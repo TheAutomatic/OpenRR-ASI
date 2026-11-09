@@ -1,0 +1,144 @@
+// SPDX-License-Identifier: MIT
+// Adapted from mochi / DLSSNR-AMD (MIT, Copyright (c) 2026 mochizuki0323).
+#include "rr_path_win.hpp"
+#include "rr_pe_crash.hpp"
+
+#include "rr_pe_log.hpp"
+
+#include <windows.h>
+#include <dbghelp.h>
+
+#include <atomic>
+#include <cstdio>
+#include <cstring>
+#include <cwchar>
+#include <string>
+
+namespace openrr::pe {
+namespace {
+
+PVOID handler = nullptr;
+HMODULE dbghelp = nullptr;
+std::atomic<int> reports{0};
+std::atomic<bool> dumped{false};
+
+bool fatal(DWORD code) {
+    switch (code) {
+        case EXCEPTION_ACCESS_VIOLATION: case EXCEPTION_ILLEGAL_INSTRUCTION: case EXCEPTION_STACK_OVERFLOW:
+        case EXCEPTION_INT_DIVIDE_BY_ZERO: case EXCEPTION_PRIV_INSTRUCTION: case EXCEPTION_IN_PAGE_ERROR:
+        case 0xC0000374:   // heap corruption
+            return true;
+        default:
+            return false;
+    }
+}
+
+// "module+0xoffset", or the bare address when it is in no module.
+std::string where(DWORD64 at) {
+    HMODULE m = nullptr;
+    char path[MAX_PATH * 4] = {};
+    if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                            reinterpret_cast<LPCSTR>(at), &m) || !m || !openrr::u8::module_file(m, path, sizeof path)) {
+        char b[32];
+        std::snprintf(b, sizeof b, "0x%llx", static_cast<unsigned long long>(at));
+        return b;
+    }
+    const char* name = std::strrchr(path, '\\');
+    char b[MAX_PATH * 4 + 32];
+    std::snprintf(b, sizeof b, "%s+0x%llx", name ? name + 1 : path,
+                  static_cast<unsigned long long>(at - reinterpret_cast<DWORD64>(m)));
+    return b;
+}
+
+void write_dump(EXCEPTION_POINTERS* ep) {
+    if (!dbghelp || dumped.exchange(true)) return;
+    using Fn = BOOL(WINAPI*)(HANDLE, DWORD, HANDLE, MINIDUMP_TYPE, PMINIDUMP_EXCEPTION_INFORMATION,
+                             PMINIDUMP_USER_STREAM_INFORMATION, PMINIDUMP_CALLBACK_INFORMATION);
+    auto fn = reinterpret_cast<Fn>(GetProcAddress(dbghelp, "MiniDumpWriteDump"));
+    if (!fn) return;
+    // (the wide path on the stack: no heap use here, the heap may be what broke)
+    wchar_t path[MAX_PATH * 2] = {};
+    const DWORD n = GetModuleFileNameW(nullptr, path, MAX_PATH * 2);
+    if (!n || n >= MAX_PATH * 2 - 24) return;
+    if (wchar_t* s = std::wcsrchr(path, L'\\')) std::wcscpy(s + 1, L"openrr-amd-crash.dmp");
+    HANDLE f = CreateFileW(path, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return;
+    MINIDUMP_EXCEPTION_INFORMATION info{GetCurrentThreadId(), ep, FALSE};
+    const BOOL ok = fn(GetCurrentProcess(), GetCurrentProcessId(), f,
+                       MINIDUMP_TYPE(MiniDumpWithIndirectlyReferencedMemory | MiniDumpWithThreadInfo |
+                                     MiniDumpWithUnloadedModules),
+                       &info, nullptr, nullptr);
+    CloseHandle(f);
+    log("[openrr]   minidump %s: %s", path, ok ? "written" : "FAILED");
+}
+
+LONG CALLBACK on_exception(EXCEPTION_POINTERS* ep) {
+    const EXCEPTION_RECORD* rec = ep ? ep->ExceptionRecord : nullptr;
+    if (rec && !fatal(rec->ExceptionCode)) {
+        // After the first evaluate (trace_arm): the first exceptions of any kind but the usual notices (thread names,
+        // debug output, breakpoints), first-chance - a C++ exception nobody catches ends the game in abort's fast fail,
+        // which no handler sees (PBZ: a game that ended with nothing logged)
+        const DWORD code = rec->ExceptionCode;
+        if (code != 0x406D1388 && code != 0x40010006 && code != 0x4001000A && code != 0x80000003) {
+            if (const int n = trace_exception())
+                log("[openrr] trace e%d: exception 0x%08lX (first chance) at %s, thread %lu", n, code,
+                    where(reinterpret_cast<DWORD64>(rec->ExceptionAddress)).c_str(), GetCurrentThreadId());
+        }
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
+    if (!rec) return EXCEPTION_CONTINUE_SEARCH;
+    if (reports.fetch_add(1) >= 3) return EXCEPTION_CONTINUE_SEARCH;
+    const DWORD64 at = reinterpret_cast<DWORD64>(rec->ExceptionAddress);
+    if (rec->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && rec->NumberParameters >= 2)
+        log("[openrr] exception 0x%08lX (%s 0x%llx) at %s, thread %lu", rec->ExceptionCode,
+            rec->ExceptionInformation[0] == 1 ? "write" : rec->ExceptionInformation[0] == 8 ? "execute" : "read",
+            static_cast<unsigned long long>(rec->ExceptionInformation[1]), where(at).c_str(), GetCurrentThreadId());
+    else
+        log("[openrr] exception 0x%08lX at %s, thread %lu", rec->ExceptionCode, where(at).c_str(), GetCurrentThreadId());
+#if defined(_M_X64) || defined(__x86_64__)
+    CONTEXT c = *ep->ContextRecord;
+    for (int i = 0; i < 20 && c.Rip; ++i) {
+        DWORD64 base = 0;
+        if (PRUNTIME_FUNCTION fe = RtlLookupFunctionEntry(c.Rip, &base, nullptr)) {
+            PVOID data = nullptr;
+            DWORD64 frame = 0;
+            RtlVirtualUnwind(UNW_FLAG_NHANDLER, base, c.Rip, fe, &c, &data, &frame, nullptr);
+        } else {
+            DWORD64 ret = 0;
+            SIZE_T got = 0;
+            if (!ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<LPCVOID>(c.Rsp), &ret, sizeof ret, &got) ||
+                got != sizeof ret)
+                break;
+            c.Rip = ret;
+            c.Rsp += 8;
+        }
+        if (!c.Rip) break;
+        log("[openrr]   from %s", where(c.Rip).c_str());
+    }
+#endif
+    static const bool dump_enabled = [] {
+        const char* e = std::getenv("OPENRR_CRASH_DUMP");
+        return e && e[0] == '1';
+    }();
+    if (dump_enabled) write_dump(ep);
+    flush_log();
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
+}  // namespace
+
+std::string where_address(const void* at) { return where(reinterpret_cast<DWORD64>(at)); }
+
+void install_crash_watch() {
+    if (handler) return;
+    // Do not call LoadLibraryW under the loader lock in InitializeASI; use already-loaded module if present.
+    dbghelp = GetModuleHandleW(L"dbghelp.dll");
+    handler = AddVectoredExceptionHandler(1, &on_exception);
+}
+
+void remove_crash_watch() {
+    if (handler) RemoveVectoredExceptionHandler(handler);
+    handler = nullptr;
+}
+
+}  // namespace openrr::pe

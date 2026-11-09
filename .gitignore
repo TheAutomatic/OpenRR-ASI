@@ -1,8 +1,9 @@
-# NVIDIA SDKs and third-party sources (fetched by tools/fetch_deps.ps1, never committed)
-third_party/
+# NVIDIA SDKs and root third-party sources (never committed)
+/third_party/
 
 # NVIDIA binaries, weights, dumps and captures: never in git
 *.dll
+*.asi
 *.exe
 *.pdb
 *.lib
@@ -17,7 +18,7 @@ scenes_out/
 out/
 
 # Build
-build/
+/build/
 capture/build/
 
 # Python
@@ -31,3 +32,6 @@ snippets/
 # Derived arrays from analysis runs
 *.npy
 *.npz
+
+# Raw in-game session log archives (markdown summary tables in docs/test-evidence/ are tracked)
+/docs/test-evidence/game-logs/
