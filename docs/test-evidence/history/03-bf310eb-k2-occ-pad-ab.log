@@ -1,0 +1,65 @@
+# Archived Evidence Snapshot: commit bf310eb (k2-occ-pad-ab)
+# OpenRR-ASI (`openrr-amd.asi`) Hardware & Unit Validation Evidence
+# Date: 2026-11-08
+# GPU: AMD Radeon RX 9070 XT (RDNA4, gfx1201)
+# Driver: AMD Radeon Software 26.10.1 (LLPC), amdxc64.dll IAmdExtD3DDevice5
+# Weights: nvngx_dlssd.dll 310.9.1.0 (Preset F / rr2)
+
+## 1. Build & Binary Verification
+
+$ bash asi/build/build_asi.sh
+[1/4] Compiling GPU & Runtime sources...
+[2/4] Compiling ASI shell, ImGui & MinHook...
+[3/4] Generating Vulkan lazy loader & linking openrr-amd.asi...
+[4/4] Building runtime SPIR-V shaders & staging package...
+built 90 runtime SPIR-V shaders in build/asi/stage/openrr-amd/shaders
+Built build/asi/stage/plugins/openrr-amd.asi (3190260 bytes, 104 Vulkan entry points resolved lazily)
+Exports: 1  Imports: bcrypt.dll KERNEL32.dll msvcrt.dll SHELL32.dll USER32.dll
+
+## 2. Automated Unit, Runtime & RX 9070 XT Hardware Suite (`test_asi_units.exe`)
+
+$ ./build/asi/test_asi_units.exe
+[PASS] Item #13: parse_key ('1'->0x31, '45'->0x2D, '0x2D'->0x2D, 'ctrl+5'->0x35+MOD_CONTROL, 'f5'->VK_F5)
+[PASS] Item #12 (control): ordinary command list accepted by split::prepare
+[PASS] Item #11: copied command-list and device vtables succeeded without recursion or E_FAIL
+[PASS] Item #12 (split barrier): BEGIN_ONLY rejected ('a split barrier is open in the command list'), END_ONLY accepted
+[PASS] Item #12 (enhanced barrier): rejected ('the command list recorded enhanced barrier')
+[PASS] Item #12 (RTAS): rejected ('the command list recorded RTAS build/copy/emit')
+[PASS] Item #12 (meta command): rejected ('the command list recorded meta command')
+[PASS] Item #12 (bundle propagation): rejected ('a split barrier is open in the command list')
+[INFO] D3D12 Direct GPU initialized on AMD Radeon RX 9070 XT (driver: 26.10.1 (LLPC))
+[PASS] Item #2 (D3dDevice::fill 256 KB > 64 KB ring): unbound wrong=0, bound wrong=0
+[PASS] D3D12 Direct Engine (1280x720->1920x1080): Fast(_lt+flow) p50=3.116 ms p95=3.186 ms, Legacy(_f+flow) p50=3.413 ms, DRS p50=2.999 ms, non_finite=0, non_zero=8294400
+[PROFILE] 1080p Quality (1280x720->1920x1080, 21 dispatches, sum=3.46 ms) Top-5 hottest dispatches:
+  #1 enc0_stage_32_64_f_lt.spv          427.4 us (12.4%)
+  #2 post_f_lt.spv                      393.3 us (11.4%)
+  #3 dec_up_32_64_64_f_lt.spv           370.4 us (10.7%)
+  #4 dec_head_32_64_f_lt.spv            357.2 us (10.3%)
+  #5 enc_stage_64_64_96_f_lt.spv        295.5 us ( 8.6%)
+[PROFILE] 4K Quality (2560x1440->3840x2160, 21 dispatches, sum=12.15 ms) Top-5 hottest dispatches:
+  #1 enc0_stage_32_64_f_lt.spv         1554.4 us (12.8%)
+  #2 post_f_lt.spv                     1517.3 us (12.5%)
+  #3 dec_up_32_64_64_f_lt.spv          1350.4 us (11.1%)
+  #4 dec_head_32_64_f_lt.spv           1304.5 us (10.7%)
+  #5 enc_stage_64_64_96_f_lt.spv       1062.4 us ( 8.7%)
+[PASS] Item #10 / K2 (Top-5 wave/LDS occ_pad=16KB A/B @ 1080p, diff_words=0/8294400):
+  enc0_stage_32_64_f_lt.spv      baseline= 383.8 us  occ_pad_16KB= 373.1 us  delta= -2.8%
+  post_f_lt.spv                  baseline= 331.4 us  occ_pad_16KB= 331.0 us  delta= -0.1%
+  dec_up_32_64_64_f_lt.spv       baseline= 343.1 us  occ_pad_16KB= 327.3 us  delta= -4.6%
+  dec_head_32_64_f_lt.spv        baseline= 325.6 us  occ_pad_16KB= 310.0 us  delta= -4.8%
+  enc_stage_64_64_96_f_lt.spv    baseline= 273.2 us  occ_pad_16KB= 279.3 us  delta= +2.3%
+  Top-5 sum: baseline=1657.1 us vs occ_pad_16KB=1620.8 us (delta=-2.2%)
+[PASS] Item #3/#4 (D3D12 ONR_RR_BUSY saturation & allocator reset recovery): 127 in-flight slots accepted, 128th returned ONR_RR_BUSY (-5), post-reset Record returned ONR_RR_OK (0)
+[PASS] Item #7 (D3D12 -> Vulkan Bridge RecordInputs/Enqueue/RecordOutput): backend=0 (VULKAN), rc_in=0, rc_enq=0, rc_out=0
+ALL ASI UNIT TESTS PASSED
+
+## 3. Analysis of Items #9 (`skip_barrier`) and #10 / K2 (Wave/LDS Occupancy A/B)
+
+- **Item #9 (`skip_barrier` outside `flow`)**:
+  - In `Engine::record_net` (`gpu/src/engine.cpp:567-572`), the only two independent consecutive dispatches (`pooled_history2` writing `pdst_` and `ae` writing `expo_[cur]`/`blk_`) already omit the UAV barrier between them (`d.barrier()` is issued only after `ae`).
+  - All other dispatches outside the 10-kernel `enc2..dec2_1` flow chain (`enc0_attr -> enc0_stage_32_64 -> enc1`, and `dec2_1 -> dec1_0 -> dec1_1 -> dec0_0 -> dec0_1 -> post -> downsample`) have strict full-tensor RAW dependencies on the immediately preceding kernel's output buffer; skipping any of those UAV barriers would cause data races.
+- **Item #10 / K2 (Top-5 hottest dispatches & `occ_pad` LDS occupancy A/B)**:
+  - At both 1080p Quality (`1280x720 -> 1920x1080`) and 4K Quality (`2560x1440 -> 3840x2160`), the Top-5 dispatches account for ~53.5%–55.9% of total GPU time: `enc0_stage_32_64` (~12.4–12.8%), `post` (~11.4–12.5%), `dec_up_32_64_64` (~10.7–11.1%), `dec_head_32_64` (~10.3–10.7%), and `enc_stage_64_64_96` (~8.6–8.7%).
+  - Testing 16 KB LDS occupancy padding (`LDS_OCC_PAD=8192` / `POST_OCC_PAD=4096`, capping WGP occupancy to 4 WGs/WGP) against baseline (`diff_words=0/8294400`, 100% bit-exact):
+    - On the three `W1` (`C=32`, 1 wave32/WG) network kernels (`enc0_stage_32_64_f_lt`, `dec_up_32_64_64_f_lt`, `dec_head_32_64_f_lt`), `LDS_OCC_PAD=8192` reduces L0/MALL cache thrashing and speeds up median execution by `-2.8%`, `-4.6%`, and `-4.8%` respectively.
+    - On `post_f_lt` (`-0.1%`, noise) and `W2` `enc_stage_64_64_96_f_lt` (`+2.3%` slower; already tuned to 9.5 KB / 6 WGs per CU in `onr_block.glsl:342`), additional LDS padding has no benefit or slightly regresses.

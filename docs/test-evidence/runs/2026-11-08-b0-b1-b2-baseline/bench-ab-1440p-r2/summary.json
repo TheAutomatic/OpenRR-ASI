@@ -1,0 +1,14 @@
+{
+  "resolution": "1706x960->2560x1440",
+  "candidate": {
+    "steady_mean_ms": 5.36884,
+    "steady_median_ms": 5.3632,
+    "steady_p95_ms": 5.45316,
+    "drs_mean_ms": 4.70567,
+    "drs_median_ms": 5.03316,
+    "drs_p95_ms": 5.40788,
+    "drs_max_ms": 5.8294,
+    "feature_vram_mb": 435,
+    "process_vram_delta_mb": 456.523
+  }
+}

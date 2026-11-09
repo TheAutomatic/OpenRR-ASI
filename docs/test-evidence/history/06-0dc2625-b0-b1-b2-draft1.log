@@ -1,0 +1,105 @@
+# Archived Evidence Snapshot: commit 0dc2625 (b0-b1-b2-draft1)
+# OpenRR-ASI (`openrr-amd.asi`) Hardware & Unit Validation Evidence
+# Date: 2026-11-08
+# GPU: AMD Radeon RX 9070 XT (RDNA4, gfx1201)
+# Driver: AMD Radeon Software 26.10.1 (LLPC), amdxc64.dll IAmdExtD3DDevice5
+# Weights: nvngx_dlssd.dll 310.9.1.0 (Preset F / rr2)
+
+## 1. Build & Binary Verification
+
+$ bash asi/build/build_asi.sh
+[1/4] Compiling GPU & Runtime sources...
+[2/4] Compiling ASI shell, ImGui & MinHook...
+[3/4] Generating Vulkan lazy loader & linking openrr-amd.asi...
+[4/4] Building runtime SPIR-V shaders & staging package...
+built 90 runtime SPIR-V shaders in build/asi/stage/openrr-amd/shaders
+Built build/asi/stage/plugins/openrr-amd.asi (3190260 bytes, 104 Vulkan entry points resolved lazily)
+Exports: 1  Imports: bcrypt.dll KERNEL32.dll msvcrt.dll SHELL32.dll USER32.dll
+
+## 2. Automated Unit, Runtime & RX 9070 XT Hardware Suite (`test_asi_units.exe`, Post B0+B1+B2 Baseline)
+
+$ ./build/asi/test_asi_units.exe
+[PASS] Item #13: parse_key ('1'->0x31, '45'->0x2D, '0x2D'->0x2D, 'ctrl+5'->0x35+MOD_CONTROL, 'f5'->VK_F5)
+[PASS] Item #12 (control): ordinary command list accepted by split::prepare
+[PASS] Item #11: copied command-list and device vtables succeeded without recursion or E_FAIL
+[PASS] Item #12 (split barrier): BEGIN_ONLY rejected ('a split barrier is open in the command list'), END_ONLY accepted
+[PASS] Item #12 (enhanced barrier): rejected ('the command list recorded enhanced barrier')
+[PASS] Item #12 (RTAS): rejected ('the command list recorded RTAS build/copy/emit')
+[PASS] Item #12 (meta command): rejected ('the command list recorded meta command')
+[PASS] Item #12 (bundle propagation): rejected ('a split barrier is open in the command list')
+[INFO] D3D12 Direct GPU initialized on AMD Radeon RX 9070 XT (driver: 26.10.1 (LLPC))
+[PASS] Item #2 (D3dDevice::fill 256 KB > 64 KB ring): unbound wrong=0, bound wrong=0
+[PASS] D3D12 Direct Engine (1280x720->1920x1080): Fast(_lt+flow) p50=3.063 ms p95=3.112 ms, Legacy(_f+flow) p50=3.300 ms, DRS p50=2.891 ms, non_finite=0, non_zero=8294400
+[PASS] D3D12 Direct Engine 1080p Quality (1280x720->1920x1080): Fast(_lt+flow) p50=3.113 ms p95=3.214 ms, Legacy(_f+flow) p50=3.325 ms
+[PROFILE] 1080p Quality (1280x720->1920x1080, 22 dispatches, sum=3.03 ms) Top-8 hottest dispatches:
+  #1 enc0_stage_32_64_f_lt.spv          359.3 us (11.8%)
+  #2 dec_up_32_64_64_f_lt.spv           330.3 us (10.9%)
+  #3 post_f_lt.spv                      324.5 us (10.7%)
+  #4 dec_head_32_64_f_lt.spv            308.0 us (10.2%)
+  #5 enc_stage_64_64_96_f_lt.spv        260.6 us ( 8.6%)
+  #6 dec_up_64_64_96_f_lt.spv           213.6 us ( 7.0%)
+  #7 dec_dfn_64_64_f_lt.spv             198.7 us ( 6.6%)
+  #8 enc0_attr_f_lt.spv                 181.2 us ( 6.0%)
+[PASS] Item #10 / K2 (1080p Quality Top-5 wave/LDS occ_pad=16KB A/B, diff_words=0/8294400, ship_diff=0):
+  enc0_stage_32_64_f_lt.spv      shipped=  375.6 us  nopad=  367.8 us  occ_pad_16KB=  376.5 us  (occ_vs_nopad= +2.4%)
+  post_f_lt.spv                  shipped=  310.6 us  nopad=  309.2 us  occ_pad_16KB=  310.4 us  (occ_vs_nopad= +0.4%)
+  dec_up_32_64_64_f_lt.spv       shipped=  331.6 us  nopad=  328.3 us  occ_pad_16KB=  325.9 us  (occ_vs_nopad= -0.7%)
+  dec_head_32_64_f_lt.spv        shipped=  304.1 us  nopad=  303.2 us  occ_pad_16KB=  303.2 us  (occ_vs_nopad= +0.0%)
+  enc_stage_64_64_96_f_lt.spv    shipped=  276.8 us  nopad=  271.8 us  occ_pad_16KB=  277.0 us  (occ_vs_nopad= +1.9%)
+  W1(C=32 x3) sum: nopad=999.2 us vs occ_pad_16KB=1005.6 us (delta=+0.6%) | All-5 sum: shipped=1598.6 us, nopad=1580.3 us, occ_pad_16KB=1593.1 us
+[PASS] D3D12 Direct Engine 4K Quality (2560x1440->3840x2160): Fast(_lt+flow) p50=11.413 ms p95=11.694 ms, Legacy(_f+flow) p50=12.856 ms
+[PROFILE] 4K Quality (2560x1440->3840x2160, 22 dispatches, sum=11.60 ms) Top-8 hottest dispatches:
+  #1 enc0_stage_32_64_f_lt.spv         1450.9 us (12.5%)
+  #2 post_f_lt.spv                     1378.2 us (11.9%)
+  #3 dec_up_32_64_64_f_lt.spv          1315.6 us (11.3%)
+  #4 dec_head_32_64_f_lt.spv           1279.6 us (11.0%)
+  #5 enc_stage_64_64_96_f_lt.spv       1002.9 us ( 8.6%)
+  #6 dec_up_64_64_96_f_lt.spv           850.7 us ( 7.3%)
+  #7 enc0_attr_f_lt.spv                 809.2 us ( 7.0%)
+  #8 dec_dfn_64_64_f_lt.spv             766.6 us ( 6.6%)
+[PASS] Item #10 / K2 (4K Quality Top-5 wave/LDS occ_pad=16KB A/B, diff_words=0/33177600, ship_diff=0):
+  enc0_stage_32_64_f_lt.spv      shipped= 1452.7 us  nopad= 1454.8 us  occ_pad_16KB= 1451.5 us  (occ_vs_nopad= -0.2%)
+  post_f_lt.spv                  shipped= 1388.0 us  nopad= 1383.5 us  occ_pad_16KB= 1378.0 us  (occ_vs_nopad= -0.4%)
+  dec_up_32_64_64_f_lt.spv       shipped= 1317.6 us  nopad= 1321.3 us  occ_pad_16KB= 1406.4 us  (occ_vs_nopad= +6.4%)
+  dec_head_32_64_f_lt.spv        shipped= 1280.8 us  nopad= 1286.8 us  occ_pad_16KB= 1271.4 us  (occ_vs_nopad= -1.2%)
+  enc_stage_64_64_96_f_lt.spv    shipped= 1006.3 us  nopad= 1002.8 us  occ_pad_16KB= 1028.0 us  (occ_vs_nopad= +2.5%)
+  W1(C=32 x3) sum: nopad=4062.8 us vs occ_pad_16KB=4129.3 us (delta=+1.6%) | All-5 sum: shipped=6445.4 us, nopad=6449.1 us, occ_pad_16KB=6535.2 us
+[PASS] Item #3/#4 (D3D12 ONR_RR_BUSY saturation & allocator reset recovery): 127 in-flight slots accepted, 128th returned ONR_RR_BUSY (-5), post-reset Record returned ONR_RR_OK (0)
+[PASS] Item #7 (D3D12 -> Vulkan Bridge RecordInputs/Enqueue/RecordOutput): backend=0 (VULKAN), rc_in=0, rc_enq=0, rc_out=0
+ALL ASI UNIT TESTS PASSED
+
+## 3. Summary of Baseline (`B0 + B1 + B2`) Improvements
+
+- **B0 (`LDS_OCC_PAD` Reverted & K2 Performance Gate)**:
+  - Default `gpu/fastmode.cmake` and `asi/build/build_shaders.py` no longer inject `LDS_OCC_PAD=8192` into shipped W1 shaders (`ship_diff=0` against `occ_nopad`), eliminating the 4K W1 regression while retaining `#ifdef LDS_OCC_PAD` and `build/asi/occ_pad16k` for side-by-side K2 testing.
+  - `test_asi_units.exe` enforces a K2 regression gate (`sum_ship <= sum_base * 1.035` and `diff_words == 0`).
+- **B1 (Lossless VRAM Slab Pooling in `Engine::resize`)**:
+  - `dec1_l_[2..4].tensor` reuse the dead `enc_l_[1].pooled` + `enc_l_[0..1].dfn_pool` prefix of `f0`, and `dec1_l_[1..4].dfn` are packed into the unused tail of `t0` (`attr_` `px0 * 48`).
+  - Reduces feature VRAM from `252 -> 244 MB` (-8 MB) at 1080p, `438 -> 424 MB` (-14 MB) at 1440p, and `966 -> 934 MB` (-32 MB) at 4K with `max_ulp_diff = 0` (`100.000000%` exact).
+- **B2 (Per-Macro `LT_*` A/B Verification)**:
+  - Enabled `LT_POST_EXP=1 LT_POST_NOCORNER=1 LT_POST_NETH=1` on `post`/`post_dlt` (`4K post_f_lt`: `1462.2 us -> 1378.2 us`, `-5.7%`; `1080p post_f_lt`: `335.0 us -> 310.6 us`, `-7.3%`) and `LT_ATTR_RCP=1 LT_ATTR_DEPTH=1` on `enc0_attr` (`4K enc0_attr_f_lt`: `869.0 us -> 809.2 us`, `-6.9%`; `1080p enc0_attr_f_lt`: `194.0 us -> 181.2 us`, `-6.6%`).
+  - Kept `LT_POST_LOG`, `LT_ATTR_SAME`, `LT_ATTR_CL`, and `C=64` `LT_FAR=3` disabled because per-macro A/B showed slight slowdowns on RDNA4 (`gfx1201`).
+
+## 4. End-to-End `openrr_bench.exe` Comparison (1080p / 1440p / 4K, Steady / DRS / VRAM / Parity)
+
+$ ./build/asi/openrr_bench.exe --runtime build/asi/stage/plugins/openrr-amd.asi --data-dir build/asi/stage/openrr-amd --rw 1280 --rh 720 --ow 1920 --oh 1080 --fast-mode 1
+=== OpenRR Offline Benchmark (1280x720 -> 1920x1080, warmup=32, steady=120, drs=64, fast_mode=1, opt_guides=0) ===
+[candidate] steady: mean=3.122 ms, median=3.123 ms, p95=3.164 ms, max=3.174 ms | DRS: mean=2.796 ms, median=2.940 ms, p95=3.295 ms, max=6.038 ms | VRAM: feature=244.0 MB (DRS 244.0 MB), proc_delta=266.8 MB
+
+$ ./build/asi/openrr_bench.exe --runtime build/asi/stage/plugins/openrr-amd.asi --data-dir build/asi/stage/openrr-amd --fast-mode 1
+=== OpenRR Offline Benchmark (1706x960 -> 2560x1440, warmup=32, steady=120, drs=64, fast_mode=1, opt_guides=0) ===
+[candidate] steady: mean=5.323 ms, median=5.325 ms, p95=5.370 ms, max=5.387 ms | DRS: mean=4.789 ms, median=5.030 ms, p95=5.459 ms, max=12.433 ms | VRAM: feature=424.0 MB (DRS 424.0 MB), proc_delta=444.8 MB
+
+$ ./build/asi/openrr_bench.exe --baseline-runtime .../openrr-runtime/OpenNrRrRuntime.dll --runtime build/asi/stage/plugins/openrr-amd.asi --rw 2560 --rh 1440 --ow 3840 --oh 2160 --fast-mode 1
+=== OpenRR Offline Benchmark (2560x1440 -> 3840x2160, warmup=32, steady=120, drs=64, fast_mode=1, opt_guides=0) ===
+[baseline] steady: mean=11.731 ms, median=11.733 ms, p95=11.797 ms, max=11.861 ms | DRS: mean=10.276 ms, median=11.112 ms, p95=11.783 ms, max=15.592 ms | VRAM: feature=966.0 MB (DRS 966.0 MB), proc_delta=989.5 MB
+[candidate] steady: mean=11.725 ms, median=11.725 ms, p95=11.786 ms, max=11.815 ms | DRS: mean=10.256 ms, median=10.978 ms, p95=11.769 ms, max=15.763 ms | VRAM: feature=934.0 MB (DRS 934.0 MB), proc_delta=956.5 MB
+[parity] steady output pixels (33177600 half-floats): exact=58.249259% (differing=13851894), max_ulp_diff=145, PSNR=55.00 dB
+[parity] drs output pixels (33177600 half-floats): exact=51.190779% (differing=16193728), max_ulp_diff=107, PSNR=52.25 dB
+
+$ ./build/asi/openrr_bench.exe --baseline-runtime .../openrr-runtime/OpenNrRrRuntime.dll --runtime build/asi/stage/plugins/openrr-amd.asi --rw 2560 --rh 1440 --ow 3840 --oh 2160 --fast-mode 0
+=== OpenRR Offline Benchmark (2560x1440 -> 3840x2160, warmup=32, steady=120, drs=64, fast_mode=0, opt_guides=0) ===
+[baseline] steady: mean=12.849 ms, median=12.854 ms, p95=12.909 ms, max=12.943 ms | DRS: mean=11.308 ms, median=12.130 ms, p95=12.923 ms, max=18.816 ms | VRAM: feature=966.0 MB (DRS 966.0 MB), proc_delta=987.5 MB
+[candidate] steady: mean=12.870 ms, median=12.873 ms, p95=12.934 ms, max=12.979 ms | DRS: mean=11.283 ms, median=12.076 ms, p95=12.949 ms, max=16.453 ms | VRAM: feature=934.0 MB (DRS 934.0 MB), proc_delta=954.5 MB
+[parity] steady output pixels (33177600 half-floats): exact=100.000000% (differing=0), max_ulp_diff=0, PSNR=999.00 dB
+[parity] drs output pixels (33177600 half-floats): exact=100.000000% (differing=0), max_ulp_diff=0, PSNR=999.00 dB

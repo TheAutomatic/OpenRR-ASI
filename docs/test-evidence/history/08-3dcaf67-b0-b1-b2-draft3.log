@@ -1,0 +1,160 @@
+# Archived Evidence Snapshot: commit 3dcaf67 (b0-b1-b2-draft3)
+# OpenRR-ASI (`openrr-amd.asi`) Hardware & Unit Validation Evidence
+# Date: 2026-11-08
+# GPU: AMD Radeon RX 9070 XT (RDNA4, gfx1201)
+# Driver: AMD Radeon Software 26.10.1 (LLPC), amdxc64.dll IAmdExtD3DDevice5
+# Weights: nvngx_dlssd.dll 310.9.1.0 (Preset F / rr2)
+
+## 1. Build & Binary Verification
+
+$ bash asi/build/build_asi.sh
+[1/4] Compiling GPU & Runtime sources...
+[2/4] Compiling ASI shell, ImGui & MinHook...
+[3/4] Generating Vulkan lazy loader & linking openrr-amd.asi...
+[4/4] Building runtime SPIR-V shaders & staging package...
+built 90 runtime SPIR-V shaders in build/asi/stage/openrr-amd/shaders
+Built build/asi/stage/plugins/openrr-amd.asi (3190772 bytes, 104 Vulkan entry points resolved lazily)
+Exports: 1  Imports: bcrypt.dll KERNEL32.dll msvcrt.dll SHELL32.dll USER32.dll
+
+## 2. Automated Unit, Runtime & RX 9070 XT Hardware Suite (`test_asi_units.exe`, Post B0+B1+B2 Baseline)
+
+$ ./build/asi/test_asi_units.exe
+[PASS] Item #13: parse_key ('1'->0x31, '45'->0x2D, '0x2D'->0x2D, 'ctrl+5'->0x35+MOD_CONTROL, 'f5'->VK_F5)
+[PASS] Item #12 (control): ordinary command list accepted by split::prepare
+[PASS] Item #11: copied command-list and device vtables succeeded without recursion or E_FAIL
+[PASS] Item #12 (split barrier): BEGIN_ONLY rejected ('a split barrier is open in the command list'), END_ONLY accepted
+[PASS] Item #12 (enhanced barrier): rejected ('the command list recorded enhanced barrier')
+[PASS] Item #12 (RTAS): rejected ('the command list recorded RTAS build/copy/emit')
+[PASS] Item #12 (meta command): rejected ('the command list recorded meta command')
+[PASS] Item #12 (bundle propagation): rejected ('a split barrier is open in the command list')
+[INFO] D3D12 Direct GPU initialized on AMD Radeon RX 9070 XT (driver: 26.10.1 (LLPC))
+[PASS] Item #2 (D3dDevice::fill 256 KB > 64 KB ring): unbound wrong=0, bound wrong=0
+[PASS] D3D12 Direct Engine (1280x720->1920x1080): Fast(_lt+flow) p50=3.073 ms p95=3.158 ms, Legacy(_f+flow) p50=3.406 ms, DRS p50=2.973 ms, non_finite=0, non_zero=8294400
+[PASS] D3D12 Direct Engine 1080p Quality (1280x720->1920x1080): Fast(_lt+flow) p50=3.164 ms p95=3.215 ms, Legacy(_f+flow) p50=3.406 ms
+[PROFILE] 1080p Quality (1280x720->1920x1080, 22 dispatches [21 net + 1 flow clear_range], sum=3.15 ms, net21_sum=3.15 ms) Top-8 hottest dispatches:
+  #1 enc0_stage_32_64_f_lt.spv          375.2 us (11.9%)
+  #2 dec_up_32_64_64_f_lt.spv           333.3 us (10.6%)
+  #3 post_f_lt.spv                      327.0 us (10.4%)
+  #4 dec_head_32_64_f_lt.spv            312.5 us ( 9.9%)
+  #5 enc_stage_64_64_96_f_lt.spv        279.9 us ( 8.9%)
+  #6 dec_up_64_64_96_f_lt.spv           233.5 us ( 7.4%)
+  #7 dec_dfn_64_64_f_lt.spv             202.5 us ( 6.4%)
+  #8 enc0_attr_f_lt.spv                 176.4 us ( 5.6%)
+[PASS] Item #10 / K2 (1080p Quality Top-5 wave/LDS occ_pad=16KB A/B, diff_words=0/8294400, ship_diff=0, spv_hash_nopad=EXACT):
+  enc0_stage_32_64_f_lt.spv      shipped=  376.8 us  nopad=  381.0 us  occ_pad_16KB=  371.4 us  (occ_vs_nopad= -2.5%)
+  post_f_lt.spv                  shipped=  311.3 us  nopad=  311.6 us  occ_pad_16KB=  316.0 us  (occ_vs_nopad= +1.4%)
+  dec_up_32_64_64_f_lt.spv       shipped=  329.0 us  nopad=  332.0 us  occ_pad_16KB=  337.5 us  (occ_vs_nopad= +1.7%)
+  dec_head_32_64_f_lt.spv        shipped=  316.0 us  nopad=  310.7 us  occ_pad_16KB=  309.2 us  (occ_vs_nopad= -0.5%)
+  enc_stage_64_64_96_f_lt.spv    shipped=  282.2 us  nopad=  279.2 us  occ_pad_16KB=  278.4 us  (occ_vs_nopad= -0.3%)
+  W1(C=32 x3) sum: nopad=1023.7 us vs occ_pad_16KB=1018.0 us (delta=-0.6%) | All-5 sum: shipped=1615.2 us, nopad=1614.6 us, occ_pad_16KB=1612.4 us
+[PASS] Item B2 (1080p Quality per-macro LT_* A/B, 3-run median [min..max]):
+  post_f_lt.spv:       PAIR_only=  346.4 [346.2..355.7] us | +EXP+NOCORNER+NETH=  326.6 [310.0..328.7] us ( -5.7%, ENABLED) | +LOG=  348.0 [329.9..348.7] us ( +6.5% vs EXP, DISABLED)
+  enc0_attr_f_lt.spv:  TAB_only =  178.0 [176.7..193.7] us | +RCP+DEPTH        =  181.2 [178.7..181.3] us ( +1.8%, DISABLED) | +SAME+CL=  242.1 [242.0..242.6] us (+33.6% vs RCP, DISABLED)
+  C=64 x3 sum:         default  =  711.6 [707.5..716.2] us | +LT_FAR=3         =  709.7 [707.0..717.7] us ( -0.3%, DISABLED)
+[PASS] Item B1 (1080p Quality isolated Fast dec1_l_[1..4] tail pooling in t0 + wide path, 20 frames x 2 runs): diff_vs_unpooled=0 (max_ulp_diff=0), repeat_diff=0, flow_overlap_audit=CLEAN (neg_ctrl_f0_race_caught=YES, race_diff=57188637), saved=1.44 MB
+[PASS] D3D12 Direct Engine 4K Quality (2560x1440->3840x2160): Fast(_lt+flow) p50=11.601 ms p95=11.749 ms, Legacy(_f+flow) p50=13.097 ms
+[PROFILE] 4K Quality (2560x1440->3840x2160, 22 dispatches [21 net + 1 flow clear_range], sum=11.85 ms, net21_sum=11.85 ms) Top-8 hottest dispatches:
+  #1 enc0_stage_32_64_f_lt.spv         1487.6 us (12.5%)
+  #2 post_f_lt.spv                     1389.2 us (11.7%)
+  #3 dec_up_32_64_64_f_lt.spv          1331.8 us (11.2%)
+  #4 dec_head_32_64_f_lt.spv           1296.6 us (10.9%)
+  #5 enc_stage_64_64_96_f_lt.spv       1023.0 us ( 8.6%)
+  #6 dec_up_64_64_96_f_lt.spv           861.9 us ( 7.3%)
+  #7 enc0_attr_f_lt.spv                 849.9 us ( 7.2%)
+  #8 dec_dfn_64_64_f_lt.spv             776.4 us ( 6.5%)
+[PASS] Item #10 / K2 (4K Quality Top-5 wave/LDS occ_pad=16KB A/B, diff_words=0/33177600, ship_diff=0, spv_hash_nopad=EXACT):
+  enc0_stage_32_64_f_lt.spv      shipped= 1478.0 us  nopad= 1489.7 us  occ_pad_16KB= 1470.8 us  (occ_vs_nopad= -1.3%)
+  post_f_lt.spv                  shipped= 1406.8 us  nopad= 1401.7 us  occ_pad_16KB= 1395.6 us  (occ_vs_nopad= -0.4%)
+  dec_up_32_64_64_f_lt.spv       shipped= 1338.3 us  nopad= 1341.3 us  occ_pad_16KB= 1433.4 us  (occ_vs_nopad= +6.9%)
+  dec_head_32_64_f_lt.spv        shipped= 1302.9 us  nopad= 1306.6 us  occ_pad_16KB= 1293.8 us  (occ_vs_nopad= -1.0%)
+  enc_stage_64_64_96_f_lt.spv    shipped= 1021.7 us  nopad= 1023.4 us  occ_pad_16KB= 1040.9 us  (occ_vs_nopad= +1.7%)
+  W1(C=32 x3) sum: nopad=4137.7 us vs occ_pad_16KB=4197.9 us (delta=+1.5%) | All-5 sum: shipped=6547.8 us, nopad=6562.8 us, occ_pad_16KB=6634.4 us
+[PASS] Item B2 (4K Quality per-macro LT_* A/B, 3-run median [min..max]):
+  post_f_lt.spv:       PAIR_only= 1503.2 [1448.7..1508.3] us | +EXP+NOCORNER+NETH= 1412.6 [1401.4..1425.7] us ( -6.0%, ENABLED) | +LOG= 1499.8 [1498.7..1505.5] us ( +6.2% vs EXP, DISABLED)
+  enc0_attr_f_lt.spv:  TAB_only =  835.1 [826.0..839.8] us | +RCP+DEPTH        =  822.0 [819.5..836.7] us ( -1.6%, DISABLED) | +SAME+CL=  987.2 [981.6..990.0] us (+20.1% vs RCP, DISABLED)
+  C=64 x3 sum:         default  = 2670.4 [2656.6..2675.0] us | +LT_FAR=3         = 2704.8 [2702.1..2723.8] us ( +1.3%, DISABLED)
+[PASS] Item B1 (4K Quality isolated Fast dec1_l_[1..4] tail pooling in t0 + wide path, 20 frames x 2 runs): diff_vs_unpooled=0 (max_ulp_diff=0), repeat_diff=0, flow_overlap_audit=CLEAN (neg_ctrl_f0_race_caught=YES, race_diff=227910767), saved=5.62 MB
+[PASS] Item #3/#4 (D3D12 ONR_RR_BUSY saturation & allocator reset recovery): 127 in-flight slots accepted, 128th returned ONR_RR_BUSY (-5), post-reset Record returned ONR_RR_OK (0)
+[PASS] Item #7 (D3D12 -> Vulkan Bridge RecordInputs/Enqueue/RecordOutput): backend=0 (VULKAN), rc_in=0, rc_enq=0, rc_out=0
+ALL ASI UNIT TESTS PASSED
+
+## 3. Notes on Baseline (`B0 + B1 + B2`) Verification
+
+- **Why `[PROFILE]` shows 22 dispatches (vs 21 prior to `d6f70fb`)**:
+  - Commit `d6f70fb` lowered `D3dDevice::fill`'s upload-ring `staged()` threshold to `<= 256` bytes so the per-frame 50 KB `flow_` clear (`Engine::record_net`) executes via GPU `clear_range.spv` (`~1.5 us`) instead of a PCIe DMA copy. `[PROFILE]` reports both `sum` (all 22 dispatches) and `net21_sum` (the 21 network/post dispatches excluding `clear_range.spv`).
+- **B0 & K2 Deterministic SPIR-V Hash Gate**:
+  - `test_asi_units.exe` computes the FNV-1a 64-bit hash of the 5 shipped Top-5 SPIR-V binaries in `build/asi/stage/openrr-amd/shaders/` and asserts `h_ship == h_nopad && h_ship != h_pad16k` (`spv_hash_nopad=EXACT`), deterministically catching any accidental re-enablement of `LDS_OCC_PAD`.
+- **B1 Isolated Lossless Fast-Mode Pooling in `t0` (`attr_` Tail) + Wide Path + Negative Control**:
+  - Because `enc2 .. dec2_1` execute concurrently without barriers in flow mode, `enc_l_[1].pooled` and `enc_l_[1].dfn_pool` at the start of `f0` remain live during the flow chain. Placing `dec1_l_[2..4].tensor` and `dec1_l_[1..4].dfn` in the unused tail of `t0` (`px0 * 42.4 .. px0 * 46.6 < px0 * 48`, after all `enc_l_[1..5]` sub-buffers and `dec1_l_[1].tensor`, and above `dec_head_32_64`'s `px0 * 40` `headScratch`) avoids any address overlap with live flow inputs.
+  - Also fixed `dec0ScratchBytes` sizing to include the starting offset of `enc_l_[0].dfn_pool` (`enc0DfnPoolEnd = align256(dec0ScratchBytes) + px0 / 4 * 8`) and fixed `wide` attribute allocation (`attr_wide_`) so it allocates a separate zero-initialized buffer without destroying `attr_` in the middle of command-list recording.
+  - Verified in isolation (same binary, `set_pool_dec1_tail(false)` vs `set_pool_dec1_tail(true)` across 20 frames x 2 runs, with frames 10..14 exercising the `wide` `depth_of_field` path, plus a negative-control run `set_pool_dec1_f0_race_for_test(true)` that restores the `0dc2625` `f0+0` layout):
+    - 1080p: `diff_vs_unpooled=0 (max_ulp_diff=0), repeat_diff=0, flow_overlap_audit=CLEAN (neg_ctrl_f0_race_caught=YES, race_diff=57188637), saved=1.44 MB` (`252 -> 251 MB` feature, `-2.3 MB` `proc_delta`).
+    - 4K: `diff_vs_unpooled=0 (max_ulp_diff=0), repeat_diff=0, flow_overlap_audit=CLEAN (neg_ctrl_f0_race_caught=YES, race_diff=227910767), saved=5.62 MB` (`966 -> 960 MB` feature, `-6.7 MB` `proc_delta`).
+- **B2 Lossy Fast-Mode Approximations & 3-Run Per-Macro A/B**:
+  - 3-run interleaved per-macro A/B in `test_asi_units.exe` confirms:
+    - `post_f_lt`: `+LT_POST_EXP=1 +LT_POST_NOCORNER=1 +LT_POST_NETH=1` improves 1080p 3-run median by `-5.7%` (`346.4 -> 326.6 us`, `-19.8 us`) and 4K 3-run median by `-6.0%` (`1503.2 -> 1412.6 us`, `-90.6 us`), whereas adding `LT_POST_LOG=1` slows down 1080p by `+6.5%` (`348.0 us`) and 4K by `+6.2%` (`1499.8 us`). **Enabled by default.**
+    - `enc0_attr_f_lt`: `+LT_ATTR_RCP=1 +LT_ATTR_DEPTH=1` is within noise (`+1.8%` at 1080p `178.0 -> 181.2 us`, `-1.6%` at 4K `835.1 -> 822.0 us` with overlapping min/max ranges `[826.0..839.8]` vs `[819.5..836.7]`), while `+LT_ATTR_SAME=1 +LT_ATTR_CL=1` slows down 1080p by `+33.6%` (`242.1 us`) and 4K by `+20.1%` (`987.2 us`). **Both disabled by default** per the rule that a lossy macro must clearly speed up both 1080p and 4K.
+    - `C=64` (`enc_stage_64_64_96` + `dec_up_64_64_96` + `dec_dfn_64_64`): `+LT_FAR=3` is within noise at 1080p (`-0.3%`, `711.6 -> 709.7 us`) and slower at 4K (`+1.3%`, `2670.4 -> 2704.8 us`). **Disabled by default.**
+  - **Kernel vs End-to-End Delta Reconciliation**:
+    - With only `LT_POST_EXP=1 LT_POST_NOCORNER=1 LT_POST_NETH=1` enabled (plus `B0` removing `LDS_OCC_PAD=8192` from W1), at 1080p `post_f_lt` saves `~20 us` (`346.4 -> 326.6 us`), while removing `LDS_OCC_PAD=8192` from W1 (where 1080p working set fits in Infinity Cache) costs `~0-5 us` (`W1` `nopad=1023.7 us` vs `occ_pad_16KB=1018.0 us`), and end-to-end 3-run median improves by **`-47 us` (`3.171 -> 3.124 ms`, `-1.5%`)**.
+    - At 4K, `post_f_lt` saves `~91 us` (`1503.2 -> 1412.6 us`) and removing `LDS_OCC_PAD=8192` from W1 saves `~60 us` (`4197.9 -> 4137.7 us`), totaling `~151 us` at the kernel level, while end-to-end 3-run median improves by **`-122 us` (`11.941 -> 11.824 ms`, `-1.0%`; Run 3: `11.966 -> 11.749 ms`, `-217 us` / `-1.8%`)**.
+
+## 4. Same-Process 3-Run A/B Benchmark (`d6f70fb` Baseline ASI vs Candidate ASI)
+
+### Run 1 / 3
+=== OpenRR Offline Benchmark (1280x720 -> 1920x1080, warmup=32, steady=120, drs=64, fast_mode=1, opt_guides=0) ===
+[baseline] steady: mean=3.187 ms, median=3.178 ms, p95=3.263 ms, max=3.321 ms | DRS: mean=2.798 ms, median=2.976 ms, p95=3.369 ms, max=3.617 ms | VRAM: feature=252.0 MB (DRS 252.0 MB), proc_delta=275.8 MB
+[candidate] steady: mean=3.132 ms, median=3.127 ms, p95=3.194 ms, max=3.228 ms | DRS: mean=2.791 ms, median=3.000 ms, p95=3.312 ms, max=3.516 ms | VRAM: feature=251.0 MB (DRS 251.0 MB), proc_delta=273.5 MB
+[parity] steady output pixels (8294400 half-floats, non_finite=0): exact=39.332791% (differing=5031981), max_ulp_diff=83, PSNR_01=55.53 dB, PSNR_tonemap=59.93 dB, p99_abs_err=0.005371, max_abs_err=0.013672
+[parity] drs output pixels (8294400 half-floats, non_finite=0): exact=57.040051% (differing=3563270), max_ulp_diff=41, PSNR_01=61.07 dB, PSNR_tonemap=65.72 dB, p99_abs_err=0.002686, max_abs_err=0.008545
+=== OpenRR Offline Benchmark (1706x960 -> 2560x1440, warmup=32, steady=120, drs=64, fast_mode=1, opt_guides=0) ===
+[baseline] steady: mean=5.444 ms, median=5.439 ms, p95=5.517 ms, max=5.551 ms | DRS: mean=4.768 ms, median=5.132 ms, p95=5.490 ms, max=5.967 ms | VRAM: feature=438.0 MB (DRS 438.0 MB), proc_delta=459.3 MB
+[candidate] steady: mean=5.443 ms, median=5.391 ms, p95=5.790 ms, max=5.867 ms | DRS: mean=4.810 ms, median=5.056 ms, p95=5.462 ms, max=11.183 ms | VRAM: feature=435.0 MB (DRS 435.0 MB), proc_delta=456.5 MB
+[parity] steady output pixels (14745600 half-floats, non_finite=0): exact=40.635220% (differing=8753693), max_ulp_diff=75, PSNR_01=56.18 dB, PSNR_tonemap=60.57 dB, p99_abs_err=0.004883, max_abs_err=0.016357
+[parity] drs output pixels (14745600 half-floats, non_finite=0): exact=56.811618% (differing=6368386), max_ulp_diff=43, PSNR_01=61.01 dB, PSNR_tonemap=65.66 dB, p99_abs_err=0.002686, max_abs_err=0.009766
+=== OpenRR Offline Benchmark (2560x1440 -> 3840x2160, warmup=32, steady=120, drs=64, fast_mode=1, opt_guides=0) ===
+[baseline] steady: mean=12.101 ms, median=11.934 ms, p95=13.671 ms, max=13.962 ms | DRS: mean=14.334 ms, median=14.473 ms, p95=19.289 ms, max=19.411 ms | VRAM: feature=966.0 MB (DRS 966.0 MB), proc_delta=989.5 MB
+[candidate] steady: mean=11.832 ms, median=11.812 ms, p95=12.074 ms, max=12.330 ms | DRS: mean=10.413 ms, median=11.281 ms, p95=12.061 ms, max=16.395 ms | VRAM: feature=960.0 MB (DRS 960.0 MB), proc_delta=982.8 MB
+[parity] steady output pixels (33177600 half-floats, non_finite=0): exact=58.276180% (differing=13842962), max_ulp_diff=141, PSNR_01=60.42 dB, PSNR_tonemap=65.20 dB, p99_abs_err=0.003174, max_abs_err=0.028076
+[parity] drs output pixels (33177600 half-floats, non_finite=0): exact=51.148380% (differing=16207795), max_ulp_diff=109, PSNR_01=58.40 dB, PSNR_tonemap=63.03 dB, p99_abs_err=0.003906, max_abs_err=0.015381
+
+### Run 2 / 3
+=== OpenRR Offline Benchmark (1280x720 -> 1920x1080, warmup=32, steady=120, drs=64, fast_mode=1, opt_guides=0) ===
+[baseline] steady: mean=3.182 ms, median=3.171 ms, p95=3.351 ms, max=3.391 ms | DRS: mean=2.869 ms, median=2.977 ms, p95=3.388 ms, max=7.557 ms | VRAM: feature=252.0 MB (DRS 252.0 MB), proc_delta=275.8 MB
+[candidate] steady: mean=3.135 ms, median=3.124 ms, p95=3.276 ms, max=3.326 ms | DRS: mean=2.829 ms, median=2.979 ms, p95=3.295 ms, max=5.698 ms | VRAM: feature=251.0 MB (DRS 251.0 MB), proc_delta=273.5 MB
+[parity] steady output pixels (8294400 half-floats, non_finite=0): exact=39.332791% (differing=5031981), max_ulp_diff=83, PSNR_01=55.53 dB, PSNR_tonemap=59.93 dB, p99_abs_err=0.005371, max_abs_err=0.013672
+[parity] drs output pixels (8294400 half-floats, non_finite=0): exact=57.040051% (differing=3563270), max_ulp_diff=41, PSNR_01=61.07 dB, PSNR_tonemap=65.72 dB, p99_abs_err=0.002686, max_abs_err=0.008545
+=== OpenRR Offline Benchmark (1706x960 -> 2560x1440, warmup=32, steady=120, drs=64, fast_mode=1, opt_guides=0) ===
+[baseline] steady: mean=5.456 ms, median=5.451 ms, p95=5.529 ms, max=5.574 ms | DRS: mean=4.822 ms, median=5.102 ms, p95=5.523 ms, max=9.236 ms | VRAM: feature=438.0 MB (DRS 438.0 MB), proc_delta=459.3 MB
+[candidate] steady: mean=5.369 ms, median=5.363 ms, p95=5.453 ms, max=5.485 ms | DRS: mean=4.706 ms, median=5.033 ms, p95=5.408 ms, max=5.829 ms | VRAM: feature=435.0 MB (DRS 435.0 MB), proc_delta=456.5 MB
+[parity] steady output pixels (14745600 half-floats, non_finite=0): exact=40.635220% (differing=8753693), max_ulp_diff=75, PSNR_01=56.18 dB, PSNR_tonemap=60.57 dB, p99_abs_err=0.004883, max_abs_err=0.016357
+[parity] drs output pixels (14745600 half-floats, non_finite=0): exact=56.811618% (differing=6368386), max_ulp_diff=43, PSNR_01=61.01 dB, PSNR_tonemap=65.66 dB, p99_abs_err=0.002686, max_abs_err=0.009766
+=== OpenRR Offline Benchmark (2560x1440 -> 3840x2160, warmup=32, steady=120, drs=64, fast_mode=1, opt_guides=0) ===
+[baseline] steady: mean=11.943 ms, median=11.941 ms, p95=12.076 ms, max=12.139 ms | DRS: mean=10.420 ms, median=11.271 ms, p95=12.015 ms, max=14.397 ms | VRAM: feature=966.0 MB (DRS 966.0 MB), proc_delta=989.5 MB
+[candidate] steady: mean=11.830 ms, median=11.824 ms, p95=11.933 ms, max=12.018 ms | DRS: mean=10.304 ms, median=11.114 ms, p95=11.823 ms, max=15.916 ms | VRAM: feature=960.0 MB (DRS 960.0 MB), proc_delta=982.8 MB
+[parity] steady output pixels (33177600 half-floats, non_finite=0): exact=58.276180% (differing=13842962), max_ulp_diff=141, PSNR_01=60.42 dB, PSNR_tonemap=65.20 dB, p99_abs_err=0.003174, max_abs_err=0.028076
+[parity] drs output pixels (33177600 half-floats, non_finite=0): exact=51.148380% (differing=16207795), max_ulp_diff=109, PSNR_01=58.40 dB, PSNR_tonemap=63.03 dB, p99_abs_err=0.003906, max_abs_err=0.015381
+
+### Run 3 / 3
+=== OpenRR Offline Benchmark (1280x720 -> 1920x1080, warmup=32, steady=120, drs=64, fast_mode=1, opt_guides=0) ===
+[baseline] steady: mean=3.166 ms, median=3.167 ms, p95=3.215 ms, max=3.235 ms | DRS: mean=2.821 ms, median=2.969 ms, p95=3.154 ms, max=6.660 ms | VRAM: feature=252.0 MB (DRS 252.0 MB), proc_delta=275.8 MB
+[candidate] steady: mean=3.128 ms, median=3.121 ms, p95=3.189 ms, max=3.271 ms | DRS: mean=2.772 ms, median=2.946 ms, p95=3.285 ms, max=3.481 ms | VRAM: feature=251.0 MB (DRS 251.0 MB), proc_delta=273.5 MB
+[parity] steady output pixels (8294400 half-floats, non_finite=0): exact=39.332791% (differing=5031981), max_ulp_diff=83, PSNR_01=55.53 dB, PSNR_tonemap=59.93 dB, p99_abs_err=0.005371, max_abs_err=0.013672
+[parity] drs output pixels (8294400 half-floats, non_finite=0): exact=57.040051% (differing=3563270), max_ulp_diff=41, PSNR_01=61.07 dB, PSNR_tonemap=65.72 dB, p99_abs_err=0.002686, max_abs_err=0.008545
+=== OpenRR Offline Benchmark (1706x960 -> 2560x1440, warmup=32, steady=120, drs=64, fast_mode=1, opt_guides=0) ===
+[baseline] steady: mean=5.466 ms, median=5.459 ms, p95=5.546 ms, max=5.565 ms | DRS: mean=4.780 ms, median=5.113 ms, p95=5.606 ms, max=6.035 ms | VRAM: feature=438.0 MB (DRS 438.0 MB), proc_delta=459.3 MB
+[candidate] steady: mean=5.405 ms, median=5.403 ms, p95=5.496 ms, max=5.511 ms | DRS: mean=4.715 ms, median=5.095 ms, p95=5.423 ms, max=5.871 ms | VRAM: feature=435.0 MB (DRS 435.0 MB), proc_delta=456.5 MB
+[parity] steady output pixels (14745600 half-floats, non_finite=0): exact=40.635220% (differing=8753693), max_ulp_diff=75, PSNR_01=56.18 dB, PSNR_tonemap=60.57 dB, p99_abs_err=0.004883, max_abs_err=0.016357
+[parity] drs output pixels (14745600 half-floats, non_finite=0): exact=56.811618% (differing=6368386), max_ulp_diff=43, PSNR_01=61.01 dB, PSNR_tonemap=65.66 dB, p99_abs_err=0.002686, max_abs_err=0.009766
+=== OpenRR Offline Benchmark (2560x1440 -> 3840x2160, warmup=32, steady=120, drs=64, fast_mode=1, opt_guides=0) ===
+[baseline] steady: mean=11.968 ms, median=11.966 ms, p95=12.065 ms, max=12.122 ms | DRS: mean=10.459 ms, median=11.194 ms, p95=12.015 ms, max=15.847 ms | VRAM: feature=966.0 MB (DRS 966.0 MB), proc_delta=989.5 MB
+[candidate] steady: mean=11.769 ms, median=11.749 ms, p95=11.880 ms, max=11.896 ms | DRS: mean=10.275 ms, median=11.121 ms, p95=11.886 ms, max=14.300 ms | VRAM: feature=960.0 MB (DRS 960.0 MB), proc_delta=982.8 MB
+[parity] steady output pixels (33177600 half-floats, non_finite=0): exact=58.276180% (differing=13842962), max_ulp_diff=141, PSNR_01=60.42 dB, PSNR_tonemap=65.20 dB, p99_abs_err=0.003174, max_abs_err=0.028076
+[parity] drs output pixels (33177600 half-floats, non_finite=0): exact=51.148380% (differing=16207795), max_ulp_diff=109, PSNR_01=58.40 dB, PSNR_tonemap=63.03 dB, p99_abs_err=0.003906, max_abs_err=0.015381
+
+### Legacy Mode (`--fast-mode 0`, 4K Quality)
+=== OpenRR Offline Benchmark (2560x1440 -> 3840x2160, warmup=32, steady=120, drs=64, fast_mode=0, opt_guides=0) ===
+[baseline] steady: mean=13.095 ms, median=13.089 ms, p95=13.195 ms, max=13.290 ms | DRS: mean=11.464 ms, median=12.385 ms, p95=13.225 ms, max=16.564 ms | VRAM: feature=966.0 MB (DRS 966.0 MB), proc_delta=987.5 MB
+[candidate] steady: mean=13.033 ms, median=13.039 ms, p95=13.132 ms, max=13.208 ms | DRS: mean=11.391 ms, median=12.157 ms, p95=13.150 ms, max=13.825 ms | VRAM: feature=960.0 MB (DRS 960.0 MB), proc_delta=980.8 MB
+[parity] steady output pixels (33177600 half-floats, non_finite=0): exact=100.000000% (differing=0), max_ulp_diff=0, PSNR_01=999.00 dB, PSNR_tonemap=999.00 dB, p99_abs_err=0.000000, max_abs_err=0.000000
+[parity] drs output pixels (33177600 half-floats, non_finite=0): exact=100.000000% (differing=0), max_ulp_diff=0, PSNR_01=999.00 dB, PSNR_tonemap=999.00 dB, p99_abs_err=0.000000, max_abs_err=0.000000

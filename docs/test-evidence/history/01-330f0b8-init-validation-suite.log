@@ -1,0 +1,29 @@
+# Archived Evidence Snapshot: commit 330f0b8 (init-validation-suite)
+# OpenRR-ASI (`openrr-amd.asi`) Hardware & Unit Validation Evidence
+# Date: 2026-11-08
+# GPU: AMD Radeon RX 9070 XT (RDNA4, gfx1201)
+# Driver: AMD Radeon Software 26.10.1 (LLPC), amdxc64.dll IAmdExtD3DDevice5
+# Weights: nvngx_dlssd.dll 310.9.1.0 (Preset F / rr2)
+
+$ bash asi/build/build_asi.sh
+[1/4] Compiling GPU & Runtime sources...
+[2/4] Compiling ASI shell, ImGui & MinHook...
+[3/4] Generating Vulkan lazy loader & linking openrr-amd.asi...
+[4/4] Building runtime SPIR-V shaders & staging package...
+built 90 runtime SPIR-V shaders in build/asi/stage/openrr-amd/shaders
+Built build/asi/stage/plugins/openrr-amd.asi (3187188 bytes, 104 Vulkan entry points resolved lazily)
+Exports: 1  Imports: bcrypt.dll KERNEL32.dll msvcrt.dll SHELL32.dll USER32.dll
+
+$ ./build/asi/test_asi_units.exe
+[PASS] Item #13: parse_key ('1'->0x31, '45'->0x2D, '0x2D'->0x2D, 'ctrl+5'->0x35+MOD_CONTROL, 'f5'->VK_F5)
+[PASS] Item #12 (control): ordinary command list accepted by split::prepare
+[PASS] Item #11: copied command-list and device vtables succeeded without recursion or E_FAIL
+[PASS] Item #12 (split barrier): BEGIN_ONLY rejected ('a split barrier is open in the command list'), END_ONLY accepted
+[PASS] Item #12 (enhanced barrier): rejected ('the command list recorded enhanced barrier')
+[PASS] Item #12 (RTAS): rejected ('the command list recorded RTAS build/copy/emit')
+[PASS] Item #12 (meta command): rejected ('the command list recorded meta command')
+[PASS] Item #12 (bundle propagation): rejected ('a split barrier is open in the command list')
+[INFO] D3D12 Direct GPU initialized on AMD Radeon RX 9070 XT (driver: 26.10.1 (LLPC))
+[PASS] Item #2 (D3dDevice::fill 256 KB > 64 KB ring): unbound wrong=0, bound wrong=0
+[PASS] D3D12 Direct Engine (1280x720->1920x1080 fast+flow16): steady p50=3.358 ms p95=3.563 ms, DRS p50=3.204 ms, non_finite=0, non_zero=8294400
+ALL ASI UNIT TESTS PASSED

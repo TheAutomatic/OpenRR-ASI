@@ -1,0 +1,49 @@
+19:24:55.253 OpenRR 0.1.2 runtime: create, output 1920x1080, render up to 1280x720, shaders C:\Users\Kenny\Downloads\OpenRR\build\asi\base_d6f70fb\openrr-amd\shaders, weights from C:/Users/Kenny/Downloads/dlssnr_on_amd_setup/dist/weights/nvngx_dlssd.dll
+19:24:55.342 Vulkan device: AMD Radeon RX 9070 XT, driver 26.10.1 (LLPC)
+19:24:55.366 D3D12 backend: self-test passed (root constants, spill table, workgroup count, indirect dispatch); 6 ELFs from the cache, 0 built, in 23 ms
+19:24:55.373 D3D12 backend: the guides are read from the game's textures and the output written in place (check passed)
+19:24:55.382 D3D12 backend: the post samples its history through the sampler, as on Vulkan (check passed)
+19:24:55.382 backend: D3D12 (asked for), kernels recorded into the game's command list; ELF cache C:\Users\Kenny\AppData\Local\OpenRR\cache
+19:24:55.382 frame 1: no transparency layer
+19:24:55.382 frame 1: disocclusion mask absent, SSS guide absent (both go into the first encoder)
+19:24:55.382 frame 1: responsivity mask absent, ColorBeforeTransparency absent, depth of field guide absent, reflection motion vectors absent (first encoder); transparency opacity absent, its motion vectors absent (downsample, with the layer); specular hit distance given
+19:24:55.671 weights rebuilt from C:/Users/Kenny/Downloads/dlssnr_on_amd_setup/dist/weights/nvngx_dlssd.dll (version 310.9.1.0) in 289 ms
+19:24:55.781 network kernels ready on D3D12 (26 pipelines: 43 ELFs from the cache, 0 built) in 0.1 s
+19:24:55.895 fast mode kernels ready (40 pipelines: 40 ELFs from the cache, 0 built) in 0.11 s
+19:24:55.922 ready
+19:24:55.923 fast mode on at frame 0
+19:24:55.951 network sized: render 1280x720 (grid 1280x736), output 1920x1080, internal 2880x1620
+19:24:55.951 VRAM: this feature 252 MB (1 features alive); the game's process 338 MB of a 15419 MB budget
+19:24:55.952 small levels: row flags
+19:24:55.952 frame 1: render 1280x720 -> 1920x1080, fast mode on, D3D12, GPU raw 0.08 ms (p50 0.08, p95 0.08 of 1), clean 0.08 ms (average 0.08 ms; mean since the last line: ingest 0.000, network 0.00, pack 0.000)
+19:24:56.850 network sized: render 1088x612 (grid 1088x640), output 1920x1080, internal 2880x1620
+19:24:56.850 VRAM: this feature 252 MB (1 features alive); the game's process 338 MB of a 15419 MB budget
+19:24:56.863 network sized: render 1280x720 (grid 1280x736), output 1920x1080, internal 2880x1620
+19:24:56.863 VRAM: this feature 252 MB (1 features alive); the game's process 338 MB of a 15419 MB budget
+19:24:56.878 network sized: render 1088x612 (grid 1088x640), output 1920x1080, internal 2880x1620
+19:24:56.878 VRAM: this feature 252 MB (1 features alive); the game's process 338 MB of a 15419 MB budget
+19:24:56.889 network sized: render 1280x720 (grid 1280x736), output 1920x1080, internal 2880x1620
+19:24:56.890 VRAM: this feature 252 MB (1 features alive); the game's process 338 MB of a 15419 MB budget
+19:24:56.905 network sized: render 1088x612 (grid 1088x640), output 1920x1080, internal 2880x1620
+19:24:56.905 VRAM: this feature 252 MB (1 features alive); the game's process 338 MB of a 15419 MB budget
+19:24:56.917 network sized: render 1280x720 (grid 1280x736), output 1920x1080, internal 2880x1620
+19:24:56.917 VRAM: this feature 252 MB (1 features alive); the game's process 338 MB of a 15419 MB budget
+19:24:56.930 network sized: render 1088x612 (grid 1088x640), output 1920x1080, internal 2880x1620
+19:24:56.932 VRAM: this feature 252 MB (1 features alive); the game's process 338 MB of a 15419 MB budget
+19:24:56.942 network sized: render 1280x720 (grid 1280x736), output 1920x1080, internal 2880x1620
+19:24:56.943 VRAM: this feature 252 MB (1 features alive); the game's process 338 MB of a 15419 MB budget
+19:24:56.957 network sized: render 1088x612 (grid 1088x640), output 1920x1080, internal 2880x1620
+19:24:56.958 VRAM: this feature 252 MB (1 features alive); the game's process 338 MB of a 15419 MB budget
+19:24:56.968 network sized: render 1280x720 (grid 1280x736), output 1920x1080, internal 2880x1620
+19:24:56.969 VRAM: this feature 252 MB (1 features alive); the game's process 338 MB of a 15419 MB budget
+19:24:56.983 network sized: render 1088x612 (grid 1088x640), output 1920x1080, internal 2880x1620
+19:24:56.984 VRAM: this feature 252 MB (1 features alive); the game's process 338 MB of a 15419 MB budget
+19:24:56.993 network sized: render 1280x720 (grid 1280x736), output 1920x1080, internal 2880x1620
+19:24:56.995 VRAM: this feature 252 MB (1 features alive); the game's process 338 MB of a 15419 MB budget
+19:24:57.009 network sized: render 1088x612 (grid 1088x640), output 1920x1080, internal 2880x1620
+19:24:57.009 VRAM: this feature 252 MB (1 features alive); the game's process 338 MB of a 15419 MB budget
+19:24:57.021 network sized: render 1280x720 (grid 1280x736), output 1920x1080, internal 2880x1620
+19:24:57.021 VRAM: this feature 252 MB (1 features alive); the game's process 338 MB of a 15419 MB budget
+19:24:57.035 network sized: render 1088x612 (grid 1088x640), output 1920x1080, internal 2880x1620
+19:24:57.036 VRAM: this feature 252 MB (1 features alive); the game's process 338 MB of a 15419 MB budget
+19:24:57.327 destroy after 218 network frames

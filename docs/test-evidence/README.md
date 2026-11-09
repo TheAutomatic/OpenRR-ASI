@@ -1,0 +1,31 @@
+# OpenRR-ASI (`openrr-amd.asi`) 测试证据归档目录
+
+本目录统一存放所有实机单元测试（`test_asi_units.exe`）与同进程 A/B 基准测试（`openrr_bench.exe`）的留档记录。**严禁在 `build/asi/` 下散落保留临时 `bench-*` 目录。**
+
+## 目录结构与规范
+
+1. **当前阶段主证据**：
+   - [`rx9070xt-d3d12-validation-2026-11-08.log`](rx9070xt-d3d12-validation-2026-11-08.log)：当前分支最新通过门禁的完整实机测试与 3 轮同进程 A/B 对照报告。
+   - [`game-baseline-2026-11-09.md`](game-baseline-2026-11-09.md)：三款实机游戏（《赛博朋克 2077》、《影之刃零 PBZ》、《红色沙漠 Crimson Desert》）初始基线运行报告、显存占用与帧耗时表格（原始游戏日志本地归档于 `game-logs/2026-11-09-initial-baseline/`，通过 `.gitignore` 忽略不入库）。
+
+2. **`history/`（按演进顺序列出的独立历史快照，只增不改）**：
+   - [`history/01-330f0b8-init-validation-suite.log`](history/01-330f0b8-init-validation-suite.log)：初始 D3D12 Direct / Split / 127 槽位 / Vulkan 桥接验证套件。
+   - [`history/02-c8db22b-direct-release-and-matrix.log`](history/02-c8db22b-direct-release-and-matrix.log)：Direct Release 钩子与状态恢复验证。
+   - [`history/03-bf310eb-k2-occ-pad-ab.log`](history/03-bf310eb-k2-occ-pad-ab.log)：1080p K2 `LDS_OCC_PAD` 初探。
+   - [`history/04-aef4b89-w1-occ-pad-4k.log`](history/04-aef4b89-w1-occ-pad-4k.log)：补齐 4K K2 `LDS_OCC_PAD` 测试（暴露出 4K 负优化问题，见 `pr-review-d6f70fb.md`）。
+   - [`history/05-7c36cf9-openrr-bench-1440p-4k.log`](history/05-7c36cf9-openrr-bench-1440p-4k.log)：引入 `openrr_bench` 1440p / 4K 端到端与显存基准。
+   - [`history/06-0dc2625-b0-b1-b2-draft1.log`](history/06-0dc2625-b0-b1-b2-draft1.log)：B0+B1+B2 初版快照（squash 前提交 `0dc2625`，含 `f0+0` 竞争与旧 PSNR 口径，见 `pr-review-0dc2625.md`）。
+   - [`history/07-c671f57-b0-b1-b2-draft2.log`](history/07-c671f57-b0-b1-b2-draft2.log)：B1 迁至 `t0` 尾部 + SPIR-V 哈希门禁 + 3 轮 `d6f70fb` 同进程对照（squash 前提交 `c671f57`，见 `pr-review-c671f57.md`）。
+   - [`history/08-3dcaf67-b0-b1-b2-draft3.log`](history/08-3dcaf67-b0-b1-b2-draft3.log)：关闭噪声内 `LT_ATTR_RCP/DEPTH`、收紧 PSNR 门禁、加入 B1 `f0` 负对照（squash 前提交 `3dcaf67`，见 `pr-review-3dcaf67.md`）。
+   - [`history/09-bdf4188-b0-b1-b2-baseline-final.log`](history/09-bdf4188-b0-b1-b2-baseline-final.log)：B0+B1+B2 基线定版（squash 前提交 `bdf4188`，现已合并为 `90fea26` + `asi/docs` 基线提交；`wide` 显存恢复 `+16 B/px`、顺序 `0dc2625` 负对照、29 缓冲重叠审计、`enc0_attr` SPIR-V 哈希核验）。
+
+3. **`runs/`（`openrr_bench.exe` 原始运行时日志与 `summary.json` 归档）**：
+   - [`runs/2026-11-08-b0-b1-b2-baseline/`](runs/2026-11-08-b0-b1-b2-baseline/)：基线定版 1080p / 1440p / 4K 三轮同进程 A/B 与 4K Legacy 的原始 `openrr_baseline.log`、`openrr_candidate.log` 与 `summary.json`。
+
+## 自动归档命令
+
+后续每完成一个阶段（如阶段 2、阶段 3），统一通过以下脚本自动执行测试、写入 `runs/<date>-<tag>-<sha>/` 与 `history/<NN>-<sha>-<tag>.log`，并自动清理 `build/asi/` 下的临时目录：
+
+```bash
+python3 asi/build/archive_evidence.py --tag <stage-slug>
+```
