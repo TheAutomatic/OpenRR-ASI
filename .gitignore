@@ -35,3 +35,6 @@ snippets/
 
 # Raw in-game session log archives (markdown summary tables in docs/test-evidence/ are tracked)
 /docs/test-evidence/game-logs/
+
+# Local execution and borrowing plans with machine-specific absolute paths
+/docs/local-plans/
