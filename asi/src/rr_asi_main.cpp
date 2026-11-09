@@ -3,6 +3,7 @@
 // Shell adapted from mochi / DLSSNR-AMD (MIT, Copyright (c) 2026 mochizuki0323).
 #include "rr_path_win.hpp"
 #include "rr_ngx_abi.hpp"
+#include "rr_mochi_hook.hpp"
 #include "rr_pe_config.hpp"
 #include "rr_pe_control.hpp"
 #include "rr_pe_crash.hpp"
@@ -30,8 +31,10 @@
 #include <cstdlib>
 #include <cstring>
 #include <cwchar>
+#include <cwctype>
 #include <exception>
 #include <filesystem>
+#include <initializer_list>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -1333,33 +1336,102 @@ bool query_d3d12_adapter_names(ID3D12Device* dev) {
 
 // ---- Engine & Barrier config from OptiScaler.ini ----
 bool g_unreal_by_exe = false;
-std::atomic<int> g_ngx_engine{0};
+bool g_game_colour_readable = false;
+bool g_game_motion_readable = false;
+std::atomic<int> g_ngx_engine{-1};
 int g_barrier_color = -1, g_barrier_mv = -1, g_barrier_depth = -1, g_barrier_output = -1;
 
-void judge_executable() {
-    wchar_t exe[MAX_PATH]{};
-    if (!GetModuleFileNameW(nullptr, exe, MAX_PATH)) return;
-    const std::filesystem::path p(exe);
-    const std::wstring stem = p.stem().wstring();
-    if (stem.find(L"Win64-Shipping") != std::wstring::npos || stem.find(L"WinGDK-Shipping") != std::wstring::npos) {
-        g_unreal_by_exe = true;
-    }
+std::wstring lower_w(std::wstring s) {
+    for (wchar_t& c : s) c = wchar_t(std::towlower(c));
+    return s;
+}
+bool contains_any(const std::wstring& s, std::initializer_list<const wchar_t*> words) {
+    for (const wchar_t* w : words)
+        if (s.find(w) != std::wstring::npos) return true;
+    return false;
 }
 
-void read_ini_barriers() {
-    const std::string path = std::string(openrr::pe::module_folder()) + "\\OptiScaler.ini";
-    auto rd = [&](const char* key) -> int {
-        char v[32]{};
-        openrr::u8::profile("ResourceBarriers", key, "auto", v, sizeof v, path);
-        if (v[0] == '\0' || _stricmp(v, "auto") == 0) return -1;
-        char* end = nullptr;
-        const long n = std::strtol(v, &end, 0);
-        return (end && *end == '\0' && n >= 0) ? int(n) : -1;
+// OptiScaler's Util.cpp game-engine check, mirrored verbatim from dlssnr-amd (Unity first, then Unreal).
+void judge_executable() {
+    wchar_t path[MAX_PATH * 2] = {};
+    GetModuleFileNameW(nullptr, path, MAX_PATH * 2);
+    const std::wstring full = path;
+    const size_t slash = full.find_last_of(L"\\/");
+    const std::wstring exe = lower_w(slash == std::wstring::npos ? full : full.substr(slash + 1));
+    const std::wstring dir = slash == std::wstring::npos ? std::wstring() : full.substr(0, slash);
+    auto version_string = [&](const wchar_t* name) -> std::wstring {
+        DWORD handle = 0;
+        const DWORD size = GetFileVersionInfoSizeW(path, &handle);
+        if (!size) return {};
+        std::vector<uint8_t> data(size);
+        if (!GetFileVersionInfoW(path, 0, size, data.data())) return {};
+        struct Translation { WORD language, codepage; }* tr = nullptr;
+        UINT n = 0;
+        if (!VerQueryValueW(data.data(), L"\\VarFileInfo\\Translation", reinterpret_cast<LPVOID*>(&tr), &n) || !tr ||
+            n < sizeof(Translation))
+            return {};
+        wchar_t query[128];
+        std::swprintf(query, 128, L"\\StringFileInfo\\%04x%04x\\%ls", tr->language, tr->codepage, name);
+        LPWSTR value = nullptr;
+        UINT len = 0;
+        if (VerQueryValueW(data.data(), query, reinterpret_cast<LPVOID*>(&value), &len) && value && len) return value;
+        return {};
     };
-    g_barrier_color = rd("ColorResourceBarrier");
-    g_barrier_mv = rd("MVResourceBarrier");
-    g_barrier_depth = rd("DepthResourceBarrier");
-    g_barrier_output = rd("OutputResourceBarrier");
+    const std::wstring product = lower_w(version_string(L"ProductName")),
+                       copyright = lower_w(version_string(L"LegalCopyright")),
+                       company = lower_w(version_string(L"CompanyName")),
+                       description = lower_w(version_string(L"FileDescription"));
+    const bool unity = GetFileAttributesW((dir + L"\\UnityPlayer.dll").c_str()) != INVALID_FILE_ATTRIBUTES ||
+                       GetFileAttributesW((dir + L"\\GameAssembly.dll").c_str()) != INVALID_FILE_ATTRIBUTES ||
+                       contains_any(product, {L"unity"}) || contains_any(company, {L"unity"}) ||
+                       contains_any(copyright, {L"unity"}) || contains_any(description, {L"unity"});
+    if (unity) return;
+    auto ends = [&](const wchar_t* tail) {
+        const size_t t = std::wcslen(tail);
+        return exe.size() >= t && exe.compare(exe.size() - t, t, tail) == 0;
+    };
+    const bool shipping = ends(L"-win64-shipping.exe") || ends(L"-wingdk-shipping.exe") || ends(L"-windows-shipping.exe") ||
+                          ends(L"-win64-test.exe") || ends(L"-win64-debug.exe") || ends(L"-windows-test.exe") ||
+                          ends(L"-windows-debug.exe");
+    bool binaries = false;
+    {
+        const size_t a = dir.find_last_of(L"\\/");
+        if (a != std::wstring::npos) {
+            const std::wstring platform = lower_w(dir.substr(a + 1)), parent = dir.substr(0, a);
+            const size_t b = parent.find_last_of(L"\\/");
+            const std::wstring bins = lower_w(b == std::wstring::npos ? parent : parent.substr(b + 1));
+            binaries = bins == L"binaries" && platform.rfind(L"win", 0) == 0;
+        }
+    }
+    g_unreal_by_exe = contains_any(product, {L"unreal"}) || contains_any(company, {L"epic games"}) ||
+                      contains_any(copyright, {L"epic games", L"unreal"}) || contains_any(description, {L"unreal"}) ||
+                      shipping || binaries;
+    // misc/GameConfigs.cpp: the Unreal games whose colour (and motion vectors) OptiScaler keeps in
+    // NON_PIXEL_SHADER_RESOURCE, and the games it takes for Unreal whatever their executable says.
+    const std::string name(exe.begin(), exe.end());
+    auto ue = [&](const char* project) {
+        return name == std::string(project) + "-win64-shipping.exe" || name == std::string(project) + "-wingdk-shipping.exe";
+    };
+    for (const char* p : {"returnal", "hellbladegame", "outriders", "medium", "sackboy", "pumpkinjack", "dungeonhaven", "pal7"})
+        if (ue(p)) g_game_colour_readable = g_game_motion_readable = true;
+    if (ue("avowed")) g_game_colour_readable = true;
+    if (name == "observersystemredux.exe") g_game_colour_readable = g_game_motion_readable = true;
+    if (name == "gwt.exe" || name == "ff7rebirth_.exe" || name == "soulstice.exe") g_unreal_by_exe = true;
+}
+
+// [Hotfix] *ResourceBarrier in OptiScaler.ini beside OptiScaler (auto / absent: not set).
+void read_ini_barriers() {
+    char ini[MAX_PATH * 4 + 32];
+    std::snprintf(ini, sizeof ini, "%s\\OptiScaler.ini", openrr::pe::module_folder());
+    auto get = [&](const char* key) {
+        char v[32] = {};
+        openrr::u8::profile("Hotfix", key, "", v, sizeof v, ini);
+        return v[0] >= '0' && v[0] <= '9' ? std::atoi(v) : -1;
+    };
+    g_barrier_color = get("ColorResourceBarrier");
+    g_barrier_depth = get("DepthResourceBarrier");
+    g_barrier_mv = get("MVResourceBarrier");
+    g_barrier_output = get("OutputResourceBarrier");
 }
 
 bool is_unreal_engine() {
@@ -1679,10 +1751,12 @@ bool fill_d3d12_frame(RrContext& ctx, const NVSDK_NGX_Parameter& params, OnrRrFr
 
     const bool unreal = is_unreal_engine();
     const uint32_t read_state = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
-    const uint32_t color_state = g_barrier_color >= 0 ? uint32_t(g_barrier_color)
-                                                      : (unreal ? D3D12_RESOURCE_STATE_RENDER_TARGET : read_state);
-    const uint32_t mv_state = g_barrier_mv >= 0 ? uint32_t(g_barrier_mv)
-                                                : (unreal ? D3D12_RESOURCE_STATE_UNORDERED_ACCESS : read_state);
+    const uint32_t color_state = g_barrier_color >= 0
+                                     ? uint32_t(g_barrier_color)
+                                     : (g_game_colour_readable ? read_state : (unreal ? D3D12_RESOURCE_STATE_RENDER_TARGET : read_state));
+    const uint32_t mv_state = g_barrier_mv >= 0
+                                  ? uint32_t(g_barrier_mv)
+                                  : (g_game_motion_readable ? read_state : (unreal ? D3D12_RESOURCE_STATE_UNORDERED_ACCESS : read_state));
     const uint32_t depth_state = g_barrier_depth >= 0 ? uint32_t(g_barrier_depth) : read_state;
     const uint32_t output_state = g_barrier_output >= 0 ? uint32_t(g_barrier_output) : D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
 
@@ -1697,9 +1771,9 @@ bool fill_d3d12_frame(RrContext& ctx, const NVSDK_NGX_Parameter& params, OnrRrFr
         return t;
     };
 
-    frame.color = tex("DLSSD.Color", NVSDK_NGX_Parameter_Color,
-                      "DLSSD.Input.Color.Subrect.Base.X", NVSDK_NGX_Parameter_DLSS_Input_Color_Subrect_Base_X,
-                      "DLSSD.Input.Color.Subrect.Base.Y", NVSDK_NGX_Parameter_DLSS_Input_Color_Subrect_Base_Y, color_state);
+    frame.color = tex(NVSDK_NGX_Parameter_Color, "DLSSD.Color",
+                      NVSDK_NGX_Parameter_DLSS_Input_Color_Subrect_Base_X, "DLSSD.Input.Color.Subrect.Base.X",
+                      NVSDK_NGX_Parameter_DLSS_Input_Color_Subrect_Base_Y, "DLSSD.Input.Color.Subrect.Base.Y", color_state);
     frame.diffuse_albedo = tex("DLSSD.DiffuseAlbedo", NVSDK_NGX_Parameter_DiffuseAlbedo,
                                "DLSSD.Input.DiffuseAlbedo.Subrect.Base.X", NVSDK_NGX_Parameter_DLSS_Input_DiffuseAlbedo_Subrect_Base_X,
                                "DLSSD.Input.DiffuseAlbedo.Subrect.Base.Y", NVSDK_NGX_Parameter_DLSS_Input_DiffuseAlbedo_Subrect_Base_Y, read_state);
@@ -1873,9 +1947,9 @@ bool fill_vk_frame(RrContext& ctx, const NVSDK_NGX_Parameter& params, OnrRrFrame
         return t;
     };
 
-    frame.color = tex("DLSSD.Color", NVSDK_NGX_Parameter_Color,
-                      "DLSSD.Input.Color.Subrect.Base.X", NVSDK_NGX_Parameter_DLSS_Input_Color_Subrect_Base_X,
-                      "DLSSD.Input.Color.Subrect.Base.Y", NVSDK_NGX_Parameter_DLSS_Input_Color_Subrect_Base_Y, read_layout);
+    frame.color = tex(NVSDK_NGX_Parameter_Color, "DLSSD.Color",
+                      NVSDK_NGX_Parameter_DLSS_Input_Color_Subrect_Base_X, "DLSSD.Input.Color.Subrect.Base.X",
+                      NVSDK_NGX_Parameter_DLSS_Input_Color_Subrect_Base_Y, "DLSSD.Input.Color.Subrect.Base.Y", read_layout);
     frame.diffuse_albedo = tex("DLSSD.DiffuseAlbedo", NVSDK_NGX_Parameter_DiffuseAlbedo,
                                "DLSSD.Input.DiffuseAlbedo.Subrect.Base.X", NVSDK_NGX_Parameter_DLSS_Input_DiffuseAlbedo_Subrect_Base_X,
                                "DLSSD.Input.DiffuseAlbedo.Subrect.Base.Y", NVSDK_NGX_Parameter_DLSS_Input_DiffuseAlbedo_Subrect_Base_Y, read_layout);
@@ -3522,8 +3596,32 @@ bool hook(const char* name, void* detour, void** real, bool required = false) {
         if (required) log("[openrr] OptiScaler exports no %s", name);
         return false;
     }
-    const MH_STATUS c = MH_CreateHook(fn, detour, real);
-    const MH_STATUS e = c == MH_OK ? MH_EnableHook(fn) : c;
+    // NR's relay is private executable memory; the detour it points at belongs to NR.
+    void* target = fn;
+    if (openrr::pe::readable_code(fn, 5) && *static_cast<uint8_t*>(fn) == 0xe9) {
+        int32_t rel = 0;
+        std::memcpy(&rel, static_cast<uint8_t*>(fn) + 1, sizeof(rel));
+        const auto relay = reinterpret_cast<uintptr_t>(fn) + 5 + rel;
+        const auto next = openrr::pe::absolute_jump(reinterpret_cast<uint8_t*>(relay));
+        HMODULE owner = nullptr;
+        if (next && GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                      GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                      reinterpret_cast<LPCWSTR>(next), &owner)) {
+            auto base = std::filesystem::path(openrr::u8::module_file(owner)).filename().string();
+            for (char& c : base) if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
+            if (base.starts_with("dlssnr-amd") && base.ends_with(".asi")) {
+                const Range range = range_of(owner);
+                if (void* inner = openrr::pe::minhook_inner_target(fn, range.begin, range.end)) {
+                    target = inner;
+                    log("[openrr] %s: NR wrapper preserved; hooking trampoline %p (export %p)", name, target, fn);
+                } else {
+                    log("[openrr] %s: unsupported NR trampoline; ordinary hook fallback (NR before/after compatibility NOT enabled)", name);
+                }
+            }
+        }
+    }
+    const MH_STATUS c = MH_CreateHook(target, detour, real);
+    const MH_STATUS e = c == MH_OK ? MH_EnableHook(target) : c;
     if (e != MH_OK) log("[openrr] %s could not be hooked (%s)", name, MH_StatusToString(e));
     return e == MH_OK;
 }
