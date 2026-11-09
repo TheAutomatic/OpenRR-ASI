@@ -12,7 +12,7 @@ namespace onr {
 
 struct I2 { int32_t x, y; };
 
-struct ClearRangePC { uint64_t ptr; uint32_t count; };
+struct ClearRangePC { uint64_t ptr; uint32_t count; uint32_t value = 0; };
 struct PooledHistory2PC { uint64_t src, dst; I2 in_size, out_size; };
 struct AeSumPC { uint64_t color, acc; I2 size, origin, maxv; };
 struct AeFinalPC { uint64_t acc, next_acc, exposure, prev, block; float inv_count; uint32_t reset, next_words; };

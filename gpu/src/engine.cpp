@@ -140,7 +140,7 @@ std::array<uint32_t, 272> enc0_block(const Enc0BlockInput& in) {
 }
 
 Buffer Engine::make(size_t bytes) {
-    Buffer b = dev_->create(bytes + 64);
+    Buffer b = dev_->create_unzeroed(bytes + 64);
     dev_->fill(b, 0);
     return b;
 }
@@ -160,7 +160,7 @@ Buffer pack_bytes(Gpu* dev, std::vector<Buffer>& fixed, const void* data, size_t
         t_pack_refs->push_back(slot);
         return *slot;
     }
-    Buffer b = dev->create(bytes);
+    Buffer b = dev->create_unzeroed(bytes);
     dev->upload(b, data, bytes);
     fixed.push_back(b);
     return b;
@@ -297,7 +297,7 @@ void Engine::init(Gpu& dev, const Kernels& k, const Weights& w) {
         fixed_.push_back(wb);
         for (Buffer* r : refs) r->addr += wb.addr;
     }
-    flow_ = dev.create(10 * 512 * 4), fixed_.push_back(flow_);
+    flow_ = dev.create(10 * 1280 * 4), fixed_.push_back(flow_);
     gtab_ = dev.create(sizeof(GuideTable)), fixed_.push_back(gtab_);
     hist_smp_ = dev.sampler(true, true);
 }
@@ -394,16 +394,45 @@ void Engine::resize(I2 render, I2 output, I2 max_render) {
                     attrScratchBytes = align256(attrScratchBytes) + px / 4 * 8;
                 }
             }
+            const size_t px0 = size_t(apad.x) * apad.y;
+            dec0ScratchBytes = align256(dec0ScratchBytes) + px0 / 4 * 8;
+            if (pool_dec1_tail_ && pool_dec1_f0_race_) {
+                size_t d1RaceBytes = 0;
+                for (int l = 2; l < 5; ++l) {
+                    I2 z = shr(apad, l);
+                    size_t px = size_t(z.x) * z.y;
+                    d1RaceBytes = align256(d1RaceBytes) + px * w_->dec1[l].b.C;
+                }
+                dec0ScratchBytes = std::max(dec0ScratchBytes, d1RaceBytes);
+            }
             for (int l = 1; l < 5; ++l) {
                 I2 z = shr(apad, l);
                 size_t px = size_t(z.x) * z.y;
                 dec0ScratchBytes = align256(dec0ScratchBytes) + px * w_->dec0[l].b.C;
                 if (l == 1)
                     attrScratchBytes = align256(attrScratchBytes) + px * w_->dec1[l].b.C;
+                // Note: during the barrier-less flow chain (enc2 .. dec2_1), enc_l_[1].pooled and enc_l_[1].dfn_pool at the
+                // start of f0 are still read by enc2 while dec4_1 .. dec2_1 write dec1_l_[2..4].tensor and dec1_l_[2..4].dfn.
+                // Therefore, dec1_l_[2..4].tensor and dec1_l_[1..4].dfn are placed in the unused tail of t0 (after all enc_l_[1..5]
+                // sub-buffers and dec1_l_[1].tensor, and still below attrBytes = px0 * 48, well above dec_head_32_64's px0 * 40 headScratch).
+                if (pool_dec1_tail_) {
+                    if (l >= 2 && !pool_dec1_f0_race_)
+                        attrScratchBytes = align256(attrScratchBytes) + px * w_->dec1[l].b.C;
+                    attrScratchBytes = align256(attrScratchBytes) + px * 8;
+                }
             }
-            const size_t px0 = size_t(apad.x) * apad.y;
-            dec0ScratchBytes = std::max(dec0ScratchBytes, px0 / 4 * 8);
         }
+        const bool need_hist = out_changed || !hist_[0].addr;
+        if (need_hist) {
+            for (auto& i : hist_img_) dev_->destroy(i);
+            for (auto& h : hist_)
+                if (h.addr) dev_->destroy(h);
+        }
+        struct BatchScope {
+            Gpu* d;
+            ~BatchScope() { if (d) d->end_batch(); }
+        } batch{dev_};
+        dev_->begin_batch();
         for (int s = 0; s < 6; ++s) {
             I2 z = shr(apad, s);
             size_t px = size_t(z.x) * z.y;
@@ -422,8 +451,8 @@ void Engine::resize(I2 render, I2 output, I2 max_render) {
             const size_t dec0Bytes = px * w_->dec0[l].b.C;
             const size_t postScratch = (!l && fast_) ? std::max((((ip * 4 + 255) & ~size_t(255)) + ip * 2), dec0ScratchBytes) : 0;
             dec0_l_[l].tensor = (l >= 1 && fast_) ? Buffer{} : S(std::max(dec0Bytes, postScratch));
-            dec1_l_[l].tensor = (l && !(l == 1 && fast_)) ? S(px * w_->dec1[l].b.C) : Buffer{};
-            dec1_l_[l].dfn = (!l && fast_) ? Buffer{} : S(px * 8);
+            dec1_l_[l].tensor = (l && !(fast_ && (l == 1 || pool_dec1_tail_))) ? S(px * w_->dec1[l].b.C) : Buffer{};
+            dec1_l_[l].dfn = (!(fast_ && (!l || pool_dec1_tail_))) ? S(px * 8) : Buffer{};
         }
         // fast: one 48-byte record per grid pixel (enc0_attr.comp, ATTR64); else 48 fp16 attributes per image pixel
         const size_t attrBytes = fast_ ? size_t(apad.x) * apad.y * 48 : arp * 96;
@@ -441,12 +470,13 @@ void Engine::resize(I2 render, I2 output, I2 max_render) {
         }
         prm_ = S(kBlockBytes + 64);
         attr_wide_ = {};
-        if (out_changed || !hist_[0].addr) {
-            for (auto& i : hist_img_) dev_->destroy(i);
-            for (auto& h : hist_)
-                if (h.addr) dev_->destroy(h);
+        if (need_hist) {
+            for (int i = 0; i < 2; ++i) hist_[i] = make(ip * 8);
+        }
+        batch.d = nullptr;
+        dev_->end_batch();
+        if (need_hist) {
             for (int i = 0; i < 2; ++i) {
-                hist_[i] = make(ip * 8);
                 hist_img_[i] = dev_->alias_image(hist_[i], uint32_t(internal_.x), uint32_t(internal_.y), VK_FORMAT_R16G16B16A16_SFLOAT, 8);
                 if (hist_img_[i].img) dev_->set_texture(uint32_t(i), hist_img_[i], hist_smp_);
             }
@@ -491,16 +521,34 @@ void Engine::resize(I2 render, I2 output, I2 max_render) {
                 enc_l_[s].dfn_pool = sub(t0, aOff, px / 4 * 8);
             }
         }
-        // enc_l_[0].dfn_pool is written in launch 3 and consumed in launch 4 (enc1); dec0_l_[1..4] are written in launches 10..20.
+        // enc_l_[0].dfn_pool is written in launch 3 and consumed in launch 4 (enc1) before the barrier;
+        // dec0_l_[1..4].tensor are written in launches 9..19 after enc_l_[1].pooled / dfn_pool at the start of f0.
+        // Because enc2 .. dec2_1 run concurrently without barriers in flow mode, enc_l_[1].pooled and enc_l_[1].dfn_pool
+        // remain live in f0 throughout the flow chain; therefore dec1_l_[2..4].tensor and dec1_l_[1..4].dfn are placed
+        // in the non-overlapping tail of t0 (above dec_head_32_64's px0 * 40 headScratch).
         const size_t dOffAfterEnc1Pool = (dOff + 255) & ~size_t(255);
-        enc_l_[0].dfn_pool = Buffer{}, enc_l_[0].dfn_pool.addr = f0 + dOffAfterEnc1Pool, enc_l_[0].dfn_pool.size = size_t(pad_.x) * pad_.y / 4 * 8;
+        enc_l_[0].dfn_pool = sub(f0, dOff, size_t(pad_.x) * pad_.y / 4 * 8);
+        if (pool_dec1_tail_ && pool_dec1_f0_race_ && w_->dec1[4].b.C != 0) {
+            // Test-only negative control (0dc2625 buggy layout): place dec1_l_[2..4].tensor sequentially at f0+0 overlapping enc_l_[1].pooled / dfn_pool
+            size_t d1Off = 0;
+            for (int l = 2; l < 5; ++l) {
+                I2 z = shr(pad_, l);
+                size_t px = size_t(z.x) * z.y;
+                dec1_l_[l].tensor = sub(f0, d1Off, px * w_->dec1[l].b.C);
+            }
+            dOff = std::max(dOff, d1Off);
+        }
         for (int l = 1; l < 5; ++l) {
             I2 z = shr(pad_, l);
             size_t px = size_t(z.x) * z.y;
             dec0_l_[l].tensor = sub(f0, dOff, px * w_->dec0[l].b.C);
-            if (l == 1)
+            if (l == 1 || (pool_dec1_tail_ && !pool_dec1_f0_race_))
                 dec1_l_[l].tensor = sub(t0, aOff, px * w_->dec1[l].b.C);
+            if (pool_dec1_tail_)
+                dec1_l_[l].dfn = sub(t0, aOff, px * 8);
         }
+        if (dOff > dec0_l_[0].tensor.size || dOffAfterEnc1Pool + enc_l_[0].dfn_pool.size > dec0_l_[0].tensor.size || aOff > attr_.size)
+            throw std::runtime_error("Engine::resize: Fast sub-buffer offset exceeds pooled scratch allocation");
     }
     fresh_ = true;
 }
@@ -549,7 +597,7 @@ void Engine::record_net(const EngineFrame& f, const Guides& g, uint64_t dfn_out,
     // 240 window rows (onr_flow.glsl FLOW_ROWS; the shifts add at most one)
     bool flow = flow_on_ && fast_ && (pad_.y >> 2) / 8 + 1 <= 240;
     for (const auto& n : flow_kernel_names()) flow = flow && K.has(n);
-    if (flow) d.fill(flow_, 0, 10 * 512 * 4, 0);
+    if (flow) d.fill(flow_, 0, 10 * 1280 * 4, 0);
 
     // launches 0 and 1: DownsampledHistory2 and the exposure (one dispatch; its last block leaves acc_ at +0)
     if (!fresh_) (frame_lite_ && lk_->has("pooled_history2") ? *lk_ : K).pooled_history2(d, PooledHistory2PC{down_[old].addr, pdst_.addr, ds_, ds2_});
@@ -585,8 +633,37 @@ void Engine::record_net(const EngineFrame& f, const Guides& g, uint64_t dfn_out,
         }
         if (wide) {
             const I2 apad = {(alloc_render_.x + 31) & ~31, (alloc_render_.y + 31) & ~31};
-            if (!attr_wide_.addr) attr_wide_ = dev_->create(size_t(apad.x) * apad.y * 64 + 64), sized_.push_back(attr_wide_);
-            a.attr = attr_wide_.addr;
+            const size_t needWide = size_t(apad.x) * apad.y * 64;
+            if (attr_.size < needWide) {
+                const uint64_t oldBase = attr_.addr;
+                Buffer nw = dev_->create_unzeroed(needWide + 64);
+                for (auto& sb : sized_) {
+                    if (sb.addr == oldBase) {
+                        dev_->destroy(sb);
+                        sb = nw;
+                        break;
+                    }
+                }
+                attr_ = nw;
+                const uint64_t delta = nw.addr - oldBase;
+                tile_.addr += delta, aniso_.addr += delta, ajab_.addr += delta, mvf_.addr += delta;
+                for (int s = 1; s < 6; ++s) {
+                    enc_l_[s].tensor.addr += delta;
+                    enc_l_[s].dfn.addr += delta;
+                    if (s >= 2) {
+                        enc_l_[s].pooled.addr += delta;
+                        enc_l_[s].dfn_pool.addr += delta;
+                    }
+                }
+                for (int l = 1; l < 5; ++l) {
+                    if (l == 1 || (pool_dec1_tail_ && !pool_dec1_f0_race_))
+                        dec1_l_[l].tensor.addr += delta;
+                    if (pool_dec1_tail_)
+                        dec1_l_[l].dfn.addr += delta;
+                }
+            }
+            attr_wide_ = attr_;
+            a.attr = attr_.addr;
             attr_k += "_w";
         }
     }

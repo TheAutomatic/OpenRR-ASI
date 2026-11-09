@@ -14,22 +14,24 @@ static uint32_t subgroup_of(const std::string& n) {
 
 // every compiled kernel of the directory; the network kernels need 32-lane subgroups (cooperative matrices)
 void Kernels::load(Gpu& dev, const std::string& dir) {
-    for (auto& e : std::filesystem::directory_iterator(dir)) {
+    for (auto& e : std::filesystem::directory_iterator(u8_to_path(dir))) {
         if (e.path().extension() != ".spv") continue;
-        std::string n = e.path().stem().string();
-        k_[n] = dev.load(e.path().string(), subgroup_of(n));
+        std::string n = path_to_u8(e.path().stem());
+        k_[n] = dev.load(path_to_u8(e.path()), subgroup_of(n));
     }
 }
 
 void Kernels::load(Gpu& dev, const std::string& dir, const std::vector<std::string>& names) {
+    const auto base = u8_to_path(dir);
     for (auto& n : names)
-        if (!k_.count(n)) k_[n] = dev.load((std::filesystem::path(dir) / (n + ".spv")).string(), subgroup_of(n));
+        if (!k_.count(n)) k_[n] = dev.load(path_to_u8(base / u8_to_path(n + ".spv")), subgroup_of(n));
 }
 
 void Kernels::load_lite(Gpu& dev, const std::string& dir, const std::vector<std::string>& names) {
+    const auto base = u8_to_path(dir);
     for (auto& n : names) {
-        auto p = std::filesystem::path(dir) / (n + "_lt.spv");
-        if (!k_.count(n) && std::filesystem::exists(p)) k_[n] = dev.load(p.string(), subgroup_of(n));
+        auto p = base / u8_to_path(n + "_lt.spv");
+        if (!k_.count(n) && std::filesystem::exists(p)) k_[n] = dev.load(path_to_u8(p), subgroup_of(n));
     }
 }
 

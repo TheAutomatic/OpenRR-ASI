@@ -20,6 +20,9 @@
 #extension GL_EXT_control_flow_attributes : require
 #extension GL_KHR_shader_subgroup_quad : require
 layout(local_size_x = 256) in;
+#ifdef POST_OCC_PAD
+shared uint post_occ_pad[POST_OCC_PAD];
+#endif
 
 layout(push_constant, scalar) uniform P {
     F16x4Buf tile;       // post_tile output, 3 x f16vec4 per network pixel
@@ -548,6 +551,9 @@ void pixel(int X, int Y, float fx, float fy, Splat sp, out vec3 out1, out vec3 o
 }
 
 void main() {
+#ifdef POST_OCC_PAD
+    if (gl_LocalInvocationIndex == 0xFFFFu) post_occ_pad[0] = pc.reset;
+#endif
     // 16 x 32 pixels per workgroup, a vertical pixel pair per thread. Lanes li and li ^ 1 hold
     // horizontally adjacent pairs, so the DownsampledHistory 2x2 mean is (top + bottom) in the thread,
     // then one quad swap for the column sum, the reference's order.

@@ -8,10 +8,15 @@
 // game's list by Record / RecordPost; the Vulkan device then only builds the ELFs (and is the fallback).
 // ABI 5, Vulkan host backend: a Vulkan game's own device (set up at its vkCreateDevice by PrepareVkDevice), the frame
 // recorded into the game's command buffer by RecordVk.
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
+#ifndef ONR_RR_BUILDING
 #define ONR_RR_BUILDING
+#endif
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <share.h>
 #define VK_USE_PLATFORM_WIN32_KHR
 #include <vulkan/vulkan.h>
 #include <d3d12.h>
@@ -29,6 +34,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "opennr_rr/d3d12.hpp"
@@ -81,9 +87,14 @@ void copy_str(char* dst, size_t n, const std::string& s) {
 
 class Log {
 public:
+    ~Log() { close(); }
     void open(const std::wstring& path) {
         std::lock_guard l(m_);
         if (!f_) f_ = _wfsopen(path.c_str(), L"a", _SH_DENYNO);
+    }
+    void flush() {
+        std::lock_guard l(m_);
+        if (f_) fflush(f_);
     }
     void close() {
         std::lock_guard l(m_);
@@ -97,15 +108,22 @@ public:
         va_end(a);
         SYSTEMTIME t;
         GetLocalTime(&t);
+        const ULONGLONG now = GetTickCount64();
+        const bool urgent = std::strstr(b, "failed") || std::strstr(b, "error") || std::strstr(b, "warning") ||
+                            std::strstr(b, "stall") || std::strstr(b, "crash") || std::strstr(b, "exception");
         std::lock_guard l(m_);
         if (!f_) return;
         fprintf(f_, "%02d:%02d:%02d.%03d %s\n", t.wHour, t.wMinute, t.wSecond, t.wMilliseconds, b);
-        fflush(f_);
+        if (urgent || now - last_flush_ >= 100) {
+            fflush(f_);
+            last_flush_ = now;
+        }
     }
 
 private:
     std::mutex m_;
     FILE* f_ = nullptr;
+    ULONGLONG last_flush_ = 0;
 };
 Log g_log;
 
@@ -422,6 +440,11 @@ struct Ctx {
     uint64_t seq = 0, frames = 0;
     float gpu_last = 0;
     std::vector<float> gpu_hist;
+    float gpu_raw_last = 0;
+    std::vector<float> gpu_raw_hist;
+    uint32_t gpu_timing_key = 0;
+    float gpu_base_ms = 0;
+    float gpu_clean_ms = 0;
     std::map<Job*, std::unique_ptr<Job>> jobs;
     std::string last_logged_error;
     uint32_t logged_edit = ONR_RR_EDIT_OFF;
@@ -448,7 +471,7 @@ struct Ctx {
     // Vulkan host backend (ABI 5): dev is the game's device, the frames recorded into its command buffers
     bool vk_host = false;
     bool small_view = false;           // Vulkan host: a secondary view's feature, the colour scaled without the network
-    static constexpr uint32_t kHostSlots = 8;
+    static constexpr uint32_t kHostSlots = 64;
     VkQueryPool hqp[kHostSlots] = {};
     uint32_t hq[kHostSlots] = {}, hqnet[kHostSlots][2] = {};
     uint64_t hrecords = 0;
@@ -546,6 +569,7 @@ void build_network(Ctx* c) {
             g_log("network kernels ready (%zu pipelines) in %.1f s", names.size(),
                   std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
         }
+        if (c->lite_want && !c->lite_started.exchange(true)) build_lite(c);
         c->built = true;
     } catch (const std::exception& e) {
         std::lock_guard l(c->m);
@@ -581,7 +605,7 @@ void start_build(Ctx* c) {
 }
 
 Buffer make_buffer(Gpu& d, size_t n) {
-    Buffer b = d.create(n + 64);
+    Buffer b = d.create_unzeroed(n + 64);
     d.fill(b, 0);
     return b;
 }
@@ -596,8 +620,15 @@ void ensure_guides(Ctx* c, Gpu& d, I2 render) {
             if (b.addr) c->guides_dev->destroy(b);
     size_t px = size_t(cap.x) * cap.y;
     const size_t bpp[G_COUNT] = {8, 4, 4, 8, 2, 4, 4, 2, 0, 8, 4, 4};   // the rest: on their first frame (record_frame)
-    for (int i = 0; i < G_COUNT; ++i)
-        if (bpp[i] && !(c->use_d3d && c->direct_ok)) c->guides[i] = make_buffer(d, px * bpp[i]);
+    if (!(c->use_d3d && c->direct_ok)) {
+        struct BatchScope {
+            Gpu& dev;
+            ~BatchScope() { dev.end_batch(); }
+        } batch{d};
+        d.begin_batch();
+        for (int i = 0; i < G_COUNT; ++i)
+            if (bpp[i]) c->guides[i] = make_buffer(d, px * bpp[i]);
+    }
     c->guide_size = cap;
     c->guides_dev = &d;
 }
@@ -621,7 +652,11 @@ struct PackPC {
 
 // the projection that turns hardware depth into view depth, and the sign that makes view depth positive ahead
 void depth_projection(const OnrRrFrame& f, float proj[4], float& sign) {
-    const float* m = f.view_to_clip;
+    const float persp[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 0, 0, -0.1f, 0};
+    bool zero = true;
+    for (int i = 0; i < 16; ++i)
+        if (f.view_to_clip[i] != 0.0f) { zero = false; break; }
+    const float* m = zero ? persp : f.view_to_clip;
     proj[0] = m[10], proj[1] = m[11], proj[2] = m[14], proj[3] = m[15];
     sign = m[11] < 0 ? -1.0f : 1.0f;
 }
@@ -751,7 +786,10 @@ void record_frame(Ctx* c, Rec& r, Job& j, bool network, bool split = false) {
             if (((ip.g[s][2] >> 16) & 12u) != 0) {
                 ip.dst[s] = 0;
             } else {
-                if (!c->guides[s].addr) c->guides[s] = d.create(size_t(c->guide_size.x) * c->guide_size.y * bpp8[s] + 64);
+                if (!c->guides[s].addr) {
+                    c->guides[s] = d.create(size_t(c->guide_size.x) * c->guide_size.y * bpp8[s] + 64);
+                    d.fill(c->guides[s], 0, c->guides[s].size, 0);
+                }
                 ip.dst[s] = gt.buf[s] = c->guides[s].addr;
                 ingest = true;
             }
@@ -889,6 +927,65 @@ void keep_hop_timing(Ctx* c, int s) {
                                            at(c->span[s + kSlots][1])};
 }
 
+uint32_t timing_key(const Ctx* c) {
+    if (!c->engine_ready) return 0;
+    const I2 r = c->engine.render();
+    const uint32_t tiles = uint32_t(((r.x + 31) >> 5) * ((r.y + 31) >> 5));
+    uint32_t k = (tiles << 1) | uint32_t(c->engine.lite_active() ? 1u : 0u);
+    k ^= uint32_t((c->logged_tl + 1) & 3) << 18;
+    k ^= uint32_t((c->logged_opt + 1) & 15) << 20;
+    k ^= uint32_t((c->logged_more + 1) & 255) << 24;
+    return k;
+}
+
+// Filters out wall-clock timestamp inflation caused by concurrent game async-compute queues preempting between
+// the start and end timestamp queries of a frame at the same grid resolution and mode, while keeping the raw
+// sample and raw history alongside it (Item #5).
+void record_gpu_sample(Ctx* c, float raw_ms, float part[3], bool has_parts) {
+    if (raw_ms <= 0) return;
+    c->gpu_raw_last = raw_ms;
+    c->gpu_raw_hist.push_back(raw_ms);
+    if (c->gpu_raw_hist.size() > 64) c->gpu_raw_hist.erase(c->gpu_raw_hist.begin());
+    float clean_ms = raw_ms;
+    const uint32_t key = timing_key(c);
+    if (key && raw_ms >= 1.0f) {
+        if (c->gpu_timing_key != key || c->gpu_base_ms <= 0.0f) {
+            c->gpu_timing_key = key;
+            c->gpu_base_ms = raw_ms;
+            c->gpu_clean_ms = raw_ms;
+        } else if (raw_ms < c->gpu_base_ms) {
+            c->gpu_base_ms = raw_ms < c->gpu_base_ms * 0.94f ? raw_ms : (c->gpu_base_ms * 0.2f + raw_ms * 0.8f);
+            c->gpu_clean_ms = raw_ms < c->gpu_clean_ms * 0.94f ? raw_ms : (c->gpu_clean_ms * 0.7f + raw_ms * 0.3f);
+        } else if (raw_ms <= c->gpu_base_ms * 1.06f) {
+            c->gpu_base_ms = c->gpu_base_ms * 0.99f + raw_ms * 0.01f;
+            c->gpu_clean_ms = c->gpu_clean_ms * 0.85f + raw_ms * 0.15f;
+        } else {
+            c->gpu_base_ms += 0.002f;
+            clean_ms = c->gpu_clean_ms;
+        }
+    }
+    if (has_parts) {
+        const float excess = raw_ms - clean_ms;
+        if (excess > 0.0f && part[1] > excess) part[1] -= excess;
+        for (int i = 0; i < 3; ++i) c->split[i] += part[i];
+        ++c->split_n;
+    }
+    c->gpu_last = clean_ms;
+    c->gpu_hist.push_back(clean_ms);
+    if (c->gpu_hist.size() > 64) c->gpu_hist.erase(c->gpu_hist.begin());
+}
+
+void gpu_raw_percentiles(const std::vector<float>& hist, float& p50, float& p95) {
+    if (hist.empty()) {
+        p50 = p95 = 0.0f;
+        return;
+    }
+    std::vector<float> s = hist;
+    std::sort(s.begin(), s.end());
+    p50 = s[(s.size() - 1) * 50 / 100];
+    p95 = s[(s.size() - 1) * 95 / 100];
+}
+
 // waits for a frame slot's submits (network and post, the host's hop between them not counted) and keeps its time
 void retire_slot(Ctx* c, int s) {
     float ms = 0, part[3] = {};
@@ -902,12 +999,7 @@ void retire_slot(Ctx* c, int s) {
         ms += harvest(c, k, part);
     }
     keep_hop_timing(c, s);
-    if (ms <= 0) return;
-    c->gpu_last = ms;
-    for (int i = 0; i < 3; ++i) c->split[i] += part[i];
-    ++c->split_n;
-    c->gpu_hist.push_back(ms);
-    if (c->gpu_hist.size() > 64) c->gpu_hist.erase(c->gpu_hist.begin());
+    record_gpu_sample(c, ms, part, ms > 0);
 }
 
 // the game queue signals, the Vulkan submit k runs behind that and signals back, the game queue waits for it
@@ -968,8 +1060,15 @@ template <class F>
 bool prepare_network(Ctx* c, Gpu& d, I2 render, F&& idle) {
     if (c->state != ONR_RR_STATE_FAILED && c->built && !c->engine_ready) {
         c->engine.init(d, c->net, c->w);
+        c->engine.set_fp8_ok(c->dev.info().fp8_coopmat);
         if (getenv("ONR_RR_NO_SAMPLER")) c->engine.set_history_sampler(false);   // measurements
         c->engine_ready = true;
+        c->gpu_hist.clear();
+        c->gpu_raw_hist.clear();
+        c->gpu_raw_last = 0;
+        c->gpu_timing_key = 0;
+        c->gpu_base_ms = 0;
+        c->gpu_clean_ms = 0;
         c->state = ONR_RR_STATE_READY;
         c->set_message("ready");
     } else if (c->state != ONR_RR_STATE_FAILED && !c->building && !c->built && !c->small_view) {
@@ -993,7 +1092,7 @@ bool prepare_network(Ctx* c, Gpu& d, I2 render, F&& idle) {
             c->out16 = make_buffer(d, size_t(c->out_size.x) * c->out_size.y * 8);
         g_log("network sized: render %dx%d (grid %dx%d), output %dx%d, internal %dx%d", render.x, render.y, (render.x + 31) & ~31,
               (render.y + 31) & ~31, c->out_size.x, c->out_size.y, c->out_size.x * 3 / 2, c->out_size.y * 3 / 2);
-        if (c->vk_host) log_vram(c);
+        if (c->vk_host || c->use_d3d) log_vram(c);
     }
     ensure_guides(c, d, render);
     return network;
@@ -1003,11 +1102,13 @@ bool prepare_network(Ctx* c, Gpu& d, I2 render, F&& idle) {
 void log_vram(Ctx* c) {
     uint64_t used = 0, budget = 0;
     const double mb = 1.0 / (1 << 20);
-    if (c->dev.vram(used, budget))
-        g_log("VRAM: this feature %.0f MB (%d features alive); the game's process %.0f MB of a %.0f MB budget%s", double(c->dev.bytes()) * mb,
+    const double self_bytes = double(c->use_d3d && c->dx ? c->dx->bytes() : c->dev.bytes());
+    const bool has_vram = c->use_d3d && c->dx ? c->dx->vram(used, budget) : c->dev.vram(used, budget);
+    if (has_vram)
+        g_log("VRAM: this feature %.0f MB (%d features alive); the game's process %.0f MB of a %.0f MB budget%s", self_bytes * mb,
               g_live.load(), double(used) * mb, double(budget) * mb, used > budget ? " (over it: the driver pages, frames slow down)" : "");
     else
-        g_log("VRAM: this feature %.0f MB (%d features alive)", double(c->dev.bytes()) * mb, g_live.load());
+        g_log("VRAM: this feature %.0f MB (%d features alive)", self_bytes * mb, g_live.load());
 }
 
 void log_frame(Ctx* c, I2 render) {
@@ -1016,10 +1117,13 @@ void log_frame(Ctx* c, I2 render) {
     float avg = 0;
     for (float x : c->gpu_hist) avg += x;
     avg = c->gpu_hist.empty() ? 0 : avg / float(c->gpu_hist.size());
-    g_log("frame %llu: render %dx%d -> %dx%d, %s, %s, GPU %.2f ms (average of %zu: %.2f ms; mean since the last line: ingest %.3f, network %.2f, "
+    float raw_p50 = 0, raw_p95 = 0;
+    gpu_raw_percentiles(c->gpu_raw_hist, raw_p50, raw_p95);
+    g_log("frame %llu: render %dx%d -> %dx%d, %s, %s, GPU raw %.2f ms (p50 %.2f, p95 %.2f of %zu), clean %.2f ms (average %.2f ms; mean since the last line: ingest %.3f, network %.2f, "
           "pack %.3f)",
           (unsigned long long)c->frames, render.x, render.y, c->out_size.x, c->out_size.y, c->engine.lite_active() ? "fast mode on" : "fast mode off",
-          c->vk_host ? "Vulkan (the game's device)" : c->use_d3d ? "D3D12" : "Vulkan", c->gpu_last, c->gpu_hist.size(), avg, c->split[0] / std::max(c->split_n, 1u),
+          c->vk_host ? "Vulkan (the game's device)" : c->use_d3d ? "D3D12" : "Vulkan", c->gpu_raw_last, raw_p50, raw_p95, c->gpu_raw_hist.size(),
+          c->gpu_last, avg, c->split[0] / std::max(c->split_n, 1u),
           c->split[1] / std::max(c->split_n, 1u), c->split[2] / std::max(c->split_n, 1u));
     c->split[0] = c->split[1] = c->split[2] = 0, c->split_n = 0;
     if (c->gaps_n) {
@@ -1074,34 +1178,41 @@ int32_t enqueue(Ctx* c, Job& j, ID3D12CommandQueue* q, uint32_t* exported = null
     return ONR_RR_OK;
 }
 
-void free_ctx(Ctx* c) {
+void teardown_ctx_resources(Ctx* c) {
     if (c->builder.joinable()) c->builder.join();
     if (c->lite_builder.joinable()) c->lite_builder.join();
     if (c->stats_thread.joinable()) c->stats_thread.join();
-    // the game's own device is idle at Destroy (the host's contract); waiting on it would race the game's queues
     if (c->dev.vk() && !c->vk_host) vkDeviceWaitIdle(c->dev.vk());
     c->engine.destroy();
-    // the network was built on D3D12 only while that backend stayed on
-    Gpu& net = c->use_d3d ? static_cast<Gpu&>(*c->dx) : c->dev;
-    c->net_lite.unload(net);
-    c->net.unload(net);
-    c->kern.unload(c->dev);
-    VkDevice v = c->dev.vk();
+    if (c->dx || c->dev.vk()) {
+        Gpu& net = c->use_d3d ? static_cast<Gpu&>(*c->dx) : c->dev;
+        c->net_lite.unload(net);
+        c->net.unload(net);
+        if (c->out16.addr) net.destroy(c->out16);
+    }
+    if (c->dev.vk()) c->kern.unload(c->dev);
     for (auto& b : c->guides)
         if (b.addr && c->guides_dev) c->guides_dev->destroy(b);
-    if (c->out16.addr) net.destroy(c->out16);
     if (c->dx) {
         c->dkern.unload(*c->dx);
         for (Buffer* b : {&c->dinput, &c->doutput, &c->dimage})
             if (b->addr) c->dx->destroy(*b);
-        // the game's queue may still run lists we recorded into: their resources go a while later
-        std::thread([d = c->dx.release()] {
-            Sleep(2000);
-            delete d;
-        }).detach();
+        for (int k = 0; k < 2; ++k)
+            if (c->stats[k].rb) {
+                c->dx->destroy_raw(c->stats[k].rb);
+                c->stats[k].rb = nullptr;
+            }
     }
-    for (Buffer* b : {&c->vinput, &c->voutput})
-        if (b->addr) c->dev.destroy(*b);
+    if (c->dev.vk()) {
+        for (Buffer* b : {&c->vinput, &c->voutput})
+            if (b->addr) c->dev.destroy(*b);
+    }
+}
+
+void free_ctx(Ctx* c) {
+    teardown_ctx_resources(c);
+    c->dx.reset();
+    VkDevice v = c->dev.vk();
     for (VkQueryPool q : c->hqp)
         if (q) vkDestroyQueryPool(v, q, nullptr);
     for (int s = 0; s < kSubmits; ++s) {
@@ -1115,50 +1226,72 @@ void free_ctx(Ctx* c) {
     for (auto& b : c->retired) b->release(v);
     c->toVk.release(v);
     c->fromVk.release(v);
-    if (c->stats[0].rb || c->stats[1].rb)
-        std::thread([a = c->stats[0].rb, b = c->stats[1].rb] {
-            Sleep(2000);
-            if (a) a->Release();
-            if (b) b->Release();
-        }).detach();
+    for (int k = 0; k < 2; ++k)
+        if (c->stats[k].rb) {
+            c->stats[k].rb->Release();
+            c->stats[k].rb = nullptr;
+        }
     if (c->d3d) c->d3d->Release();
     delete c;
 }
 
-// A context on a Vulkan game's device is freed only after kRetireRecords more recordings on that device: a game may
-// release a feature with command buffers that use it recorded but not yet run. Without more recordings it stays
-// (a few hundred MB until the game closes, when RR goes off for good).
-constexpr uint32_t kRetireRecords = 32;
-struct Retired {
-    VkDevice dev;
-    Ctx* c;
-    uint32_t records;
-};
-std::mutex g_retired_m;
-std::vector<Retired> g_retired;
-
-void destroy_ctx(Ctx* c) {
-    --g_live;
+bool ctx_retired(Ctx* c) {
+    if (c->stats_busy && c->stats_busy->load()) return false;
+    if (c->d3d && FAILED(c->d3d->GetDeviceRemovedReason())) return true;
+    if (c->use_d3d && c->dx && !c->dx->all_retired()) return false;
     if (c->vk_host && c->dev.vk()) {
-        std::lock_guard l(g_retired_m);
-        g_retired.push_back({c->dev.vk(), c, 0});
-        return;
+        if (onr::vk_device_is_destroyed(c->dev.vk())) return true;
+        if (!c->dev.all_retired()) return false;
+        for (size_t s = 0; s < Ctx::kHostSlots; ++s) {
+            if (!c->hq[s] || !c->hqp[s]) continue;
+            if (!c->dev.pool_retired(c->hqp[s])) return false;
+            c->hq[s] = 0;
+        }
     }
-    free_ctx(c);
+    return true;
 }
 
-// a recording on device d: retired contexts there one recording closer to going
-void sweep_retired(VkDevice d) {
+struct RetiredCtx {
+    Ctx* c = nullptr;
+    ULONGLONG tick = 0;
+    uint32_t sweeps = 0;
+    bool warned = false;
+};
+std::mutex g_retired_m;
+std::vector<RetiredCtx> g_retired;
+
+void sweep_retired(VkDevice destroyed_vk = VK_NULL_HANDLE) {
+    if (destroyed_vk != VK_NULL_HANDLE) onr::vk_note_device_destroyed(destroyed_vk);
     std::vector<Ctx*> go;
     {
         std::lock_guard l(g_retired_m);
         size_t keep = 0;
-        for (auto& r : g_retired)
-            if (r.dev == d && ++r.records >= kRetireRecords) go.push_back(r.c);
-            else g_retired[keep++] = r;
+        for (auto& r : g_retired) {
+            if (ctx_retired(r.c)) {
+                go.push_back(r.c);
+            } else {
+                if (++r.sweeps >= 64 && !r.warned) {
+                    r.warned = true;
+                    g_log("sweep_retired: retired context %p still awaiting GPU completion proof after %u sweeps", static_cast<void*>(r.c), r.sweeps);
+                }
+                g_retired[keep++] = r;
+            }
+        }
         g_retired.resize(keep);
     }
     for (Ctx* c : go) free_ctx(c);
+}
+
+void destroy_ctx(Ctx* c) {
+    --g_live;
+    teardown_ctx_resources(c);
+    sweep_retired();
+    if (!ctx_retired(c)) {
+        std::lock_guard l(g_retired_m);
+        g_retired.push_back({c, GetTickCount64(), 0});
+        return;
+    }
+    free_ctx(c);
 }
 
 std::string gpu_reason(const Device& d) {
@@ -1229,11 +1362,11 @@ void create_vk_host(Ctx* c, const OnrRrVkDevice& v) {
     } catch (const std::exception& e) {
         g_log("Vulkan host backend: guides and output copied (%s)", e.what());
     }
-    for (auto& q : c->hqp) {
+    for (uint32_t s = 0; s < 8; ++s) {
         VkQueryPoolCreateInfo qi{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
         qi.queryType = VK_QUERY_TYPE_TIMESTAMP;
         qi.queryCount = kMaxQueries;
-        if (vkCreateQueryPool(c->dev.vk(), &qi, nullptr, &q) != VK_SUCCESS) throw std::runtime_error("vkCreateQueryPool");
+        if (vkCreateQueryPool(c->dev.vk(), &qi, nullptr, &c->hqp[s]) != VK_SUCCESS) throw std::runtime_error("vkCreateQueryPool");
     }
     g_log("backend: Vulkan host (the game's device), kernels recorded into the game's command buffer");
     c->state = ONR_RR_STATE_BUILDING;
@@ -1242,7 +1375,8 @@ void create_vk_host(Ctx* c, const OnrRrVkDevice& v) {
     // ONR_RR_SMALL_VIEWS=1 runs the network there too.
     if (c->out_size.x < 960 && !getenv("ONR_RR_SMALL_VIEWS")) {
         c->small_view = true;
-        c->message = "small view: the colour scaled, no network";
+        c->state = ONR_RR_STATE_READY;
+        c->message = "small secondary view: colour scaled without the network";
         g_log("output %dx%d: a small secondary view, the colour is scaled without the network (ONR_RR_SMALL_VIEWS=1 runs it)", c->out_size.x,
               c->out_size.y);
         return;
@@ -1259,12 +1393,26 @@ int32_t Create(const OnrRrCreateInfo* in, void** out) {
     auto* c = new Ctx;
     try {
         std::wstring dir = module_dir();
-        g_log.open(in->log_path ? std::wstring(in->log_path) : dir + L"\\opennr_rr.log");
+        g_log.open(in->log_path ? std::wstring(in->log_path) : dir + L"\\openrr-amd.log");
         if (!vkd) {
             c->d3d = static_cast<ID3D12Device*>(in->d3d12_device);
             c->d3d->AddRef();
         }
-        std::wstring data = in->data_dir ? std::wstring(in->data_dir) : dir + L"\\opennr-rr";
+        std::wstring data;
+        if (in->data_dir) {
+            data = std::wstring(in->data_dir);
+        } else {
+            std::error_code ec;
+            const std::filesystem::path md(dir);
+            if (std::filesystem::exists(md / L"openrr-amd" / L"shaders", ec))
+                data = (md / L"openrr-amd").wstring();
+            else if (std::filesystem::exists(md.parent_path() / L"openrr-amd" / L"shaders", ec))
+                data = (md.parent_path() / L"openrr-amd").wstring();
+            else if (std::filesystem::exists(md / L"opennr-rr" / L"shaders", ec))
+                data = (md / L"opennr-rr").wstring();
+            else
+                data = dir + L"\\openrr-amd";
+        }
         c->shader_dir = data + L"\\shaders";
         c->dlssd_path = in->dlssd_path ? in->dlssd_path : L"";
         c->weights_source = utf8(c->dlssd_path);
@@ -1300,12 +1448,14 @@ int32_t Create(const OnrRrCreateInfo* in, void** out) {
         c->kern.load(c->dev, utf8(c->shader_dir), {"ingest", "pack"});
         // D3D12 backend: only for a host that knows Record (ABI 4 sets the choice), and only after its self-test
         uint32_t choice = in->size > ONR_RR_CREATE_INFO_SIZE_V1 ? in->backend : uint32_t(ONR_RR_BACKEND_CHOICE_VULKAN);
-        if (const char* e = getenv("ONR_RR_BACKEND"))   // validation override
-            choice = !_stricmp(e, "vulkan") ? ONR_RR_BACKEND_CHOICE_VULKAN : !_stricmp(e, "d3d12") ? ONR_RR_BACKEND_CHOICE_D3D12 : choice;
+        if (choice == ONR_RR_BACKEND_CHOICE_AUTO) {
+            if (const char* e = getenv("ONR_RR_BACKEND"))   // fallback when host leaves Backend=auto
+                choice = !_stricmp(e, "vulkan") ? ONR_RR_BACKEND_CHOICE_VULKAN : !_stricmp(e, "d3d12") ? ONR_RR_BACKEND_CHOICE_D3D12 : choice;
+        }
         if (choice != ONR_RR_BACKEND_CHOICE_VULKAN) {
             wchar_t local[MAX_PATH] = {};
             c->cache_dir = in->cache_dir ? std::wstring(in->cache_dir)
-                           : GetEnvironmentVariableW(L"LOCALAPPDATA", local, MAX_PATH) ? std::wstring(local) + L"\\OpenNR\\rr"
+                           : GetEnvironmentVariableW(L"LOCALAPPDATA", local, MAX_PATH) ? std::wstring(local) + L"\\OpenRR\\cache"
                                                                                      : std::wstring();
             try {
                 d3d_setup(c);
@@ -1355,6 +1505,7 @@ int32_t Destroy(void* ctx) {
     auto* c = static_cast<Ctx*>(ctx);
     g_log("destroy after %llu network frames", (unsigned long long)c->frames);
     destroy_ctx(c);
+    g_log.flush();
     return ONR_RR_OK;
 }
 
@@ -1512,6 +1663,8 @@ int32_t plan_job(Ctx* c, const OnrRrFrame* f, std::unique_ptr<Job>& j, D3D12_PLA
     j->f.size = sizeof(OnrRrFrame);
     // a host from before the V4 tail gave the layer's opacity knowing it was not read: it stays unread
     if (f->size <= ONR_RR_FRAME_SIZE_V4) j->f.transparency_opacity = {};
+    if (!j->f.transparency_layer.resource) j->f.transparency_opacity = {}, j->f.transparency_motion = {};
+    if (j->f.flags & ONR_RR_FRAME_ROUGHNESS_PACKED) j->f.roughness = {};
     // rr2 has no input for the ray direction + hit distance (nvngx_dlssd.dll binds only DLSSD.SpecularHitDistance)
     if (j->f.specular_ray_direction_hit_distance.resource && !c->logged_ray) {
         c->logged_ray = true;
@@ -1756,17 +1909,16 @@ void vk_selftest(Ctx* c) {
 }
 
 // The kernels' push constants must fit the root constants of the D3D12 path.
-template <size_t N> struct PushFits { static_assert(N <= kMaxPushBytes, "push constants past the root constants"); };
-template struct PushFits<sizeof(IngestPC)>;
-template struct PushFits<sizeof(PackPC)>;
-template struct PushFits<sizeof(Enc0AttrPC)>;
-template struct PushFits<sizeof(Enc0StagePC)>;
-template struct PushFits<sizeof(EncStagePC)>;
-template struct PushFits<sizeof(DecUpPC)>;
-template struct PushFits<sizeof(DecDfnPC)>;
-template struct PushFits<sizeof(PostDltPC)>;
-template struct PushFits<sizeof(DownsampleTlPC)>;
-template struct PushFits<sizeof(DfnImportPC)>;
+static_assert(sizeof(IngestPC) <= kMaxPushBytes, "push constants past the root constants");
+static_assert(sizeof(PackPC) <= kMaxPushBytes, "push constants past the root constants");
+static_assert(sizeof(Enc0AttrPC) <= kMaxPushBytes, "push constants past the root constants");
+static_assert(sizeof(Enc0StagePC) <= kMaxPushBytes, "push constants past the root constants");
+static_assert(sizeof(EncStagePC) <= kMaxPushBytes, "push constants past the root constants");
+static_assert(sizeof(DecUpPC) <= kMaxPushBytes, "push constants past the root constants");
+static_assert(sizeof(DecDfnPC) <= kMaxPushBytes, "push constants past the root constants");
+static_assert(sizeof(PostDltPC) <= kMaxPushBytes, "push constants past the root constants");
+static_assert(sizeof(DownsampleTlPC) <= kMaxPushBytes, "push constants past the root constants");
+static_assert(sizeof(DfnImportPC) <= kMaxPushBytes, "push constants past the root constants");
 
 // The texture paths of d3d_ingest and d3d_pack on known data, on the device's own queue: an rgba16f texture (finite
 // halves, denormals included) and an rgba8 one (every byte value) read as the colour and the albedo, and the colour
@@ -2009,7 +2161,7 @@ void d3d_setup(Ctx* c) {
         Ctx* c; D3dDevice* d;
         ~Unload() { if (d) c->dkern.unload(*d); }
     } unload{c, dx.get()};
-    c->dkern.load(*dx, utf8(c->shader_dir), {"ingest", "pack", "selftest"});
+    c->dkern.load(*dx, utf8(c->shader_dir), {"ingest", "pack", "selftest", "clear_range"});
     std::string direct;   // the texture paths are optional: without them the guides and the output are copied
     try {
         c->dkern.load(*dx, utf8(c->shader_dir), {"d3d_ingest", "d3d_pack"});
@@ -2075,25 +2227,26 @@ void d3d_setup(Ctx* c) {
     c->dx = std::move(dx);
 }
 
-// a D3D12 recording's times, kSlots recordings later: the network's span and the parts around it
-void d3d_harvest(Ctx* c, uint32_t slot) {
-    const uint32_t n = c->dq[slot];
-    c->dq[slot] = 0;
-    if (n < 2) return;
-    std::vector<uint64_t> ts(n);
-    if (!c->dx->read_stamps(slot, ts)) return;
+// a D3D12 recording's times once its slot retired: the network's span and the parts around it
+void d3d_harvest(Ctx* c) {
     const double ms = 1000.0 / double(c->dx->timestamp_frequency());
-    add_gaps(c, ts, ms);
-    const uint32_t a = c->dqnet[slot][0], b = c->dqnet[slot][1];
-    if (b > a && b <= n) {
-        c->split[0] += float(double(ts[a] - ts.front()) * ms);
-        c->split[1] += float(double(ts[b - 1] - ts[a]) * ms);
-        c->split[2] += float(double(ts.back() - ts[b - 1]) * ms);
-        ++c->split_n;
+    for (uint32_t slot = 0; slot < D3dDevice::kSlots; ++slot) {
+        const uint32_t n = c->dq[slot];
+        if (n < 2) continue;
+        std::vector<uint64_t> ts(n);
+        if (!c->dx->read_stamps(slot, ts)) continue;
+        c->dq[slot] = 0;
+        add_gaps(c, ts, ms);
+        const uint32_t a = c->dqnet[slot][0], b = c->dqnet[slot][1];
+        float part[3] = {};
+        const bool has_parts = b > a && b <= n;
+        if (has_parts) {
+            part[0] = float(double(ts[a] - ts.front()) * ms);
+            part[1] = float(double(ts[b - 1] - ts[a]) * ms);
+            part[2] = float(double(ts.back() - ts[b - 1]) * ms);
+        }
+        record_gpu_sample(c, float(double(ts.back() - ts.front()) * ms), part, has_parts);
     }
-    c->gpu_last = float(double(ts.back() - ts.front()) * ms);
-    c->gpu_hist.push_back(c->gpu_last);
-    if (c->gpu_hist.size() > 64) c->gpu_hist.erase(c->gpu_hist.begin());
 }
 
 // a D3D12 buffer of at least n bytes, kept for larger frames
@@ -2119,6 +2272,7 @@ DXGI_FORMAT direct_view(DXGI_FORMAT f, int slot) {
     case DXGI_FORMAT_R8G8B8A8_TYPELESS: case DXGI_FORMAT_R8G8B8A8_UNORM:
         return slot == G_ALBEDO || slot == G_SPEC ? DXGI_FORMAT_R8G8B8A8_UNORM : DXGI_FORMAT_UNKNOWN;
     case DXGI_FORMAT_B8G8R8A8_TYPELESS: case DXGI_FORMAT_B8G8R8A8_UNORM:
+    case DXGI_FORMAT_B8G8R8X8_TYPELESS: case DXGI_FORMAT_B8G8R8X8_UNORM:
         return slot == G_ALBEDO || slot == G_SPEC ? DXGI_FORMAT_B8G8R8A8_UNORM : DXGI_FORMAT_UNKNOWN;
     default: return DXGI_FORMAT_UNKNOWN;
     }
@@ -2159,37 +2313,51 @@ void d3d_plan_direct(Ctx* c, Job& j, std::vector<D3D12_RESOURCE_BARRIER>& back) 
         back.push_back(b);
     }
     if (!to.empty()) c->dx->list()->ResourceBarrier(UINT(to.size()), to.data());
+    else c->dx->barrier();
 }
 
 // the job's guides that are not read directly, copied into dinput (one barrier each way), on the bound list
-void d3d_copy_inputs(Ctx* c, const Job& j) {
+void d3d_copy_inputs(Ctx* c, Job& j) {
     const OnrRrTexture* tex[G_COUNT];
     frame_textures(j.f, tex);
     D3dDevice::TexCopy cp[G_COUNT];
     uint32_t n = 0;
-    for (int i = 0; i < G_COUNT; ++i)
-        if (j.in[i].present && !j.in[i].direct)
-            cp[n++] = {static_cast<ID3D12Resource*>(tex[i]->resource), tex[i]->state, j.in[i].offset, j.in[i].pitch, 0, 0};
+    uint64_t compact_off = 0;
+    for (int i = 0; i < G_COUNT; ++i) {
+        if (!j.in[i].present || j.in[i].direct) continue;
+        j.in[i].offset = compact_off;
+        cp[n++] = {static_cast<ID3D12Resource*>(tex[i]->resource), tex[i]->state, compact_off, j.in[i].pitch, 0, 0};
+        compact_off = (compact_off + uint64_t(j.in[i].pitch) * j.in[i].th + 511) & ~uint64_t(511);
+    }
     if (n) {
-        uint64_t end = 0;
-        for (int i = 0; i < G_COUNT; ++i)
-            if (j.in[i].present && !j.in[i].direct)
-                end = std::max<uint64_t>(end, j.in[i].offset + uint64_t(j.in[i].pitch) * j.in[i].th);
-        d3d_ensure(c, c->dinput, (end + 511) & ~uint64_t(511));
+        d3d_ensure(c, c->dinput, compact_off);
         c->dx->copy_textures_to_buffer(cp, n, c->dinput);
     }
 }
 
 // d3d_pack straight into the output: an rgba16f texture that takes a UAV (the store keeps the bits); r set up, the
 // texture moved into UNORDERED_ACCESS (back: the move to undo). False: the rows go through doutput and a copy.
+DXGI_FORMAT direct_uav_format(DXGI_FORMAT f) {
+    switch (f) {
+    case DXGI_FORMAT_R16G16B16A16_TYPELESS: case DXGI_FORMAT_R16G16B16A16_FLOAT: return DXGI_FORMAT_R16G16B16A16_FLOAT;
+    default: return DXGI_FORMAT_UNKNOWN;
+    }
+}
+
 bool d3d_direct_output(Ctx* c, const Job& j, Rec& r, std::vector<D3D12_RESOURCE_BARRIER>& back) {
     auto* out = static_cast<ID3D12Resource*>(j.f.output.resource);
     D3D12_RESOURCE_DESC od = out->GetDesc();
-    if (!c->direct_ok || j.out_tf != TF_RGBA16F || !(od.Flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) || od.SampleDesc.Count != 1 ||
-        j.f.output.x > 65535 || j.f.output.y > 65535)
+    const DXGI_FORMAT uav_fmt = direct_uav_format(od.Format);
+    if (!c->direct_ok || uav_fmt == DXGI_FORMAT_UNKNOWN || !(od.Flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) ||
+        od.SampleDesc.Count != 1 || j.f.output.x > 65535 || j.f.output.y > 65535)
         return false;
-    c->dx->uav(out, 16, DXGI_FORMAT_R16G16B16A16_FLOAT);
-    r.out_fmt = TF_RGBA16F | 256u, r.out_pitch = j.f.output.x | j.f.output.y << 16;
+    D3D12_FEATURE_DATA_FORMAT_SUPPORT fs{uav_fmt};
+    if (FAILED(c->d3d->CheckFeatureSupport(D3D12_FEATURE_FORMAT_SUPPORT, &fs, sizeof fs)) ||
+        !(fs.Support1 & D3D12_FORMAT_SUPPORT1_TYPED_UNORDERED_ACCESS_VIEW) ||
+        !(fs.Support2 & D3D12_FORMAT_SUPPORT2_UAV_TYPED_STORE))
+        return false;
+    c->dx->uav(out, 16, uav_fmt);
+    r.out_fmt = uint32_t(j.out_tf) | 256u, r.out_pitch = j.f.output.x | j.f.output.y << 16;
     const auto st = D3D12_RESOURCE_STATES(j.f.output.state);
     if (st != D3D12_RESOURCE_STATE_UNORDERED_ACCESS) {
         D3D12_RESOURCE_BARRIER b{D3D12_RESOURCE_BARRIER_TYPE_TRANSITION};
@@ -2221,6 +2389,7 @@ int32_t Record(void* ctx, const OnrRrFrame* f, void* list, uint32_t edit, OnrRrD
     if (image) image->buffer = nullptr;
     auto* c = static_cast<Ctx*>(ctx);
     auto* cl = static_cast<ID3D12GraphicsCommandList*>(list);
+    sweep_retired();
     std::lock_guard l(c->m);
     if (!c->use_d3d) return fail(ONR_RR_UNSUPPORTED, c->vk_host ? "Record: the Vulkan host backend runs, use RecordVk" : "Record: the Vulkan backend runs");
     D3dDevice& d = *c->dx;
@@ -2251,10 +2420,18 @@ int32_t Record(void* ctx, const OnrRrFrame* f, void* list, uint32_t edit, OnrRrD
             g_log("denoised image hop: %s", c->logged_edit == ONR_RR_EDIT_LOOP ? "loop" : c->logged_edit == ONR_RR_EDIT_DISPLAY ? "display" : "off");
         }
 
-        const uint32_t slot = uint32_t(c->drecords++ % D3dDevice::kSlots);
-        d3d_harvest(c, slot);
-        d.bind(cl, slot);
-        Rec r{d, c->dkern, c->dinput.addr, c->doutput.addr, c->dimage.addr, c->dqnet[slot]};
+        const uint32_t hint = uint32_t(c->drecords++ % D3dDevice::kGameSlots);
+        d3d_harvest(c);
+        if (!d.bind(cl, hint)) {
+            static std::atomic<bool> said_full{false};
+            if (!said_full.exchange(true, std::memory_order_relaxed))
+                g_log("Record: all D3D12 recording slots (63 primary + 64 overflow) are in flight; skipping this frame (output not written)");
+            return ONR_RR_BUSY;
+        }
+        const uint32_t slot = d.bound_slot();
+        const bool overflow = d.using_overflow();
+        uint32_t dummy_qnet[2] = {};
+        Rec r{d, c->dkern, c->dinput.addr, c->doutput.addr, c->dimage.addr, overflow ? dummy_qnet : c->dqnet[slot]};
         std::vector<D3D12_RESOURCE_BARRIER> back;
         try {
             d.stamp();
@@ -2277,13 +2454,13 @@ int32_t Record(void* ctx, const OnrRrFrame* f, void* list, uint32_t edit, OnrRrD
             }
             if (!back.empty()) cl->ResourceBarrier(UINT(back.size()), back.data());
         } catch (...) {
-            c->dq[slot] = 0;
+            if (!overflow) c->dq[slot] = 0;
             d.unbind();
             throw;
         }
         // a hop's times come with its RecordPost
-        c->dq[slot] = hop ? 0 : d.queries();
-        if (g_stamps && !hop && network) c->stamp_names = d.stamp_names;
+        if (!overflow) c->dq[slot] = hop ? 0 : d.queries();
+        if (g_stamps && !hop && !overflow && network) c->stamp_names = d.stamp_names;
         d.unbind();
         if (network) log_frame(c, render);
         if (!hop) return ONR_RR_OK;
@@ -2323,10 +2500,19 @@ int32_t RecordPost(void* ctx, void* job, void* list, uint32_t format) {
             if (!std::exchange(said, true)) g_log("RecordPost: edit format %u is not read; the network's image is used", format);
             tf = TF_NONE;
         }
-        const uint32_t slot = uint32_t(c->drecords++ % D3dDevice::kSlots);
-        d3d_harvest(c, slot);
-        d.bind(static_cast<ID3D12GraphicsCommandList*>(list), slot);
-        Rec r{d, c->dkern, c->dinput.addr, c->doutput.addr, c->dimage.addr, c->dqnet[slot]};
+        const uint32_t hint = uint32_t(c->drecords++ % D3dDevice::kGameSlots);
+        d3d_harvest(c);
+        if (!d.bind(static_cast<ID3D12GraphicsCommandList*>(list), hint)) {
+            static std::atomic<bool> said_post_full{false};
+            if (!said_post_full.exchange(true, std::memory_order_relaxed))
+                g_log("RecordPost: all D3D12 recording slots are in flight; skipping this frame (output not written)");
+            c->jobs.erase(it);
+            return ONR_RR_BUSY;
+        }
+        const uint32_t slot = d.bound_slot();
+        const bool overflow = d.using_overflow();
+        uint32_t dummy_qnet[2] = {};
+        Rec r{d, c->dkern, c->dinput.addr, c->doutput.addr, c->dimage.addr, overflow ? dummy_qnet : c->dqnet[slot]};
         std::vector<D3D12_RESOURCE_BARRIER> back;
         try {
             d.stamp();
@@ -2342,10 +2528,11 @@ int32_t RecordPost(void* ctx, void* job, void* list, uint32_t format) {
             d.stamp();
             if (!back.empty()) d.list()->ResourceBarrier(UINT(back.size()), back.data());
         } catch (...) {
+            if (!overflow) c->dq[slot] = 0;
             d.unbind();
             throw;
         }
-        c->dq[slot] = d.queries();
+        if (!overflow) c->dq[slot] = d.queries();
         d.unbind();
     } catch (const std::exception& e) {
         if (c->state != ONR_RR_STATE_FAILED) {
@@ -2486,25 +2673,26 @@ int32_t RecordOutput(void* ctx, void* job, void* list) {
 
 // ------------------------------------------------------------------------------------------------ Vulkan host backend
 
-// a slot's timestamps once its command buffer ran (8 recordings later); nothing while they are not written
-void vk_harvest(Ctx* c, uint32_t slot) {
-    const uint32_t n = c->hq[slot];
-    c->hq[slot] = 0;
-    if (n < 2) return;
-    std::vector<uint64_t> ts(n);
-    if (vkGetQueryPoolResults(c->dev.vk(), c->hqp[slot], 0, n, ts.size() * 8, ts.data(), 8, VK_QUERY_RESULT_64_BIT) != VK_SUCCESS) return;
+// a slot's timestamps once its command buffer ran; nothing while they are not written
+void vk_harvest(Ctx* c) {
     const double ms = c->dev.timestamp_period_ns() * 1e-6;
-    add_gaps(c, ts, ms);
-    const uint32_t a = c->hqnet[slot][0], b = c->hqnet[slot][1];
-    if (b > a && b <= n) {
-        c->split[0] += float(double(ts[a] - ts.front()) * ms);
-        c->split[1] += float(double(ts[b - 1] - ts[a]) * ms);
-        c->split[2] += float(double(ts.back() - ts[b - 1]) * ms);
-        ++c->split_n;
+    for (uint32_t slot = 0; slot < Ctx::kHostSlots; ++slot) {
+        const uint32_t n = c->hq[slot];
+        if (n < 2 || !c->hqp[slot] || !c->dev.pool_retired(c->hqp[slot])) continue;
+        c->hq[slot] = 0;
+        std::vector<uint64_t> ts(n);
+        if (vkGetQueryPoolResults(c->dev.vk(), c->hqp[slot], 0, n, ts.size() * 8, ts.data(), 8, VK_QUERY_RESULT_64_BIT) != VK_SUCCESS) continue;
+        add_gaps(c, ts, ms);
+        const uint32_t a = c->hqnet[slot][0], b = c->hqnet[slot][1];
+        float part[3] = {};
+        const bool has_parts = b > a && b <= n;
+        if (has_parts) {
+            part[0] = float(double(ts[a] - ts.front()) * ms);
+            part[1] = float(double(ts[b - 1] - ts[a]) * ms);
+            part[2] = float(double(ts.back() - ts[b - 1]) * ms);
+        }
+        record_gpu_sample(c, float(double(ts.back() - ts.front()) * ms), part, has_parts);
     }
-    c->gpu_last = float(double(ts.back() - ts.front()) * ms);
-    c->gpu_hist.push_back(c->gpu_last);
-    if (c->gpu_hist.size() > 64) c->gpu_hist.erase(c->gpu_hist.begin());
 }
 
 void vk_ensure(Ctx* c, Buffer& b, UINT64 n) {
@@ -2602,9 +2790,16 @@ bool vk_direct_output(Ctx* c, const Job& j, Rec& r) {
 // the guides not read directly into vinput: every texture to TRANSFER_SRC in one barrier (a texture given twice moves
 // once), the copies, and back; GENERAL ones are copied where they are. The first barrier also orders the game's work
 // before our reads of its textures and our write of the output.
-void vk_copy_inputs(Ctx* c, const Job& j, VkCommandBuffer cb) {
+void vk_copy_inputs(Ctx* c, Job& j, VkCommandBuffer cb) {
     const OnrRrTexture* tex[G_COUNT];
     frame_textures(j.f, tex);
+    uint64_t compact_off = 0;
+    for (int i = 0; i < G_COUNT; ++i) {
+        if (!j.in[i].present || j.in[i].direct) continue;
+        j.in[i].offset = compact_off;
+        compact_off = (compact_off + uint64_t(j.in[i].pitch) * j.in[i].th + 511) & ~uint64_t(511);
+    }
+    if (compact_off) vk_ensure(c, c->vinput, compact_off);
     std::vector<VkImageMemoryBarrier2> to, back;
     std::vector<VkImage> moved;
     VkMemoryBarrier2 mb{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
@@ -2699,7 +2894,7 @@ int32_t RecordVk(void* ctx, const OnrRrFrame* f, void* cmd) {
         return fail(ONR_RR_INVALID_ARGUMENT, "RecordVk: missing arguments");
     auto* c = static_cast<Ctx*>(ctx);
     auto* cb = static_cast<VkCommandBuffer>(cmd);
-    if (c->vk_host) sweep_retired(c->dev.vk());
+    if (c->vk_host) sweep_retired();
     std::lock_guard l(c->m);
     if (!c->vk_host) return fail(ONR_RR_UNSUPPORTED, "RecordVk: the runtime was not created on a Vulkan device");
     Device& d = c->dev;
@@ -2710,10 +2905,30 @@ int32_t RecordVk(void* ctx, const OnrRrFrame* f, void* cmd) {
         I2 render{int32_t(j->f.render_width), int32_t(j->f.render_height)};
         // buffers replaced here outlive the recordings that use them (the device's grave), so nothing waits
         const bool network = prepare_network(c, d, render, [] {});
-        vk_ensure(c, c->vinput, in_bytes);
-        vk_ensure(c, c->voutput, out_bytes);
-        const uint32_t slot = uint32_t(c->hrecords++ % Ctx::kHostSlots);
-        vk_harvest(c, slot);
+        // vinput and voutput are allocated on demand below only when a texture is not read/written directly.
+        (void)in_bytes;
+        vk_harvest(c);
+        const uint32_t hint = uint32_t(c->hrecords++ % Ctx::kHostSlots);
+        uint32_t slot = UINT32_MAX;
+        for (uint32_t i = 0; i < Ctx::kHostSlots; ++i) {
+            const uint32_t cand = (hint + i) % Ctx::kHostSlots;
+            if (!c->hqp[cand] || d.pool_retired(c->hqp[cand])) {
+                slot = cand;
+                break;
+            }
+        }
+        if (slot == UINT32_MAX) {
+            static std::atomic<bool> said_vk_full{false};
+            if (!said_vk_full.exchange(true, std::memory_order_relaxed))
+                g_log("RecordVk: all 64 Vulkan host recording slots are in flight; skipping this frame (output not written)");
+            return ONR_RR_BUSY;
+        }
+        if (!c->hqp[slot]) {
+            VkQueryPoolCreateInfo qi{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+            qi.queryType = VK_QUERY_TYPE_TIMESTAMP;
+            qi.queryCount = kMaxQueries;
+            if (vkCreateQueryPool(d.vk(), &qi, nullptr, &c->hqp[slot]) != VK_SUCCESS) throw std::runtime_error("vkCreateQueryPool");
+        }
         d.bind(cb, c->hqp[slot]);
         d.use_views(slot);
         Rec r{d, c->kern, c->vinput.addr, c->voutput.addr, 0, c->hqnet[slot]};
@@ -2725,16 +2940,21 @@ int32_t RecordVk(void* ctx, const OnrRrFrame* f, void* cmd) {
             }
             const bool direct_out = vk_direct_output(c, *j, r);
             vk_copy_inputs(c, *j, cb);
+            r.input = c->vinput.addr;
+            if (!direct_out) {
+                vk_ensure(c, c->voutput, out_bytes);
+                r.output = c->voutput.addr;
+            }
             record_frame(c, r, *j, network);
             if (direct_out) vk_output_written(cb);
             else vk_copy_output(c, *j, cb);
             d.stamp();
         } catch (...) {
-            c->hq[slot] = 0;
+            if (slot < Ctx::kHostSlots) c->hq[slot] = 0;
             d.unbind();
             throw;
         }
-        c->hq[slot] = d.queries();
+        if (slot < Ctx::kHostSlots) c->hq[slot] = d.queries();
         d.unbind();
         if (network) log_frame(c, render);
         return ONR_RR_OK;
@@ -2843,6 +3063,66 @@ extern "C" int32_t OnrRrGetFastMode(void* context) {
     auto* c = static_cast<Ctx*>(context);
     if (!c->lite_want) return 0;
     return c->lite_failed ? 3 : c->lite_built ? 1 : 2;
+}
+
+extern "C" int32_t OnrRrGetGpuTiming(void* context, float* raw_last, float* raw_p50, float* raw_p95, float* clean_last, float* clean_avg) {
+    if (!context) return ONR_RR_INVALID_ARGUMENT;
+    auto* c = static_cast<Ctx*>(context);
+    std::lock_guard l(c->m);
+    float p50 = 0, p95 = 0;
+    gpu_raw_percentiles(c->gpu_raw_hist, p50, p95);
+    if (raw_last) *raw_last = c->gpu_raw_last;
+    if (raw_p50) *raw_p50 = p50;
+    if (raw_p95) *raw_p95 = p95;
+    if (clean_last) *clean_last = c->gpu_last;
+    if (clean_avg) {
+        float avg = 0;
+        for (float x : c->gpu_hist) avg += x;
+        *clean_avg = c->gpu_hist.empty() ? 0 : avg / float(c->gpu_hist.size());
+    }
+    return ONR_RR_OK;
+}
+
+extern "C" void OnrRrNotifyD3d12ListReset(void* list, void* allocator) {
+    onr::d3d12_note_list_reset(static_cast<ID3D12GraphicsCommandList*>(list), static_cast<ID3D12CommandAllocator*>(allocator));
+}
+
+extern "C" void OnrRrNotifyD3d12ListReleased(void* list) {
+    onr::d3d12_note_list_released(static_cast<ID3D12GraphicsCommandList*>(list));
+}
+
+extern "C" void OnrRrNotifyD3d12AllocatorReset(void* allocator) {
+    onr::d3d12_note_allocator_reset(static_cast<ID3D12CommandAllocator*>(allocator));
+}
+
+extern "C" void OnrRrNotifyD3d12AllocatorReleased(void* allocator) {
+    onr::d3d12_note_allocator_released(static_cast<ID3D12CommandAllocator*>(allocator));
+}
+
+extern "C" void OnrRrNotifyVkCommandBuffersAllocated(void* device, void* pool, uint32_t count, void* const* cmds) {
+    onr::vk_note_command_buffers_allocated(static_cast<VkDevice>(device), reinterpret_cast<VkCommandPool>(pool), count,
+                                           reinterpret_cast<const VkCommandBuffer*>(cmds));
+}
+
+extern "C" void OnrRrNotifyVkCommandBufferReset(void* cmd) {
+    onr::vk_note_command_buffer_reset(static_cast<VkCommandBuffer>(cmd));
+}
+
+extern "C" void OnrRrNotifyVkCommandBuffersFreed(void* device, void* pool, uint32_t count, void* const* cmds) {
+    onr::vk_note_command_buffers_freed(static_cast<VkDevice>(device), reinterpret_cast<VkCommandPool>(pool), count,
+                                       reinterpret_cast<const VkCommandBuffer*>(cmds));
+}
+
+extern "C" void OnrRrNotifyVkCommandPoolReset(void* device, void* pool) {
+    onr::vk_note_command_pool_reset(static_cast<VkDevice>(device), reinterpret_cast<VkCommandPool>(pool));
+}
+
+extern "C" void OnrRrNotifyVkCommandPoolDestroyed(void* device, void* pool) {
+    onr::vk_note_command_pool_destroyed(static_cast<VkDevice>(device), reinterpret_cast<VkCommandPool>(pool));
+}
+
+extern "C" void OnrRrNotifyVkDeviceDestroyed(void* device) {
+    sweep_retired(static_cast<VkDevice>(device));
 }
 
 extern "C" int32_t OnrRrSetDeltaRate(void* context, float rate) {

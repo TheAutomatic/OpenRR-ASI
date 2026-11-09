@@ -4,6 +4,8 @@ project(opennr_rr LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+add_compile_definitions(_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR)
 find_package(Vulkan REQUIRED)
 
 find_program(GLSLANG glslangValidator HINTS "$ENV{VULKAN_SDK}/Bin" REQUIRED)
@@ -12,8 +14,9 @@ file(GLOB SHADER_INCLUDES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/shaders/
 set(SPV_DIR ${CMAKE_BINARY_DIR}/shaders)
 set(SPVS)
 # what OpenNrRrRuntime.dll loads (fast mode only); the other kernels (k8, _x, _e, probes) stay for the harness
+file(STRINGS ${CMAKE_CURRENT_SOURCE_DIR}/shaders.list PLAIN_RUNTIME_SHADERS REGEX "^[A-Za-z0-9_]+$")
 set(RUNTIME_SPVS)
-foreach(n ingest pack selftest selftest_tex pooled_history2 ae downsample downsample_tl post_tile dfn_export dfn_import)
+foreach(n ${PLAIN_RUNTIME_SHADERS})
     list(APPEND RUNTIME_SPVS ${SPV_DIR}/${n}.spv)
 endforeach()
 set(FLOW_KERNELS enc_stage_96_128_128 enc_stage_128_128_160 enc_stage_160_256_160 enc_stage_160_256_0 dec_up_160_256_160
@@ -180,14 +183,18 @@ target_link_libraries(opennr_rr PUBLIC Vulkan::Vulkan d3d12 dxgi)
 add_dependencies(opennr_rr shaders)
 
 file(GLOB HARNESS_SRC CONFIGURE_DEPENDS harness/*.cpp)
-add_executable(opennr_rr_harness ${HARNESS_SRC})
-target_link_libraries(opennr_rr_harness PRIVATE opennr_rr d3d12 dxgi)
-target_compile_definitions(opennr_rr_harness PRIVATE ONR_SPV_DIR="${SPV_DIR}")
+if(HARNESS_SRC)
+    add_executable(opennr_rr_harness ${HARNESS_SRC})
+    target_link_libraries(opennr_rr_harness PRIVATE opennr_rr d3d12 dxgi)
+    target_compile_definitions(opennr_rr_harness PRIVATE ONR_SPV_DIR="${SPV_DIR}")
+    if(MSVC)
+        target_compile_options(opennr_rr_harness PRIVATE /W4 /permissive-)
+    endif()
+endif()
 
 if(MSVC)
     add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
     target_compile_options(opennr_rr PRIVATE /W4 /permissive-)
-    target_compile_options(opennr_rr_harness PRIVATE /W4 /permissive-)
 endif()
 
 # runtime DLL (opennr_rr_api.h) and its D3D12 validation driver
@@ -195,24 +202,32 @@ add_library(OpenNrRrRuntime SHARED ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/src/ru
     ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/src/version.rc)
 target_include_directories(OpenNrRrRuntime PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/include)
 target_link_libraries(OpenNrRrRuntime PRIVATE opennr_rr d3d12)
-add_executable(opennr_rr_validate ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/validate/main.cpp)
-target_include_directories(opennr_rr_validate PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/include)
-target_link_libraries(opennr_rr_validate PRIVATE d3d12 dxgi)
-# and its Vulkan host driver (ABI 5): a device of its own made as a Vulkan game's, RecordVk on its command buffer
-add_executable(opennr_rr_validate_vk ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/validate/vk_main.cpp)
-target_include_directories(opennr_rr_validate_vk PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/include)
-target_link_libraries(opennr_rr_validate_vk PRIVATE Vulkan::Vulkan)
 if(MSVC)
     target_compile_options(OpenNrRrRuntime PRIVATE /W4 /permissive-)
-    target_compile_options(opennr_rr_validate PRIVATE /W4 /permissive-)
-    target_compile_options(opennr_rr_validate_vk PRIVATE /W4 /permissive-)
+endif()
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../runtime/validate/main.cpp")
+    add_executable(opennr_rr_validate ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/validate/main.cpp)
+    target_include_directories(opennr_rr_validate PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/include)
+    target_link_libraries(opennr_rr_validate PRIVATE d3d12 dxgi)
+    if(MSVC)
+        target_compile_options(opennr_rr_validate PRIVATE /W4 /permissive-)
+    endif()
+endif()
+# and its Vulkan host driver (ABI 5): a device of its own made as a Vulkan game's, RecordVk on its command buffer
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../runtime/validate/vk_main.cpp")
+    add_executable(opennr_rr_validate_vk ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/validate/vk_main.cpp)
+    target_include_directories(opennr_rr_validate_vk PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../runtime/include)
+    target_link_libraries(opennr_rr_validate_vk PRIVATE Vulkan::Vulkan)
+    if(MSVC)
+        target_compile_options(opennr_rr_validate_vk PRIVATE /W4 /permissive-)
+    endif()
 endif()
 
-# what ships: the DLL and the kernels it loads, in <build>/stage (OpenNrRrRuntime.dll, opennr-rr/shaders/*.spv)
+# what ships: the DLL and the kernels it loads, in <build>/stage (OpenNrRrRuntime.dll, openrr-amd/shaders/*.spv)
 set(STAGE_DIR ${CMAKE_BINARY_DIR}/stage)
 add_custom_target(runtime_stage
     COMMAND ${CMAKE_COMMAND} -E rm -rf ${STAGE_DIR}
-    COMMAND ${CMAKE_COMMAND} -E make_directory ${STAGE_DIR}/opennr-rr/shaders
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${STAGE_DIR}/openrr-amd/shaders
     COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:OpenNrRrRuntime> ${STAGE_DIR}
-    COMMAND ${CMAKE_COMMAND} -E copy ${RUNTIME_SPVS} ${LITE_SPVS} ${STAGE_DIR}/opennr-rr/shaders
+    COMMAND ${CMAKE_COMMAND} -E copy ${RUNTIME_SPVS} ${LITE_SPVS} ${STAGE_DIR}/openrr-amd/shaders
     DEPENDS OpenNrRrRuntime shaders VERBATIM)

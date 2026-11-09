@@ -29,6 +29,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <stdexcept>
 #include <string>
@@ -44,7 +45,7 @@ void vk_check(VkResult r, const char* what) {
 }
 
 std::vector<uint8_t> read_file(const std::wstring& p) {
-    std::ifstream f(p, std::ios::binary);
+    std::ifstream f(std::filesystem::path(p), std::ios::binary);
     if (!f) throw std::runtime_error("cannot read a scene file");
     return std::vector<uint8_t>((std::istreambuf_iterator<char>(f)), {});
 }
@@ -124,6 +125,10 @@ int wmain(int argc, wchar_t** argv) {
         OnrRrApi& api = a5.v4.v3.v2.v1;
         if (!get || get(ONR_RR_ABI_VERSION_5, &api) || !a5.PrepareVkDevice || !a5.FinishVkDevice || !a5.RecordVk)
             throw std::runtime_error("the runtime has no ABI 5");
+        auto note_vk_alloc = reinterpret_cast<void (*)(void*, void*, uint32_t, void* const*)>(GetProcAddress(dll, "OnrRrNotifyVkCommandBuffersAllocated"));
+        auto note_vk_reset = reinterpret_cast<void (*)(void*)>(GetProcAddress(dll, "OnrRrNotifyVkCommandBufferReset"));
+        auto note_vk_pool_destroyed = reinterpret_cast<void (*)(void*, void*)>(GetProcAddress(dll, "OnrRrNotifyVkCommandPoolDestroyed"));
+        auto note_vk_dev_destroyed = reinterpret_cast<void (*)(void*)>(GetProcAddress(dll, "OnrRrNotifyVkDeviceDestroyed"));
         char err[512] = {};
 
         // the "game": a Vulkan 1.3 instance and device of its own, as a game makes them
@@ -317,6 +322,10 @@ int wmain(int argc, wchar_t** argv) {
         cai.commandBufferCount = 1;
         VkCommandBuffer cb;
         vk_check(vkAllocateCommandBuffers(dev, &cai, &cb), "vkAllocateCommandBuffers");
+        if (note_vk_alloc) {
+            void* cb_v = cb;
+            note_vk_alloc(dev, reinterpret_cast<void*>(pool), 1, &cb_v);
+        }
         VkFenceCreateInfo fci{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
         VkFence fence;
         vk_check(vkCreateFence(dev, &fci, nullptr, &fence), "vkCreateFence");
@@ -335,10 +344,11 @@ int wmain(int argc, wchar_t** argv) {
             vkResetFences(dev, 1, &fence);
         };
         auto begin = [&] {
-            vkResetCommandBuffer(cb, 0);
+            vk_check(vkResetCommandBuffer(cb, 0), "vkResetCommandBuffer");
+            if (note_vk_reset) note_vk_reset(cb);
             VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
             bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-            vkBeginCommandBuffer(cb, &bi);
+            vk_check(vkBeginCommandBuffer(cb, &bi), "vkBeginCommandBuffer");
         };
         // the images into their resting layouts
         begin();
@@ -401,6 +411,10 @@ int wmain(int argc, wchar_t** argv) {
             a2.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
             a2.commandBufferCount = 1;
             vk_check(vkAllocateCommandBuffers(dev, &a2, &cb2), "vkAllocateCommandBuffers");
+            if (note_vk_alloc) {
+                void* cb2_v = cb2;
+                note_vk_alloc(dev, reinterpret_cast<void*>(pool2), 1, &cb2_v);
+            }
             vk_check(vkCreateFence(dev, &fci, nullptr, &fence2), "vkCreateFence");
             // frame 0's guides, the top left corner, into the second feature's images (in their layouts)
             begin();
@@ -422,10 +436,11 @@ int wmain(int argc, wchar_t** argv) {
             submit_wait();
         }
         auto record_second = [&](int f) {
-            vkResetCommandBuffer(cb2, 0);
+            vk_check(vkResetCommandBuffer(cb2, 0), "vkResetCommandBuffer");
+            if (note_vk_reset) note_vk_reset(cb2);
             VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
             bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-            vkBeginCommandBuffer(cb2, &bi);
+            vk_check(vkBeginCommandBuffer(cb2, &bi), "vkBeginCommandBuffer");
             OnrRrFrame fr{};
             fr.size = sizeof fr;
             fr.render_width = sw2, fr.render_height = sh2;
@@ -578,18 +593,22 @@ int wmain(int argc, wchar_t** argv) {
             auto ref = read_file(p);
             const uint16_t* r = reinterpret_cast<const uint16_t*>(ref.data());
             double se = 0, peak = 0;
-            size_t cnt = 0, eq = 0;
+            size_t cnt = 0, eq = 0, non_finite = 0;
             uint64_t hash = 1469598103934665603ull;
             for (size_t i = 0; i < size_t(OW) * OH * 4; ++i) {
                 hash = (hash ^ m[i]) * 1099511628211ull;
                 if (i % 4 == 3) continue;
                 double u = h2f(m[i]), v = h2f(r[i]);
-                se += (u - v) * (u - v), peak = std::max(peak, std::fabs(v)), ++cnt, eq += m[i] == r[i];
+                if (!std::isfinite(u) || !std::isfinite(v)) non_finite++;
+                else se += (u - v) * (u - v), peak = std::max(peak, std::fabs(v)), ++cnt, eq += m[i] == r[i];
             }
-            double db = se > 0 ? 10 * std::log10(peak * peak / (se / double(cnt))) : 999;
+            double db = (non_finite == 0 && cnt > 0 && std::isfinite(se) && std::isfinite(peak) && se >= 0.0)
+                            ? (se > 0.0 ? (peak > 0.0 ? 10 * std::log10(peak * peak / (se / double(cnt))) : 0.0) : 999.0)
+                            : 0.0;
+            if (!std::isfinite(db)) db = 0.0;
             lo = std::min(lo, db), hi = std::max(hi, db);
-            printf("%5d  %7.2f  %7.3f  %7.2f  %016llx\n", f, db, 100.0 * double(eq) / double(cnt), info.gpu_ms_last, (unsigned long long)hash);
-            bad += db < 45;
+            printf("%5d  %7.2f  %7.3f  %7.2f  %016llx\n", f, db, cnt ? 100.0 * double(eq) / double(cnt) : 0.0, info.gpu_ms_last, (unsigned long long)hash);
+            bad += !(db >= 45.0) || non_finite > 0;
         }
         printf("PSNR %.2f .. %.2f dB over %d frames%s\n", lo, hi, nframes, bad ? " (some below 45 dB)" : "");
         if (const char* lp = getenv("ONR_VALIDATE_LOOP")) {
@@ -613,6 +632,10 @@ int wmain(int argc, wchar_t** argv) {
                 vk_check(vkWaitForFences(dev, 1, &fence2, VK_TRUE, 30ull * 1000 * 1000 * 1000), "vkWaitForFences (released feature)");
                 vkResetFences(dev, 1, &fence2);
                 vkDeviceWaitIdle(dev);
+                vk_check(vkResetCommandBuffer(cb2, 0), "vkResetCommandBuffer");
+                if (note_vk_reset) note_vk_reset(cb2);
+                vk_check(vkResetCommandBuffer(cb, 0), "vkResetCommandBuffer");
+                if (note_vk_reset) note_vk_reset(cb);
                 api.Destroy(ctx);
                 ctx = nullptr;
                 const bool alt = (k & 1) == 0;
@@ -663,21 +686,30 @@ int wmain(int argc, wchar_t** argv) {
         }
         // the device idle before Destroy, as the host promises
         vkDeviceWaitIdle(dev);
+        vk_check(vkResetCommandBuffer(cb, 0), "vkResetCommandBuffer");
+        if (note_vk_reset) note_vk_reset(cb);
+        if (second) {
+            vk_check(vkResetCommandBuffer(cb2, 0), "vkResetCommandBuffer");
+            if (note_vk_reset) note_vk_reset(cb2);
+        }
         api.Destroy(ctx);
         if (ctx2) api.Destroy(ctx2);
         if (second) {
             vkDestroyFence(dev, fence2, nullptr);
+            if (note_vk_pool_destroyed) note_vk_pool_destroyed(dev, reinterpret_cast<void*>(pool2));
             vkDestroyCommandPool(dev, pool2, nullptr);
             for (auto& t : tex2) vkDestroyImageView(dev, t.view, nullptr), vkDestroyImage(dev, t.img, nullptr), vkFreeMemory(dev, t.mem, nullptr);
             vkDestroyImageView(dev, out2.view, nullptr), vkDestroyImage(dev, out2.img, nullptr), vkFreeMemory(dev, out2.mem, nullptr);
         }
         vkDestroyQueryPool(dev, qp, nullptr);
         vkDestroyFence(dev, fence, nullptr);
+        if (note_vk_pool_destroyed) note_vk_pool_destroyed(dev, reinterpret_cast<void*>(pool));
         vkDestroyCommandPool(dev, pool, nullptr);
         for (auto* b : {&up, &rb, &lsrc, &ldst})
             if (b->buf) vkDestroyBuffer(dev, b->buf, nullptr), vkFreeMemory(dev, b->mem, nullptr);
         for (auto& t : tex) vkDestroyImageView(dev, t.view, nullptr), vkDestroyImage(dev, t.img, nullptr), vkFreeMemory(dev, t.mem, nullptr);
         vkDestroyImageView(dev, out.view, nullptr), vkDestroyImage(dev, out.img, nullptr), vkFreeMemory(dev, out.mem, nullptr);
+        if (note_vk_dev_destroyed) note_vk_dev_destroyed(dev);
         vkDestroyDevice(dev, nullptr);
         vkDestroyInstance(inst, nullptr);
         return bad ? 1 : 0;

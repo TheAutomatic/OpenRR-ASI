@@ -80,6 +80,9 @@ void head_px(ivec2 p, bool own, float16_t dv[18]) {
 #endif
 
 void main() {
+#ifdef LDS_OCC_PAD
+    if (gl_LocalInvocationIndex == 0xFFFFu) lds1[0] = pc.ls;
+#endif
 #if ENC_EMBED
     // enc0 walks the grid backwards: it starts on the attribute rows enc0_attr wrote last (still in the MALL), and
     // enc1, walking forwards, starts on the rows enc0 wrote last

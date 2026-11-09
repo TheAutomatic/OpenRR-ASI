@@ -9,21 +9,42 @@
 // window rows than FLOW_ROWS.
 #extension GL_KHR_memory_scope_semantics : require
 #define FLOW_ROWS 240u
-#define FLOW_WORDS 512u
+#define FLOW_ROW_REPS 4u
+#define FLOW_ALL_BASE (5u * FLOW_ROWS)
+#define FLOW_WORDS 1280u
 layout(buffer_reference, std430, buffer_reference_align = 4) buffer FlowFlags { uint v[]; };
 FlowFlags flow_flags() { return FlowFlags(uint64_t(pc.mask)); }
 #if FLOW_WAIT
+#ifndef FLOW_BACKOFF
+#define FLOW_BACKOFF 32u
+#endif
 // producer pixel rows [ya, yb] at producer height hp
 void flow_wait_rows(int ya, int yb, int hp) {
     if (gl_LocalInvocationIndex == 0u) {
         FlowFlags f = flow_flags();
         uint b = uint(FLOW_SLOT - 1) * FLOW_WORDS;
+        uint wg_hash = gl_WorkGroupID.x + gl_WorkGroupID.y * 5u + gl_WorkGroupID.z * 11u;
+        uint spin = wg_hash | 1u;
         int lo = max(ya / 8 - 1, 0), hi = yb / 8 + 1;
         if (hi >= (hp - 1) / 8) {
-            while (atomicLoad(f.v[b + 2u * FLOW_ROWS + 1u], gl_ScopeDevice, gl_StorageSemanticsBuffer, gl_SemanticsAcquire) == 0u) {}
+            uint rep = wg_hash & 15u;
+            for (uint w = 1u; w != 0u; ++w) {
+                if (atomicLoad(f.v[b + FLOW_ALL_BASE + 1u + rep], gl_ScopeDevice, gl_StorageSemanticsBuffer, gl_SemanticsAcquire) != 0u)
+                    break;
+                for (uint k = 0u; k < FLOW_BACKOFF; ++k) spin = spin * 1664525u + 1013904223u;
+                if (spin == 0x9e3779b9u) w = 1u;
+            }
         } else {
-            for (int r = lo; r <= hi; ++r)
-                while (atomicLoad(f.v[b + FLOW_ROWS + uint(r)], gl_ScopeDevice, gl_StorageSemanticsBuffer, gl_SemanticsAcquire) == 0u) {}
+            uint rrep = wg_hash & (FLOW_ROW_REPS - 1u);
+            for (int r = lo; r <= hi; ++r) {
+                uint idx = b + FLOW_ROWS + FLOW_ROW_REPS * uint(r) + rrep;
+                for (uint w = 1u; w != 0u; ++w) {
+                    if (atomicLoad(f.v[idx], gl_ScopeDevice, gl_StorageSemanticsBuffer, gl_SemanticsAcquire) != 0u)
+                        break;
+                    for (uint k = 0u; k < FLOW_BACKOFF; ++k) spin = spin * 1664525u + 1013904223u;
+                    if (spin == 0x9e3779b9u) w = 1u;
+                }
+            }
         }
     }
     barrier();
@@ -51,8 +72,15 @@ void flow_signal(ivec2 win) {
         uint b = uint(FLOW_SLOT) * FLOW_WORDS;
         uint rows = uint((pc.size.y + pc.shift.y + 7) / 8);
         uint n = atomicAdd(f.v[b + uint(win.y)], 1u, gl_ScopeDevice, gl_StorageSemanticsBuffer, gl_SemanticsAcquireRelease);
-        if (n + 1u == uint(pc.nwx)) atomicStore(f.v[b + FLOW_ROWS + uint(win.y)], 1u, gl_ScopeDevice, gl_StorageSemanticsBuffer, gl_SemanticsRelease);
-        uint t = atomicAdd(f.v[b + 2u * FLOW_ROWS], 1u, gl_ScopeDevice, gl_StorageSemanticsBuffer, gl_SemanticsAcquireRelease);
-        if (t + 1u == uint(pc.nwx) * rows) atomicStore(f.v[b + 2u * FLOW_ROWS + 1u], 1u, gl_ScopeDevice, gl_StorageSemanticsBuffer, gl_SemanticsRelease);
+        if (n + 1u == uint(pc.nwx)) {
+            uint rbase = b + FLOW_ROWS + FLOW_ROW_REPS * uint(win.y);
+            for (uint rep = 0u; rep < FLOW_ROW_REPS; ++rep)
+                atomicStore(f.v[rbase + rep], 1u, gl_ScopeDevice, gl_StorageSemanticsBuffer, gl_SemanticsRelease);
+        }
+        uint t = atomicAdd(f.v[b + FLOW_ALL_BASE], 1u, gl_ScopeDevice, gl_StorageSemanticsBuffer, gl_SemanticsAcquireRelease);
+        if (t + 1u == uint(pc.nwx) * rows) {
+            for (uint rep = 0u; rep < 16u; ++rep)
+                atomicStore(f.v[b + FLOW_ALL_BASE + 1u + rep], 1u, gl_ScopeDevice, gl_StorageSemanticsBuffer, gl_SemanticsRelease);
+        }
     }
 }

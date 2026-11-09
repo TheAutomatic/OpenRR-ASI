@@ -75,6 +75,7 @@ enum OnrRrResult {
     ONR_RR_UNSUPPORTED = -2,   // GPU or nvngx_dlssd.dll not supported; GetLastError says why
     ONR_RR_FAILED = -3,
     ONR_RR_DEVICE_LOST = -4,
+    ONR_RR_BUSY = -5,          // all recording slots are in flight; frame was skipped (output not written)
 };
 
 enum OnrRrMode {
@@ -130,9 +131,9 @@ typedef struct OnrRrCreateInfo {
     uint32_t max_render_width, max_render_height;
     uint32_t output_width, output_height;
     const wchar_t* dlssd_path;     // nvngx_dlssd.dll the weights are built from (read only, never loaded)
-    const wchar_t* cache_dir;      // built weights and pipeline cache; null: %LOCALAPPDATA%\OpenNR\rr
-    const wchar_t* data_dir;       // folder holding shaders\; null: <runtime DLL folder>\opennr-rr
-    const wchar_t* log_path;       // null: <runtime DLL folder>\opennr_rr.log
+    const wchar_t* cache_dir;      // built weights and pipeline cache; null: %LOCALAPPDATA%\OpenRR\cache
+    const wchar_t* data_dir;       // folder holding shaders\; null: <runtime DLL folder>\openrr-amd
+    const wchar_t* log_path;       // null: <runtime DLL folder>\openrr-amd.log
     // Optional tail (size may be ONR_RR_CREATE_INFO_SIZE_V1 without it: Vulkan backend)
     uint32_t backend;              // OnrRrBackendChoice
     // Optional tail (size may be ONR_RR_CREATE_INFO_SIZE_V2 without it): the game's Vulkan device (ABI 5). With it
@@ -337,27 +338,83 @@ typedef struct OnrRrApi5 {
 // OnrRrApi5.
 typedef int32_t (*PFN_OnrRrGetApi)(uint32_t abi_version, OnrRrApi* api);
 // exported by OpenNrRrRuntime.dll
-#ifdef ONR_RR_BUILDING
+#if defined(ONR_RR_BUILDING) && !defined(ONR_RR_STATIC)
 __declspec(dllexport)
 #endif
 int32_t OnrRrGetApi(uint32_t abi_version, OnrRrApi* api);
 // exported beside it, resolved by name (an older DLL has none): the rate the display's NR delta history blends at
 // where the camera moves, 0..1, default 0.05 (FASE5-NR section 13). Before Record, on the render thread.
-#ifdef ONR_RR_BUILDING
+#if defined(ONR_RR_BUILDING) && !defined(ONR_RR_STATIC)
 __declspec(dllexport)
 #endif
 int32_t OnrRrSetDeltaRate(void* context, float rate);
 // The user's "Fast mode": cheaper kernels with a small, measured loss (docs/FASE24-FASTMODE.md). Takes effect on the next
 // recorded frame, keeping every history; the kernels are built on the first frame that asks. Get: 0 off, 1 on, 2 building,
 // 3 not available. Before Record, on the render thread.
-#ifdef ONR_RR_BUILDING
+#if defined(ONR_RR_BUILDING) && !defined(ONR_RR_STATIC)
 __declspec(dllexport)
 #endif
 int32_t OnrRrSetFastMode(void* context, int32_t on);
-#ifdef ONR_RR_BUILDING
+#if defined(ONR_RR_BUILDING) && !defined(ONR_RR_STATIC)
 __declspec(dllexport)
 #endif
 int32_t OnrRrGetFastMode(void* context);
+#if defined(ONR_RR_BUILDING) && !defined(ONR_RR_STATIC)
+__declspec(dllexport)
+#endif
+int32_t OnrRrGetGpuTiming(void* context, float* raw_last, float* raw_p50, float* raw_p95, float* clean_last, float* clean_avg);
+/*
+ * Host command-recording lifecycle notifications (required for slot & resource retirement on
+ * Record / RecordPost / RecordVk when not using the ASI plugin's automatic API hooks):
+ * - D3D12: call OnrRrNotifyD3d12ListReset(list, allocator) when a command list is created or
+ *   Reset with an allocator, OnrRrNotifyD3d12AllocatorReset(allocator) after ID3D12CommandAllocator::Reset(),
+ *   and the corresponding Released functions when a command list or allocator is destroyed.
+ * - Vulkan: call OnrRrNotifyVkCommandBuffersAllocated / OnrRrNotifyVkCommandBufferReset /
+ *   OnrRrNotifyVkCommandBuffersFreed / OnrRrNotifyVkCommandPoolReset after the matching Vulkan calls,
+ *   and call OnrRrNotifyVkCommandPoolDestroyed / OnrRrNotifyVkDeviceDestroyed BEFORE the actual
+ *   vkDestroyCommandPool / vkDestroyDevice call (while the VkDevice handle is still valid for deferred
+ *   resource teardown).
+ */
+#if defined(ONR_RR_BUILDING) && !defined(ONR_RR_STATIC)
+__declspec(dllexport)
+#endif
+void OnrRrNotifyD3d12ListReset(void* list, void* allocator);
+#if defined(ONR_RR_BUILDING) && !defined(ONR_RR_STATIC)
+__declspec(dllexport)
+#endif
+void OnrRrNotifyD3d12ListReleased(void* list);
+#if defined(ONR_RR_BUILDING) && !defined(ONR_RR_STATIC)
+__declspec(dllexport)
+#endif
+void OnrRrNotifyD3d12AllocatorReset(void* allocator);
+#if defined(ONR_RR_BUILDING) && !defined(ONR_RR_STATIC)
+__declspec(dllexport)
+#endif
+void OnrRrNotifyD3d12AllocatorReleased(void* allocator);
+#if defined(ONR_RR_BUILDING) && !defined(ONR_RR_STATIC)
+__declspec(dllexport)
+#endif
+void OnrRrNotifyVkCommandBuffersAllocated(void* device, void* pool, uint32_t count, void* const* cmds);
+#if defined(ONR_RR_BUILDING) && !defined(ONR_RR_STATIC)
+__declspec(dllexport)
+#endif
+void OnrRrNotifyVkCommandBufferReset(void* cmd);
+#if defined(ONR_RR_BUILDING) && !defined(ONR_RR_STATIC)
+__declspec(dllexport)
+#endif
+void OnrRrNotifyVkCommandBuffersFreed(void* device, void* pool, uint32_t count, void* const* cmds);
+#if defined(ONR_RR_BUILDING) && !defined(ONR_RR_STATIC)
+__declspec(dllexport)
+#endif
+void OnrRrNotifyVkCommandPoolReset(void* device, void* pool);
+#if defined(ONR_RR_BUILDING) && !defined(ONR_RR_STATIC)
+__declspec(dllexport)
+#endif
+void OnrRrNotifyVkCommandPoolDestroyed(void* device, void* pool);
+#if defined(ONR_RR_BUILDING) && !defined(ONR_RR_STATIC)
+__declspec(dllexport)
+#endif
+void OnrRrNotifyVkDeviceDestroyed(void* device);
 
 #ifdef __cplusplus
 }

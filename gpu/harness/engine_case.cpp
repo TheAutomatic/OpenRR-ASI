@@ -18,14 +18,20 @@ namespace {
 const std::pair<uint32_t, int> kUsed[] = {{0x2e8, 18}, {0x350, 6}, {0x39c, 4}, {0x3d8, 3}, {0x424, 16}, {0x4e4, 16}, {0x524, 16}, {0x590, 1}};
 
 double psnr_rgb(const std::vector<uint16_t>& a, const std::vector<uint16_t>& b) {
+    if (a.empty() || a.size() != b.size()) return 0.0;
     double se = 0, peak = 0;
     size_t n = 0;
-    for (size_t i = 0; i < std::min(a.size(), b.size()); ++i) {
+    for (size_t i = 0; i < a.size(); ++i) {
         if (i % 4 == 3) continue;
         double u = to_float(a[i]), v = to_float(b[i]);
+        if (!std::isfinite(u) || !std::isfinite(v)) return 0.0;
         se += (u - v) * (u - v), peak = std::max(peak, std::abs(v)), ++n;
     }
-    return se > 0 ? 10 * std::log10(peak * peak / (se / double(n))) : 999.0;
+    if (n == 0 || !std::isfinite(se) || !std::isfinite(peak) || se < 0.0) return 0.0;
+    if (se == 0.0) return 999.0;
+    if (!(peak > 0.0)) return 0.0;
+    const double db = 10.0 * std::log10(peak * peak / (se / double(n)));
+    return std::isfinite(db) ? db : 0.0;
 }
 
 uint64_t fnv(const void* p, size_t n) {
@@ -119,7 +125,7 @@ int run_engine(Ctx& c, const fs::path& dll, const fs::path& dir) {
         c.dev.download(out, po.data(), po.size() * 2);
         double db = psnr_rgb(po, cf.read<uint16_t>("exp_out.f16"));
         printf("  %5zu  %7.2f  %7.2f  %016llx\n", f, db, ms, (unsigned long long)fnv(po.data(), po.size() * 2));
-        bad += db < 45.0;
+        bad += !(db >= 45.0);
     }
     printf("  enc0 block: %zu used words differ from the capture over the sequence\n", block_diff);
     for (auto& b : gb) c.dev.destroy(b);

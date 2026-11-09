@@ -337,22 +337,27 @@ layout(push_constant, scalar) uniform P {
 #define SCR2 0u
 #endif
 #if W1
-#define LDS_N (DEC_UP != 0 ? 64u * ENC_C : 8u)   // DEC_UP: U [4][16][C]
+#define LDS_BASE_N (DEC_UP != 0 ? 64u * ENC_C : 8u)   // DEC_UP: U [4][16][C]
 #elif W2
 // Q_h | V_h^T with padded rows (9.5 KB: 6 windows per CU, measured faster than 8 at 8 KB); also the
 // DEC_UP U [4][16][C] and the enc1 merge rows [16][4 C] before / after
-#define LDS_N (DEC_DFN != 0 ? 64u * QST + 32u * VST : max(64u * QST + 32u * VST, 64u * ENC_C))
+#define LDS_BASE_N (DEC_DFN != 0 ? 64u * QST + 32u * VST : max(64u * QST + 32u * VST, 64u * ENC_C))
 #elif XS_ALIAS
-#define LDS_N max(QV_BUFS * QVB, PR + max(4u * PRS, SCR))
+#define LDS_BASE_N max(QV_BUFS * QVB, PR + max(4u * PRS, SCR))
 #else
-#define LDS_N (QV + max(max(max(QV_BUFS * QVB, SCR), SCR2), max(ENC_EMBED != 0 ? 64u * SST : 0u, ENC_MERGE_IN != 0 ? 256u * ENC_CIN : 0u)))
+#define LDS_BASE_N (QV + max(max(max(QV_BUFS * QVB, SCR), SCR2), max(ENC_EMBED != 0 ? 64u * SST : 0u, ENC_MERGE_IN != 0 ? 256u * ENC_CIN : 0u)))
 #endif
 #else
 // QV .. end also holds the prologue / merge scratch (64 C halves)
 #define PR (QV + max(4096u * QV_BUFS + 64u * SST, SCR) - 64u * SST)
 #define OB (PR + 64u * SST)
 #define MO XS
-#define LDS_N (OB + (SPLIT == 2 ? 2048u : 0u))
+#define LDS_BASE_N (OB + (SPLIT == 2 ? 2048u : 0u))
+#endif
+#ifdef LDS_OCC_PAD
+#define LDS_N max(uint(LDS_OCC_PAD), uint(LDS_BASE_N))
+#else
+#define LDS_N LDS_BASE_N
 #endif
 // one LDS, four aliased views (shared blocks alias at offset 0): halves, u32 pairs, u32x2 quads, u32x4 octets
 #extension GL_EXT_shared_memory_block : require

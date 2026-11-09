@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: MIT
+# Plain runtime shaders compiled without extra variant defines (shared by gpu/CMakeLists.txt and asi/build/build_shaders.py)
+ingest
+pack
+selftest
+selftest_tex
+pooled_history2
+ae
+downsample
+downsample_tl
+post_tile
+dfn_export
+dfn_import
+clear_range

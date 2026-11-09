@@ -3,24 +3,28 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <d3d12.h>
+#include <dxgi1_4.h>
 #include <dxgi1_6.h>
 
 #include "opennr_rr/d3d12.hpp"
 
 #include <algorithm>
+#include <atomic>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
+#include <unordered_map>
 
 namespace onr {
 
-namespace {
-
 // The AMD D3D12 driver extension, as exported by amdxc64.dll (AmdExtD3DCreateInterface). Only the vtable order and
 // the structure used here are declared; the layout follows the interface headers of the Radeon Developer Tool Suite
-// samples (AmdDxExt).
-struct __declspec(uuid("014937EC-9288-446F-A9AC-D75A8E3A984F")) AmdFactory : IUnknown {
+// samples (AmdDxExt). Kept outside the anonymous namespace so GCC does not devirtualize pure-virtual COM calls.
+constexpr GUID kIID_AmdFactory = {0x014937EC, 0x9288, 0x446F, {0xA9, 0xAC, 0xD7, 0x5A, 0x8E, 0x3A, 0x98, 0x4F}};
+constexpr GUID kIID_AmdDevice5 = {0xBDC14598, 0xB7D2, 0x4A8D, {0x9C, 0xA5, 0x67, 0x84, 0x8E, 0x2A, 0xF7, 0x45}};
+struct AmdFactory : IUnknown {
     virtual HRESULT STDMETHODCALLTYPE CreateInterface(IUnknown* outer, REFIID riid, void** out) = 0;
 };
 struct AmdElfInfo {
@@ -30,7 +34,7 @@ struct AmdElfInfo {
     size_t size = 0;
     uint32_t threads[3] = {1, 1, 1};
 };
-struct __declspec(uuid("BDC14598-B7D2-4A8D-9CA5-67848E2AF745")) AmdDevice5 : IUnknown {
+struct AmdDevice5 : IUnknown {
     virtual HRESULT STDMETHODCALLTYPE CreateGraphicsPipelineState(const void*, const void*, REFIID, void**) = 0;
     virtual void STDMETHODCALLTYPE PushMarker(ID3D12GraphicsCommandList*, const char*) = 0;
     virtual void STDMETHODCALLTYPE PopMarker(ID3D12GraphicsCommandList*) = 0;
@@ -41,6 +45,8 @@ struct __declspec(uuid("BDC14598-B7D2-4A8D-9CA5-67848E2AF745")) AmdDevice5 : IUn
     virtual void STDMETHODCALLTYPE SetPrimitiveTopology(ID3D12GraphicsCommandList*, uint32_t) = 0;
     virtual HRESULT STDMETHODCALLTYPE CreateComputePipelineFromElf(AmdElfInfo*, REFIID, void**) = 0;
 };
+
+namespace {
 
 void check(HRESULT hr, const char* what) {
     if (FAILED(hr)) {
@@ -54,11 +60,16 @@ template <class T> void release(T*& p) {
     if (p) p->Release(), p = nullptr;
 }
 
-ID3D12Resource* buffer(ID3D12Device* dev, uint64_t size, D3D12_HEAP_TYPE heap, D3D12_RESOURCE_STATES state, bool uav) {
+ID3D12Resource* buffer(ID3D12Device* dev, uint64_t size, D3D12_HEAP_TYPE heap, D3D12_RESOURCE_STATES state, bool uav, bool not_zeroed = false) {
     D3D12_HEAP_PROPERTIES hp{heap};
     D3D12_RESOURCE_DESC rd{D3D12_RESOURCE_DIMENSION_BUFFER, 0, std::max<uint64_t>(size, 256), 1, 1, 1, DXGI_FORMAT_UNKNOWN, {1, 0},
                            D3D12_TEXTURE_LAYOUT_ROW_MAJOR, uav ? D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS : D3D12_RESOURCE_FLAG_NONE};
     ID3D12Resource* r = nullptr;
+    if (not_zeroed) {
+        constexpr D3D12_HEAP_FLAGS kFlagCreateNotZeroed = static_cast<D3D12_HEAP_FLAGS>(0x1000);
+        if (SUCCEEDED(dev->CreateCommittedResource(&hp, kFlagCreateNotZeroed, &rd, state, nullptr, IID_PPV_ARGS(&r))) && r)
+            return r;
+    }
     check(dev->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &rd, state, nullptr, IID_PPV_ARGS(&r)), "CreateCommittedResource");
     return r;
 }
@@ -173,28 +184,105 @@ void root_constants(const void* push, uint32_t size, uint32_t* rc) {
     rc[61] = 0;
 }
 
+namespace {
+struct AllocTrack {
+    uint64_t epoch = 0;
+    bool released = false;
+};
+std::mutex g_alloc_track_m;
+std::atomic<uint64_t> g_d3d_next_epoch{1};
+std::atomic<int> g_live_d3d_devices{0};
+std::unordered_map<ID3D12GraphicsCommandList*, ID3D12CommandAllocator*> g_list_to_alloc;
+std::unordered_map<ID3D12CommandAllocator*, AllocTrack> g_alloc_epoch;
+
+void query_list_allocator(ID3D12GraphicsCommandList* cl, ID3D12CommandAllocator*& out_alloc, uint64_t& out_alloc_epoch) {
+    out_alloc = nullptr;
+    out_alloc_epoch = 0;
+    if (!cl) return;
+    std::lock_guard<std::mutex> lock(g_alloc_track_m);
+    auto it = g_list_to_alloc.find(cl);
+    if (it == g_list_to_alloc.end() || !it->second) return;
+    auto eit = g_alloc_epoch.find(it->second);
+    if (eit == g_alloc_epoch.end() || eit->second.released || eit->second.epoch == 0) return;
+    out_alloc = it->second;
+    out_alloc_epoch = eit->second.epoch;
+}
+
+bool allocator_retired(ID3D12CommandAllocator* alloc, uint64_t rec_epoch) {
+    if (!alloc || rec_epoch == 0) return false;
+    std::lock_guard<std::mutex> lock(g_alloc_track_m);
+    auto it = g_alloc_epoch.find(alloc);
+    if (it == g_alloc_epoch.end()) return false;
+    return it->second.epoch > rec_epoch;
+}
+}  // namespace
+
+void d3d12_note_list_reset(ID3D12GraphicsCommandList* cl, ID3D12CommandAllocator* alloc) {
+    if (!cl) return;
+    std::lock_guard<std::mutex> lock(g_alloc_track_m);
+    g_list_to_alloc[cl] = alloc;
+    if (alloc) {
+        auto it = g_alloc_epoch.find(alloc);
+        if (it == g_alloc_epoch.end() || it->second.released || it->second.epoch == 0) {
+            g_alloc_epoch[alloc] = AllocTrack{g_d3d_next_epoch.fetch_add(1, std::memory_order_relaxed), false};
+        }
+    }
+}
+
+void d3d12_note_list_released(ID3D12GraphicsCommandList* cl) {
+    if (!cl) return;
+    std::lock_guard<std::mutex> lock(g_alloc_track_m);
+    g_list_to_alloc.erase(cl);
+}
+
+void d3d12_note_allocator_reset(ID3D12CommandAllocator* alloc) {
+    if (!alloc) return;
+    std::lock_guard<std::mutex> lock(g_alloc_track_m);
+    g_alloc_epoch[alloc] = AllocTrack{g_d3d_next_epoch.fetch_add(1, std::memory_order_relaxed), false};
+}
+
+void d3d12_note_allocator_released(ID3D12CommandAllocator* alloc) {
+    if (!alloc) return;
+    std::lock_guard<std::mutex> lock(g_alloc_track_m);
+    g_alloc_epoch[alloc] = AllocTrack{g_d3d_next_epoch.fetch_add(1, std::memory_order_relaxed), true};
+    for (auto it = g_list_to_alloc.begin(); it != g_list_to_alloc.end();) {
+        if (it->second == alloc) it = g_list_to_alloc.erase(it);
+        else ++it;
+    }
+}
+
 D3dDevice::~D3dDevice() {
     if (q_ && fence_) wait_own();
-    for (auto& g : grave_) g.second->Release();
+    reap(true);
+    if (clear_range_.pso) static_cast<ID3D12PipelineState*>(clear_range_.pso)->Release();
+    if (qrb_ && done_map_) qrb_->Unmap(0, nullptr);
     if (ring_ && ring_map_) ring_->Unmap(0, nullptr);
     release(heap_), release(qrb_), release(qh_), release(ring_), release(fence_), release(own_), release(ca_), release(q_);
     release(dispatch_sig_), release(rs_);
     if (ext_) static_cast<IUnknown*>(ext_)->Release();
-    release(dev_);
+    if (dev_) {
+        release(dev_);
+        if (--g_live_d3d_devices <= 0) {
+            std::lock_guard<std::mutex> lock(g_alloc_track_m);
+            g_list_to_alloc.clear();
+            g_alloc_epoch.clear();
+        }
+    }
 }
 
 bool D3dDevice::init(ID3D12Device* dev, Device* compiler, const std::wstring& cache_dir, std::string& err) {
     try {
         dev_ = dev;
         dev_->AddRef();
+        ++g_live_d3d_devices;
         compiler_ = compiler;
         HMODULE umd = GetModuleHandleA("amdxc64.dll");
         auto create = umd ? reinterpret_cast<HRESULT(__cdecl*)(IUnknown*, REFIID, void**)>(GetProcAddress(umd, "AmdExtD3DCreateInterface")) : nullptr;
         if (!create) throw std::runtime_error("amdxc64.dll (the AMD D3D12 driver) has no AmdExtD3DCreateInterface");
         AmdFactory* f = nullptr;
-        check(create(dev_, __uuidof(AmdFactory), (void**)&f), "AmdExtD3DCreateInterface");
+        check(create(dev_, kIID_AmdFactory, (void**)&f), "AmdExtD3DCreateInterface");
         AmdDevice5* x = nullptr;
-        HRESULT hr = f->CreateInterface(dev_, __uuidof(AmdDevice5), (void**)&x);
+        HRESULT hr = f->CreateInterface(dev_, kIID_AmdDevice5, (void**)&x);
         f->Release();
         check(hr, "IAmdExtD3DDevice5");
         ext_ = x;
@@ -211,7 +299,7 @@ bool D3dDevice::init(ID3D12Device* dev, Device* compiler, const std::wstring& ca
             fac->Release();
         }
         driver_key_ = compiler_->info().name + "|" + std::to_string(compiler_->info().driver_version) + "|" + compiler_->info().driver_info + "|" +
-                      std::to_string(umd_ver.QuadPart) + "|patch 1";
+                      std::to_string(umd_ver.QuadPart) + "|patch 2";
         if (!cache_dir.empty()) cache_ = cache_dir + L"\\elf-" + std::filesystem::path(hex(fnv(driver_key_.data(), driver_key_.size()))).wstring();
 
         D3D12_ROOT_PARAMETER rp{};
@@ -246,7 +334,7 @@ bool D3dDevice::init(ID3D12Device* dev, Device* compiler, const std::wstring& ca
         // Each recording slot owns kSlotViews (18) + kTableViews (12) descriptors so its sampled-image table is
         // snapshotted per recording and never overwritten in place by a later resize() or set_texture().
         if (dev_->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV) == 32) {
-            D3D12_DESCRIPTOR_HEAP_DESC hd{D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, kSlots * kSlotStride,
+            D3D12_DESCRIPTOR_HEAP_DESC hd{D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, (kSlots + kOverflowDescSlots) * kSlotStride,
                                           D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE};
             check(dev_->CreateDescriptorHeap(&hd, IID_PPV_ARGS(&heap_)), "CreateDescriptorHeap");
             heap_cpu_ = heap_->GetCPUDescriptorHandleForHeapStart().ptr;
@@ -255,7 +343,7 @@ bool D3dDevice::init(ID3D12Device* dev, Device* compiler, const std::wstring& ca
         void* m = nullptr;
         check(qrb_->Map(0, nullptr, &m), "Map");
         memset(m, 0, size_t(kSlots) * kSlotQueries * 8);
-        qrb_->Unmap(0, nullptr);
+        done_map_ = static_cast<volatile uint64_t*>(m);
         return true;
     } catch (const std::exception& e) {
         err = e.what();
@@ -275,16 +363,18 @@ void D3dDevice::begin_own() {
     own_m_.lock();
     check(ca_->Reset(), "CommandAllocator::Reset");
     check(own_->Reset(ca_, nullptr), "CommandList::Reset");
-    bind(own_, kSlots - 1);
+    bind(own_, kOwnSlot);
 }
 
 void D3dDevice::submit_own() {
+    const uint32_t s = slot_;
     unbind();
     HRESULT hr = own_->Close();
     if (SUCCEEDED(hr)) {
         ID3D12CommandList* l = own_;
         q_->ExecuteCommandLists(1, &l);
         hr = q_->Signal(fence_, ++fv_);
+        slots_[s].own_fv = fv_;
         if (SUCCEEDED(hr)) wait_own();
     }
     own_m_.unlock();
@@ -292,20 +382,192 @@ void D3dDevice::submit_own() {
     check(dev_->GetDeviceRemovedReason(), "the D3D12 device was removed");
 }
 
-void D3dDevice::bury(IUnknown* u) {
-    if (u) grave_.push_back({binds_ + kSlots + 2, u});
+bool D3dDevice::slot_retired(SlotState& s, uint32_t) {
+    if (!s.serial) return true;
+    if (dev_ && FAILED(dev_->GetDeviceRemovedReason())) return true;
+    if (s.own) return s.own_fv != 0 && fence_ && fence_->GetCompletedValue() >= s.own_fv;
+    if (allocator_retired(s.alloc, s.alloc_epoch))
+        return true;
+    if (binds_ - s.serial >= kGameSlots + kOverflowDescSlots && !s.warned) {
+        s.warned = true;
+        OutputDebugStringA("[openrr] warning: D3D12 slot awaiting retirement proof past 127 recordings\n");
+    }
+    return false;
 }
 
-void D3dDevice::bind(ID3D12GraphicsCommandList* cl, uint32_t slot) {
-    ++binds_;
-    std::erase_if(grave_, [&](auto& g) { return g.first <= binds_ && (g.second->Release(), true); });
+bool D3dDevice::overflow_retired(OverflowUpload& o) {
+    if (!o.serial) return true;
+    if (dev_ && FAILED(dev_->GetDeviceRemovedReason())) return true;
+    if (allocator_retired(o.alloc, o.alloc_epoch))
+        return true;
+    if (binds_ - o.serial >= kGameSlots + kOverflowDescSlots && !o.warned) {
+        o.warned = true;
+        OutputDebugStringA("[openrr] warning: D3D12 overflow slot awaiting retirement proof past 127 recordings\n");
+    }
+    return false;
+}
+
+bool D3dDevice::serial_retired(uint64_t serial) {
+    if (!serial || serial == current_serial_) return !serial;
+    for (uint32_t i = 0; i < kSlots; ++i)
+        if (slots_[i].serial == serial) return slot_retired(slots_[i], i);
+    for (auto& o : overflow_)
+        if (o.serial == serial) return overflow_retired(o);
+    return true;
+}
+
+void D3dDevice::reap(bool all) {
+    if (all) {
+        for (auto& s : slots_) s.serial = 0;
+        for (auto& o : overflow_) {
+            if (o.qrb && o.done) o.qrb->Unmap(0, nullptr);
+            if (o.qrb) o.qrb->Release();
+            if (o.qh) o.qh->Release();
+            if (o.ring && o.map) o.ring->Unmap(0, nullptr);
+            if (o.ring) o.ring->Release();
+        }
+        overflow_.clear();
+        for (auto& g : grave_)
+            if (g.obj) g.obj->Release();
+        grave_.clear();
+        return;
+    }
+    for (uint32_t i = 0; i < kSlots; ++i)
+        if (slots_[i].serial && slots_[i].serial != current_serial_ && slot_retired(slots_[i], i))
+            slots_[i].serial = 0;
+    for (auto& o : overflow_) {
+        if (o.serial && o.serial != current_serial_ && overflow_retired(o)) {
+            o.serial = 0;
+            o.has_query = false;
+            o.alloc = nullptr;
+            o.alloc_epoch = 0;
+            o.warned = false;
+            if (o.done) *o.done = 0;
+        }
+    }
+    size_t keep = 0;
+    for (auto& g : grave_) {
+        std::erase_if(g.wait_serials, [&](uint64_t s) { return serial_retired(s); });
+        if (!g.wait_serials.empty()) {
+            grave_[keep++] = std::move(g);
+            continue;
+        }
+        if (g.obj) g.obj->Release();
+    }
+    grave_.resize(keep);
+}
+
+bool D3dDevice::all_retired() {
+    reap(false);
+    for (uint32_t i = 0; i < kSlots; ++i)
+        if (slots_[i].serial && !slot_retired(slots_[i], i)) return false;
+    for (auto& o : overflow_)
+        if (o.serial && !overflow_retired(o)) return false;
+    return grave_.empty();
+}
+
+void D3dDevice::bury(IUnknown* u) {
+    if (!u) return;
+    reap(false);
+    Grave g;
+    g.obj = u;
+    for (uint32_t i = 0; i < kSlots; ++i)
+        if (slots_[i].serial && !slot_retired(slots_[i], i)) g.wait_serials.push_back(slots_[i].serial);
+    for (auto& o : overflow_)
+        if (o.serial && !overflow_retired(o)) g.wait_serials.push_back(o.serial);
+    if (current_serial_) g.wait_serials.push_back(current_serial_);
+    if (g.wait_serials.empty()) {
+        u->Release();
+        return;
+    }
+    grave_.push_back(std::move(g));
+}
+
+uint64_t D3dDevice::bind(ID3D12GraphicsCommandList* cl, uint32_t slot) {
+    current_serial_ = ++binds_;
+    reap(false);
     cl_ = cl;
-    slot_ = slot % kSlots;
+    uint32_t picked = (cl == own_) ? kOwnSlot : (slot % kGameSlots);
+    bool found = cl == own_ || slot_retired(slots_[picked], picked);
+    if (!found) {
+        for (uint32_t i = 0; i < kGameSlots; ++i) {
+            uint32_t cand = (picked + i) % kGameSlots;
+            if (slot_retired(slots_[cand], cand)) {
+                picked = cand;
+                found = true;
+                break;
+            }
+        }
+    }
+    slot_ = picked;
     nquery_ = 0;
     stamp_names.clear();
-    ring_off_ = uint64_t(slot_) << 16, ring_end_ = ring_off_ + (1u << 16);
+    ID3D12CommandAllocator* list_alloc = nullptr;
+    uint64_t alloc_epoch = 0;
+    if (cl != own_) query_list_allocator(cl, list_alloc, alloc_epoch);
+    if (found) {
+        using_overflow_ = false;
+        active_overflow_idx_ = UINT32_MAX;
+        desc_slot_ = slot_;
+        auto& s = slots_[slot_];
+        s = SlotState{};
+        s.serial = current_serial_;
+        s.own = (cl == own_);
+        s.alloc = list_alloc;
+        s.alloc_epoch = alloc_epoch;
+        if (done_map_) memset(const_cast<uint64_t*>(done_map_) + size_t(slot_) * kSlotQueries, 0, kSlotQueries * 8);
+        cur_ring_ = ring_;
+        cur_ring_map_ = ring_map_;
+        ring_off_ = uint64_t(slot_) << 16, ring_end_ = ring_off_ + (1u << 16);
+    } else {
+        uint32_t pool_idx = UINT32_MAX;
+        for (uint32_t i = 0; i < overflow_.size(); ++i) {
+            const uint32_t cand = (overflow_cursor_ + i) % uint32_t(overflow_.size());
+            if (!overflow_[cand].serial) {
+                pool_idx = cand;
+                overflow_cursor_ = (cand + 1) % uint32_t(overflow_.size());
+                break;
+            }
+        }
+        if (pool_idx == UINT32_MAX && overflow_.size() < kOverflowDescSlots) {
+            OverflowUpload o;
+            o.desc_slot = kSlots + uint32_t(overflow_.size());
+            o.ring = buffer(dev_, 1u << 16, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ, false);
+            check(o.ring->Map(0, nullptr, reinterpret_cast<void**>(&o.map)), "Map");
+            D3D12_QUERY_HEAP_DESC oqhd{D3D12_QUERY_HEAP_TYPE_TIMESTAMP, 1};
+            if (SUCCEEDED(dev_->CreateQueryHeap(&oqhd, IID_PPV_ARGS(&o.qh)))) {
+                o.qrb = buffer(dev_, 8, D3D12_HEAP_TYPE_READBACK, D3D12_RESOURCE_STATE_COPY_DEST, false);
+                void* dm = nullptr;
+                if (SUCCEEDED(o.qrb->Map(0, nullptr, &dm)) && dm) {
+                    *static_cast<uint64_t*>(dm) = 0;
+                    o.done = static_cast<volatile uint64_t*>(dm);
+                }
+            }
+            pool_idx = uint32_t(overflow_.size());
+            overflow_.push_back(std::move(o));
+            overflow_cursor_ = (pool_idx + 1) % uint32_t(overflow_.size());
+        }
+        if (pool_idx == UINT32_MAX) {
+            current_serial_ = 0;
+            cl_ = nullptr;
+            return 0;
+        }
+        using_overflow_ = true;
+        active_overflow_idx_ = pool_idx;
+        OverflowUpload& o = overflow_[pool_idx];
+        o.serial = current_serial_;
+        o.has_query = false;
+        o.alloc = list_alloc;
+        o.alloc_epoch = alloc_epoch;
+        o.warned = false;
+        if (o.done) *o.done = 0;
+        desc_slot_ = o.desc_slot;
+        cur_ring_ = o.ring;
+        cur_ring_map_ = o.map;
+        ring_off_ = 0, ring_end_ = (1u << 16) - 256;
+    }
     if (heap_) {
-        const uint64_t base_desc = uint64_t(slot_) * kSlotStride * 32;
+        const uint64_t base_desc = uint64_t(desc_slot_) * kSlotStride * 32;
         desc_lo_ = uint32_t(heap_gpu_ + base_desc);
         table_lo_ = desc_lo_ + kSlotViews * 32;
         memcpy(reinterpret_cast<uint8_t*>(heap_cpu_ + base_desc + kSlotViews * 32), tex_table_, sizeof(tex_table_));
@@ -314,39 +576,65 @@ void D3dDevice::bind(ID3D12GraphicsCommandList* cl, uint32_t slot) {
     }
     bound_ = nullptr;
     dirty_ = false;
+    if (heap_) cl_->SetDescriptorHeaps(1, &heap_);
     cl_->SetComputeRootSignature(rs_);
+    return current_serial_;
 }
 
 void D3dDevice::unbind() {
-    if (cl_ && nquery_) cl_->ResolveQueryData(qh_, D3D12_QUERY_TYPE_TIMESTAMP, slot_ * kSlotQueries, nquery_, qrb_, uint64_t(slot_) * kSlotQueries * 8);
+    if (cl_ && !using_overflow_) {
+        slots_[slot_].query_count = nquery_;
+        if (nquery_)
+            cl_->ResolveQueryData(qh_, D3D12_QUERY_TYPE_TIMESTAMP, slot_ * kSlotQueries, nquery_, qrb_, uint64_t(slot_) * kSlotQueries * 8);
+    } else if (cl_ && using_overflow_ && active_overflow_idx_ < overflow_.size()) {
+        auto& o = overflow_[active_overflow_idx_];
+        if (o.serial == current_serial_ && nquery_ > 0 && o.qh && o.qrb) {
+            o.has_query = true;
+            cl_->EndQuery(o.qh, D3D12_QUERY_TYPE_TIMESTAMP, 0);
+            cl_->ResolveQueryData(o.qh, D3D12_QUERY_TYPE_TIMESTAMP, 0, 1, o.qrb, 0);
+        }
+    }
+    current_serial_ = 0;
+    using_overflow_ = false;
+    active_overflow_idx_ = UINT32_MAX;
+    cur_ring_ = nullptr;
+    cur_ring_map_ = nullptr;
     cl_ = nullptr;
     bound_ = nullptr;
 }
 
 bool D3dDevice::read_stamps(uint32_t slot, std::vector<uint64_t>& ts) {
     const size_t n = ts.size();
-    if (!n || n > kSlotQueries) return false;
+    if (!n || n > kSlotQueries || !done_map_) return false;
     slot %= kSlots;
-    D3D12_RANGE r{size_t(slot) * kSlotQueries * 8, size_t(slot) * kSlotQueries * 8 + n * 8};
-    uint8_t* m = nullptr;
-    if (FAILED(qrb_->Map(0, &r, reinterpret_cast<void**>(&m)))) return false;
-    memcpy(ts.data(), m + r.Begin, n * 8);
-    bool ok = ts.front() && ts.back() && ts.back() >= ts.front();
-    memset(m + r.Begin, 0, n * 8);   // stale until the slot's next list writes it again
-    qrb_->Unmap(0, &r);
-    return ok;
+    if (!slot_retired(slots_[slot], slot)) return false;
+    const auto* m = reinterpret_cast<const uint64_t*>(const_cast<const uint64_t*>(done_map_)) + size_t(slot) * kSlotQueries;
+    memcpy(ts.data(), m, n * 8);
+    return ts.front() && ts.back() && ts.back() >= ts.front();
 }
 
 Buffer D3dDevice::create(VkDeviceSize size) {
     Buffer b;
-    ID3D12Resource* r = buffer(dev_, size, D3D12_HEAP_TYPE_DEFAULT, D3D12_RESOURCE_STATE_COMMON, true);
+    ID3D12Resource* r = buffer(dev_, size, D3D12_HEAP_TYPE_DEFAULT, D3D12_RESOURCE_STATE_COMMON, true, false);
     b.res = r;
     b.addr = r->GetGPUVirtualAddress();
     b.size = size;
+    bytes_ += size;
+    return b;
+}
+
+Buffer D3dDevice::create_unzeroed(VkDeviceSize size) {
+    Buffer b;
+    ID3D12Resource* r = buffer(dev_, size, D3D12_HEAP_TYPE_DEFAULT, D3D12_RESOURCE_STATE_COMMON, true, true);
+    b.res = r;
+    b.addr = r->GetGPUVirtualAddress();
+    b.size = size;
+    bytes_ += size;
     return b;
 }
 
 void D3dDevice::destroy(Buffer& b) {
+    if (b.res && bytes_ >= b.size) bytes_ -= b.size;
     bury(static_cast<ID3D12Resource*>(b.res));
     b = Buffer{};
 }
@@ -355,24 +643,43 @@ void D3dDevice::destroy(Buffer& b) {
 // address, which the API state does not cover. Every copy moves the buffer out of COMMON and back, after a UAV
 // barrier when a kernel may still touch it.
 void D3dDevice::staged(const Buffer& b, uint64_t off, uint64_t size, const void* data, uint32_t value, bool is_fill) {
-    if (!cl_) throw std::runtime_error("D3dDevice: recording outside bind()");
+    if (!cl_ || !cur_ring_ || !cur_ring_map_) throw std::runtime_error("D3dDevice: recording outside bind()");
     const uint64_t at = (ring_off_ + 255) & ~uint64_t(255);
     if (at + size > ring_end_) throw std::runtime_error("D3dDevice: upload ring slot full");
     if (is_fill)
-        for (uint64_t i = 0; i < size; i += 4) memcpy(ring_map_ + at + i, &value, size_t(std::min<uint64_t>(4, size - i)));
+        for (uint64_t i = 0; i < size; i += 4) memcpy(cur_ring_map_ + at + i, &value, size_t(std::min<uint64_t>(4, size - i)));
     else
-        memcpy(ring_map_ + at, data, size_t(size));
+        memcpy(cur_ring_map_ + at, data, size_t(size));
     ring_off_ = at + size;
     auto* r = static_cast<ID3D12Resource*>(b.res);
     if (dirty_) barrier();
     D3D12_RESOURCE_BARRIER t = transition(r, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST);
     cl_->ResourceBarrier(1, &t);
-    cl_->CopyBufferRegion(r, off, ring_, at, size);
-    std::swap(t.Transition.StateBefore, t.Transition.StateAfter);
+    cl_->CopyBufferRegion(r, off, cur_ring_, at, size);
+    t = transition(r, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    cl_->ResourceBarrier(1, &t);
+    t = transition(r, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COMMON);
     cl_->ResourceBarrier(1, &t);
 }
 
-void D3dDevice::fill(const Buffer& b, VkDeviceSize off, VkDeviceSize size, uint32_t value) { staged(b, off, size, nullptr, value, true); }
+void D3dDevice::fill(const Buffer& b, VkDeviceSize off, VkDeviceSize size, uint32_t value) {
+    if (!size) return;
+    const uint64_t at = (ring_off_ + 255) & ~uint64_t(255);
+    if ((!batch_ && size <= 256 && at + size <= ring_end_) || !clear_range_.pso) {
+        staged(b, off, size, nullptr, value, true);
+        return;
+    }
+    if (dirty_) barrier();
+    constexpr uint64_t kMaxChunk = 65534ull * 256 * 4;
+    for (uint64_t done = 0; done < size;) {
+        const uint64_t chunk = std::min<uint64_t>(size - done, kMaxChunk);
+        struct { uint64_t ptr; uint32_t count; uint32_t value; } pc{b.addr + off + done, uint32_t(chunk), value};
+        const uint32_t groups = uint32_t(((chunk + 3) / 4 + 1 + 255) / 256);
+        dispatch(clear_range_, &pc, sizeof pc, groups);
+        done += chunk;
+    }
+    barrier();
+}
 
 void D3dDevice::update(const Buffer& b, VkDeviceSize off, VkDeviceSize size, const void* data) { staged(b, off, size, data, 0, false); }
 
@@ -420,7 +727,46 @@ void D3dDevice::download(const Buffer& b, void* dst, VkDeviceSize size, VkDevice
     rb->Release();
 }
 
+void D3dDevice::begin_batch() {
+    if (batch_ || cl_ || !clear_range_.pso) return;
+    begin_own();
+    batch_ = true;
+    batch_dirty_ = false;
+}
+
+void D3dDevice::end_batch() {
+    if (!batch_) return;
+    batch_ = false;
+    if (!batch_dirty_) {
+        unbind();
+        own_->Close();
+        own_m_.unlock();
+        return;
+    }
+    batch_dirty_ = false;
+    submit_own();
+}
+
 void D3dDevice::fill(const Buffer& b, uint32_t value) {
+    if (!b.size) return;
+    if (cl_) {
+        if (batch_) batch_dirty_ = true;
+        fill(b, 0, b.size, value);
+        return;
+    }
+    if (clear_range_.pso) {
+        begin_own();
+        try {
+            fill(b, 0, b.size, value);
+        } catch (...) {
+            unbind();
+            own_->Close();
+            own_m_.unlock();
+            throw;
+        }
+        submit_own();
+        return;
+    }
     std::vector<uint32_t> v(size_t((b.size + 3) / 4), value);
     upload(b, v.data(), b.size);
 }
@@ -477,13 +823,15 @@ void D3dDevice::copy_buffer_to_texture(const Buffer& src, uint32_t pitch, ID3D12
 }
 
 std::vector<uint8_t> D3dDevice::elf_of(const std::string& spv_path, uint32_t subgroup) {
-    std::ifstream f(spv_path, std::ios::binary);
+    const std::filesystem::path fs_spv = u8_to_path(spv_path);
+    std::ifstream f(fs_spv, std::ios::binary);
     if (!f) throw std::runtime_error("cannot open " + spv_path);
     std::vector<char> spv((std::istreambuf_iterator<char>(f)), {});
     uint64_t key = fnv(spv.data(), spv.size(), fnv(&subgroup, 4));
     std::filesystem::path file;
+    const std::string stem = path_to_u8(fs_spv.stem());
     if (!cache_.empty()) {
-        file = std::filesystem::path(cache_) / (std::filesystem::path(spv_path).stem().string() + "-" + hex(key) + ".elf");
+        file = std::filesystem::path(cache_) / u8_to_path(stem + "-" + hex(key) + ".elf");
         std::ifstream c(file, std::ios::binary);
         std::vector<uint8_t> d((std::istreambuf_iterator<char>(c)), {});
         uint64_t h = 0;
@@ -513,12 +861,13 @@ std::vector<uint8_t> D3dDevice::elf_of(const std::string& spv_path, uint32_t sub
 }
 
 Kernel D3dDevice::load(const std::string& spv_path, uint32_t subgroup) {
+    const std::string stem = path_to_u8(u8_to_path(spv_path).stem());
     std::vector<uint8_t> elf = elf_of(spv_path, subgroup);
     std::vector<uint8_t> patched;
     try {
         patched = patch_elf(elf);
     } catch (const std::exception& x) {
-        throw std::runtime_error(std::filesystem::path(spv_path).stem().string() + ": " + x.what());
+        throw std::runtime_error(stem + ": " + x.what());
     }
     AmdElfInfo info;
     info.elf = patched.data();
@@ -526,10 +875,14 @@ Kernel D3dDevice::load(const std::string& spv_path, uint32_t subgroup) {
     elf_threads(elf, info.threads);
     Kernel k;
     k.name = spv_path;
-    k.views = std::filesystem::path(spv_path).stem().string().rfind("d3d_", 0) == 0;
+    k.views = stem.rfind("d3d_", 0) == 0;
     ID3D12PipelineState* pso = nullptr;
     check(static_cast<AmdDevice5*>(ext_)->CreateComputePipelineFromElf(&info, IID_PPV_ARGS(&pso)), "CreateComputePipelineFromElf");
     k.pso = pso;
+    if (stem == "clear_range" && !clear_range_.pso && pso) {
+        pso->AddRef();
+        clear_range_ = k;
+    }
     return k;
 }
 
@@ -575,14 +928,14 @@ void D3dDevice::srv(ID3D12Resource* r, uint32_t index, uint32_t fmt) {
     d.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
     d.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
     d.Texture2D.MipLevels = 1;
-    dev_->CreateShaderResourceView(r, &d, {size_t(heap_cpu_ + (uint64_t(slot_) * kSlotStride + index) * 32)});
+    dev_->CreateShaderResourceView(r, &d, {size_t(heap_cpu_ + (uint64_t(desc_slot_) * kSlotStride + index) * 32)});
 }
 
 void D3dDevice::uav(ID3D12Resource* r, uint32_t index, uint32_t fmt) {
     D3D12_UNORDERED_ACCESS_VIEW_DESC d{};
     d.Format = DXGI_FORMAT(fmt);
     d.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-    dev_->CreateUnorderedAccessView(r, nullptr, &d, {size_t(heap_cpu_ + (uint64_t(slot_) * kSlotStride + index) * 32)});
+    dev_->CreateUnorderedAccessView(r, nullptr, &d, {size_t(heap_cpu_ + (uint64_t(desc_slot_) * kSlotStride + index) * 32)});
 }
 
 // The descriptor of a linear w x h image at address a: from the Vulkan device of its own, over a buffer of its own.
@@ -673,7 +1026,7 @@ void D3dDevice::set_texture(uint32_t slot, const Image& i, VkSampler s) {
         throw std::runtime_error("D3dDevice::set_texture: no such image or sampler");
     memcpy(tex_table_[slot], it->second.data(), 48);
     if (cl_ && heap_)
-        memcpy(reinterpret_cast<uint8_t*>(heap_cpu_ + (uint64_t(slot_) * kSlotStride + kSlotViews) * 32 + slot * 48),
+        memcpy(reinterpret_cast<uint8_t*>(heap_cpu_ + (uint64_t(desc_slot_) * kSlotStride + kSlotViews) * 32 + slot * 48),
                it->second.data(), 48);
 }
 
@@ -685,7 +1038,31 @@ void D3dDevice::barrier() {
 }
 
 void D3dDevice::stamp() {
-    if (cl_ && nquery_ < kSlotQueries) cl_->EndQuery(qh_, D3D12_QUERY_TYPE_TIMESTAMP, slot_ * kSlotQueries + nquery_++);
+    if (!cl_) return;
+    if (!using_overflow_ && nquery_ < kSlotQueries)
+        cl_->EndQuery(qh_, D3D12_QUERY_TYPE_TIMESTAMP, slot_ * kSlotQueries + nquery_++);
+    else if (using_overflow_)
+        ++nquery_;
+}
+
+bool D3dDevice::vram(uint64_t& used, uint64_t& budget) const {
+    if (!dev_) return false;
+    IDXGIFactory4* fac = nullptr;
+    if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&fac)))) return false;
+    IDXGIAdapter3* ad3 = nullptr;
+    LUID luid = dev_->GetAdapterLuid();
+    bool ok = false;
+    if (SUCCEEDED(fac->EnumAdapterByLuid(luid, IID_PPV_ARGS(&ad3)))) {
+        DXGI_QUERY_VIDEO_MEMORY_INFO info{};
+        if (SUCCEEDED(ad3->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &info))) {
+            used = info.CurrentUsage;
+            budget = info.Budget;
+            ok = true;
+        }
+        ad3->Release();
+    }
+    fac->Release();
+    return ok;
 }
 
 }  // namespace onr

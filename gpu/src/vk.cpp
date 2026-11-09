@@ -2,15 +2,286 @@
 #include "opennr_rr/vk.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <mutex>
 #include <stdexcept>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 namespace onr {
+
+std::filesystem::path u8_to_path(const std::string& s) {
+#ifdef _WIN32
+    std::wstring w;
+    const auto* p = reinterpret_cast<const unsigned char*>(s.data());
+    const auto* end = p + s.size();
+    while (p < end) {
+        unsigned c = *p, n = 0;
+        if (c < 0x80) n = 0;
+        else if ((c & 0xE0) == 0xC0) { c &= 0x1F; n = 1; }
+        else if ((c & 0xF0) == 0xE0) { c &= 0x0F; n = 2; }
+        else if ((c & 0xF8) == 0xF0) { c &= 0x07; n = 3; }
+        else { w.push_back(wchar_t(0xFFFD)); ++p; continue; }
+        if (p + n >= end) { w.push_back(wchar_t(0xFFFD)); break; }
+        unsigned k = 1;
+        for (; k <= n; ++k) {
+            if ((p[k] & 0xC0) != 0x80) break;
+            c = (c << 6) | (p[k] & 0x3F);
+        }
+        if (k <= n) { w.push_back(wchar_t(0xFFFD)); p += k; continue; }
+        p += n + 1;
+        if (c >= 0x10000) {
+            c -= 0x10000;
+            w.push_back(wchar_t(0xD800 + (c >> 10)));
+            w.push_back(wchar_t(0xDC00 + (c & 0x3FF)));
+        } else {
+            w.push_back(wchar_t(c));
+        }
+    }
+    return std::filesystem::path(w);
+#else
+    return std::filesystem::path(s);
+#endif
+}
+
+std::string path_to_u8(const std::filesystem::path& p) {
+#ifdef _WIN32
+    const std::wstring w = p.wstring();
+    std::string s;
+    for (size_t i = 0; i < w.size(); ++i) {
+        unsigned c = unsigned(w[i]);
+        if (c >= 0xD800 && c < 0xDC00 && i + 1 < w.size() && unsigned(w[i + 1]) >= 0xDC00 && unsigned(w[i + 1]) < 0xE000) {
+            c = 0x10000 + ((c - 0xD800) << 10) + (unsigned(w[i + 1]) - 0xDC00);
+            ++i;
+        }
+        if (c < 0x80) s.push_back(char(c));
+        else if (c < 0x800) {
+            s.push_back(char(0xC0 | (c >> 6)));
+            s.push_back(char(0x80 | (c & 0x3F)));
+        } else if (c < 0x10000) {
+            s.push_back(char(0xE0 | (c >> 12)));
+            s.push_back(char(0x80 | ((c >> 6) & 0x3F)));
+            s.push_back(char(0x80 | (c & 0x3F)));
+        } else {
+            s.push_back(char(0xF0 | (c >> 18)));
+            s.push_back(char(0x80 | ((c >> 12) & 0x3F)));
+            s.push_back(char(0x80 | ((c >> 6) & 0x3F)));
+            s.push_back(char(0x80 | (c & 0x3F)));
+        }
+    }
+    return s;
+#else
+    return p.string();
+#endif
+}
+
+namespace {
+struct VkCmdTrack {
+    VkDevice dev = VK_NULL_HANDLE;
+    VkCommandPool pool = VK_NULL_HANDLE;
+    uint64_t cmd_epoch = 0;
+    bool freed = false;
+};
+struct VkPoolTrack {
+    VkDevice dev = VK_NULL_HANDLE;
+    uint64_t pool_epoch = 0;
+    bool destroyed = false;
+};
+
+std::mutex g_vk_track_m;
+std::atomic<uint64_t> g_vk_next_epoch{1};
+std::unordered_map<VkCommandBuffer, VkCmdTrack> g_cmd_track;
+std::unordered_map<VkCommandPool, VkPoolTrack> g_pool_track;
+std::unordered_set<VkDevice> g_destroyed_vk_devices;
+
+void bind_vk_cmd_epoch(VkDevice dev, VkCommandBuffer cmd, uint64_t& out_cmd_epoch, VkCommandPool& out_pool, uint64_t& out_pool_epoch) {
+    out_cmd_epoch = 0;
+    out_pool = VK_NULL_HANDLE;
+    out_pool_epoch = 0;
+    if (!cmd) return;
+    std::lock_guard<std::mutex> lock(g_vk_track_m);
+    auto it = g_cmd_track.find(cmd);
+    if (it == g_cmd_track.end() || it->second.freed || it->second.cmd_epoch == 0) {
+        const uint64_t ce = g_vk_next_epoch.fetch_add(1, std::memory_order_relaxed);
+        g_cmd_track[cmd] = VkCmdTrack{dev, VK_NULL_HANDLE, ce, false};
+        out_cmd_epoch = ce;
+        return;
+    }
+    out_cmd_epoch = it->second.cmd_epoch;
+    if (it->second.pool) {
+        auto pit = g_pool_track.find(it->second.pool);
+        if (pit != g_pool_track.end() && !pit->second.destroyed && pit->second.pool_epoch != 0) {
+            out_pool = it->second.pool;
+            out_pool_epoch = pit->second.pool_epoch;
+        }
+    }
+}
+
+bool vk_cmd_retired(VkCommandBuffer cmd, uint64_t rec_cmd_epoch, VkCommandPool pool, uint64_t rec_pool_epoch) {
+    if (!cmd || rec_cmd_epoch == 0) return false;
+    std::lock_guard<std::mutex> lock(g_vk_track_m);
+    auto it = g_cmd_track.find(cmd);
+    if (it != g_cmd_track.end() && it->second.cmd_epoch > rec_cmd_epoch)
+        return true;
+    if (pool && rec_pool_epoch != 0) {
+        auto pit = g_pool_track.find(pool);
+        if (pit != g_pool_track.end() && pit->second.pool_epoch > rec_pool_epoch)
+            return true;
+    }
+    return false;
+}
+}  // namespace
+
+void vk_note_command_buffers_allocated(VkDevice dev, VkCommandPool pool, uint32_t count, const VkCommandBuffer* cmds) {
+    if (!cmds || !count) return;
+    std::lock_guard<std::mutex> lock(g_vk_track_m);
+    if (dev) g_destroyed_vk_devices.erase(dev);
+    if (pool) {
+        auto pit = g_pool_track.find(pool);
+        if (pit == g_pool_track.end() || pit->second.destroyed || pit->second.pool_epoch == 0)
+            g_pool_track[pool] = VkPoolTrack{dev, g_vk_next_epoch.fetch_add(1, std::memory_order_relaxed), false};
+    }
+    for (uint32_t i = 0; i < count; ++i) {
+        if (!cmds[i]) continue;
+        g_cmd_track[cmds[i]] = VkCmdTrack{dev, pool, g_vk_next_epoch.fetch_add(1, std::memory_order_relaxed), false};
+    }
+}
+
+void vk_note_command_buffer_reset(VkCommandBuffer cmd) {
+    if (!cmd) return;
+    std::lock_guard<std::mutex> lock(g_vk_track_m);
+    auto it = g_cmd_track.find(cmd);
+    if (it != g_cmd_track.end()) {
+        it->second.cmd_epoch = g_vk_next_epoch.fetch_add(1, std::memory_order_relaxed);
+        it->second.freed = false;
+    } else {
+        g_cmd_track[cmd] = VkCmdTrack{VK_NULL_HANDLE, VK_NULL_HANDLE, g_vk_next_epoch.fetch_add(1, std::memory_order_relaxed), false};
+    }
+}
+
+void vk_note_command_buffers_freed(VkDevice dev, VkCommandPool pool, uint32_t count, const VkCommandBuffer* cmds) {
+    if (!cmds || !count) return;
+    std::lock_guard<std::mutex> lock(g_vk_track_m);
+    for (uint32_t i = 0; i < count; ++i) {
+        if (!cmds[i]) continue;
+        auto it = g_cmd_track.find(cmds[i]);
+        if (it != g_cmd_track.end()) {
+            it->second.cmd_epoch = g_vk_next_epoch.fetch_add(1, std::memory_order_relaxed);
+            it->second.freed = true;
+        } else {
+            g_cmd_track[cmds[i]] = VkCmdTrack{dev, pool, g_vk_next_epoch.fetch_add(1, std::memory_order_relaxed), true};
+        }
+    }
+}
+
+void vk_note_command_pool_reset(VkDevice dev, VkCommandPool pool) {
+    if (!pool) return;
+    std::lock_guard<std::mutex> lock(g_vk_track_m);
+    g_pool_track[pool] = VkPoolTrack{dev, g_vk_next_epoch.fetch_add(1, std::memory_order_relaxed), false};
+    for (auto& kv : g_cmd_track) {
+        if (kv.second.pool == pool)
+            kv.second.cmd_epoch = g_vk_next_epoch.fetch_add(1, std::memory_order_relaxed);
+    }
+}
+
+void vk_note_command_pool_destroyed(VkDevice dev, VkCommandPool pool) {
+    if (!pool) return;
+    std::lock_guard<std::mutex> lock(g_vk_track_m);
+    g_pool_track[pool] = VkPoolTrack{dev, g_vk_next_epoch.fetch_add(1, std::memory_order_relaxed), true};
+    for (auto& kv : g_cmd_track) {
+        if (kv.second.pool == pool) {
+            kv.second.cmd_epoch = g_vk_next_epoch.fetch_add(1, std::memory_order_relaxed);
+            kv.second.freed = true;
+        }
+    }
+}
+
+void vk_note_device_destroyed(VkDevice dev) {
+    if (!dev) return;
+    std::lock_guard<std::mutex> lock(g_vk_track_m);
+    g_destroyed_vk_devices.insert(dev);
+    std::erase_if(g_cmd_track, [&](const auto& kv) { return kv.second.dev == dev; });
+    std::erase_if(g_pool_track, [&](const auto& kv) { return kv.second.dev == dev; });
+}
+
+bool vk_device_is_destroyed(VkDevice dev) {
+    if (!dev) return true;
+    std::lock_guard<std::mutex> lock(g_vk_track_m);
+    return g_destroyed_vk_devices.count(dev) != 0;
+}
+
+VkPhysicalDevice pick_vk_physical_device(const std::vector<VkPhysicalDevice>& devs, const uint8_t* luid,
+                                         std::string* out_name, uint32_t* out_api_version, bool* out_is_amd) {
+    if (out_name) out_name->clear();
+    if (out_api_version) *out_api_version = 0;
+    if (out_is_amd) *out_is_amd = false;
+    if (devs.empty()) return VK_NULL_HANDLE;
+
+    struct Cand {
+        VkPhysicalDevice pd = VK_NULL_HANDLE;
+        std::string name;
+        uint32_t api_version = 0;
+        VkPhysicalDeviceType type = VK_PHYSICAL_DEVICE_TYPE_OTHER;
+        bool luid_match = false;
+        bool is_amd = false;
+        bool has_f8_cm = false;
+    };
+    std::vector<Cand> cands;
+    cands.reserve(devs.size());
+    for (VkPhysicalDevice pd : devs) {
+        VkPhysicalDeviceDriverProperties drv{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
+        VkPhysicalDeviceIDProperties id{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES, &drv};
+        VkPhysicalDeviceProperties2 p{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &id};
+        vkGetPhysicalDeviceProperties2(pd, &p);
+        const bool is_amd = (p.properties.vendorID == 0x1002) ||
+                            (drv.driverID == VK_DRIVER_ID_AMD_PROPRIETARY) ||
+                            (drv.driverID == VK_DRIVER_ID_AMD_OPEN_SOURCE) ||
+                            (drv.driverID == VK_DRIVER_ID_MESA_RADV);
+        const bool luid_match = luid && id.deviceLUIDValid && !std::memcmp(id.deviceLUID, luid, VK_LUID_SIZE);
+        uint32_t ne = 0;
+        vkEnumerateDeviceExtensionProperties(pd, nullptr, &ne, nullptr);
+        std::vector<VkExtensionProperties> exts(ne);
+        if (ne) vkEnumerateDeviceExtensionProperties(pd, nullptr, &ne, exts.data());
+        bool has_cm = false, has_f8 = false;
+        for (const auto& x : exts) {
+            if (!std::strcmp(x.extensionName, VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME)) has_cm = true;
+            else if (!std::strcmp(x.extensionName, VK_EXT_SHADER_FLOAT8_EXTENSION_NAME)) has_f8 = true;
+        }
+        cands.push_back(Cand{pd, p.properties.deviceName, p.properties.apiVersion, p.properties.deviceType,
+                             luid_match, is_amd || (has_cm && has_f8), has_cm && has_f8});
+    }
+
+    const Cand* chosen = nullptr;
+    if (luid) {
+        for (const auto& c : cands) {
+            if (c.luid_match) { chosen = &c; break; }
+        }
+    } else {
+        // 1. Discrete GPU with AMD identity/driver and RDNA4 FP8+coopmat extensions
+        for (const auto& c : cands) {
+            if (c.type == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU && c.is_amd && c.has_f8_cm) { chosen = &c; break; }
+        }
+        // 2. Discrete GPU with AMD identity/driver (e.g. RDNA3 / RDNA2 discrete GPU)
+        if (!chosen) {
+            for (const auto& c : cands) {
+                if (c.type == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU && c.is_amd) { chosen = &c; break; }
+            }
+        }
+        // 3. Fallback to first enumerated device only when no discrete candidate matched
+        if (!chosen) chosen = &cands[0];
+    }
+
+    if (!chosen) return VK_NULL_HANDLE;
+    if (out_name) *out_name = chosen->name;
+    if (out_api_version) *out_api_version = chosen->api_version;
+    if (out_is_amd) *out_is_amd = chosen->is_amd;
+    return chosen->pd;
+}
 
 static void check(VkResult r, const char* what) {
     if (r != VK_SUCCESS) {
@@ -63,7 +334,7 @@ Device::~Device() {
 bool Device::init(std::string& err, const DeviceOptions& opt) {
     try {
         VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
-        app.pApplicationName = "opennr-rr";
+        app.pApplicationName = "openrr";
         app.apiVersion = VK_API_VERSION_1_3;
         VkInstanceCreateInfo ici{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
         ici.pApplicationInfo = &app;
@@ -73,17 +344,7 @@ bool Device::init(std::string& err, const DeviceOptions& opt) {
         vkEnumeratePhysicalDevices(inst_, &n, nullptr);
         std::vector<VkPhysicalDevice> devs(n);
         vkEnumeratePhysicalDevices(inst_, &n, devs.data());
-        for (auto d : devs) {
-            VkPhysicalDeviceIDProperties id{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES};
-            VkPhysicalDeviceProperties2 p{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &id};
-            vkGetPhysicalDeviceProperties2(d, &p);
-            if (opt.luid ? id.deviceLUIDValid && !memcmp(id.deviceLUID, opt.luid, VK_LUID_SIZE)
-                         : p.properties.vendorID == 0x1002 && p.properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
-                phys_ = d;
-                break;
-            }
-        }
-        if (!phys_ && n && !opt.luid) phys_ = devs[0];
+        phys_ = pick_vk_physical_device(devs, opt.luid);
         if (!phys_) throw std::runtime_error(opt.luid ? "no Vulkan device with the adapter's LUID" : "no Vulkan device");
 
         VkPhysicalDeviceDriverProperties drv{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
@@ -147,6 +408,7 @@ bool Device::init(std::string& err, const DeviceOptions& opt) {
         info_.fp8_coopmat = has_f8 && f8.shaderFloat8 && f8.shaderFloat8CooperativeMatrix;
         info_.fp64 = f2.features.shaderFloat64;
         info_.int64_atomics = v12.shaderBufferInt64Atomics;
+        host_query_reset_ = v12.hostQueryReset != VK_FALSE;
         if (!v12.bufferDeviceAddress || !v12.shaderFloat16 || !v11.storageBuffer16BitAccess || !f2.features.shaderInt64)
             throw std::runtime_error("device lacks bufferDeviceAddress / float16 / 16-bit storage / int64");
         if (opt.interop && !v12.timelineSemaphore) throw std::runtime_error("device lacks timeline semaphores");
@@ -270,11 +532,15 @@ bool Device::adopt(const HostDevice& h, std::string& err) {
         // the host enabled these through PrepareVkDevice, which asked the GPU the same
         VkPhysicalDeviceShaderFloat8FeaturesEXT f8{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT8_FEATURES_EXT};
         VkPhysicalDeviceCooperativeMatrixFeaturesKHR cm{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR, &f8};
-        VkPhysicalDeviceFeatures2 f2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &cm};
+        VkPhysicalDeviceVulkan12Features v12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, &cm};
+        VkPhysicalDeviceFeatures2 f2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &v12};
         vkGetPhysicalDeviceFeatures2(phys_, &f2);
         info_.coopmat = cm.cooperativeMatrix;
         info_.fp8_coopmat = f8.shaderFloat8 && f8.shaderFloat8CooperativeMatrix;
         info_.fp64 = f2.features.shaderFloat64;
+        host_query_reset_ = v12.hostQueryReset != VK_FALSE;
+        if (!host_query_reset_)
+            throw std::runtime_error("the host's device lacks hostQueryReset");
         uint32_t nq = 0;
         vkGetPhysicalDeviceQueueFamilyProperties(phys_, &nq, nullptr);
         for (uint32_t i = 0; i < nq; ++i) families_.push_back(i);
@@ -291,18 +557,43 @@ bool Device::adopt(const HostDevice& h, std::string& err) {
 }
 
 void Device::bury(const Grave& g) {
-    grave_.push_back(g);
-    grave_.back().at = binds_;
+    Grave item = g;
+    for (const auto& q : active_queries_) item.wait_serials.push_back(q.serial);
+    if (current_serial_) item.wait_serials.push_back(current_serial_);
+    grave_.push_back(std::move(item));
+    sweep(false);
 }
 
 void Device::sweep(bool all) {
+    if (!all && dev_) {
+        const bool dev_gone = vk_device_is_destroyed(dev_);
+        std::erase_if(active_queries_, [&](QueryProof& q) {
+            if (q.serial == current_serial_) return false;
+            if (dev_gone) return true;
+            if (vk_cmd_retired(q.cmd, q.cmd_epoch, q.cmd_pool, q.pool_epoch)) return true;
+            if (binds_ - q.serial >= kViewSlots && !q.warned) {
+                q.warned = true;
+            }
+            return false;
+        });
+    } else if (all) {
+        active_queries_.clear();
+    }
     size_t keep = 0;
     for (auto& g : grave_) {
-        if (!all && g.at + kGraveBinds > binds_) {
-            grave_[keep++] = g;
-            continue;
+        if (!all) {
+            std::erase_if(g.wait_serials, [&](uint64_t s) {
+                if (s == current_serial_) return false;
+                return std::none_of(active_queries_.begin(), active_queries_.end(), [&](const QueryProof& q) { return q.serial == s; });
+            });
+            if (!g.wait_serials.empty()) {
+                grave_[keep++] = std::move(g);
+                continue;
+            }
         }
         if (g.set) vkFreeDescriptorSets(dev_, dpool_, 1, &g.set);
+        if (g.vset) vkFreeDescriptorSets(dev_, vpool_, 1, &g.vset);
+        if (g.qpool) vkDestroyQueryPool(dev_, g.qpool, nullptr);
         if (g.view) vkDestroyImageView(dev_, g.view, nullptr);
         if (g.img) vkDestroyImage(dev_, g.img, nullptr);
         if (g.buf) vkDestroyBuffer(dev_, g.buf, nullptr);
@@ -311,6 +602,17 @@ void Device::sweep(bool all) {
         if (g.module) vkDestroyShaderModule(dev_, g.module, nullptr);
     }
     grave_.resize(keep);
+}
+
+bool Device::pool_retired(VkQueryPool q) {
+    if (!q) return true;
+    sweep(false);
+    return std::none_of(active_queries_.begin(), active_queries_.end(), [&](const QueryProof& p) { return p.pool == q; });
+}
+
+bool Device::all_retired() {
+    sweep(false);
+    return grave_.empty() && active_queries_.empty();
 }
 
 bool Device::vram(uint64_t& used, uint64_t& budget) const {
@@ -417,7 +719,34 @@ void Device::download(const Buffer& b, void* dst, VkDeviceSize size, VkDeviceSiz
     }
 }
 
+void Device::begin_batch() {
+    if (batch_ || current_serial_ != 0 || (own_cmd_ != VK_NULL_HANDLE && cmd_ != own_cmd_)) return;
+    batch_ = true;
+    batch_dirty_ = false;
+    vkResetCommandBuffer(cmd_, 0);
+    VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    vkBeginCommandBuffer(cmd_, &bi);
+}
+
+void Device::end_batch() {
+    if (!batch_) return;
+    batch_ = false;
+    vkEndCommandBuffer(cmd_);
+    if (batch_dirty_) submit_wait(dev_, queue_, cmd_, fence_);
+    batch_dirty_ = false;
+}
+
 void Device::fill(const Buffer& b, uint32_t value) {
+    if (current_serial_ != 0 || (own_cmd_ != VK_NULL_HANDLE && cmd_ != own_cmd_)) {
+        fill(b, 0, VK_WHOLE_SIZE, value);
+        barrier_wide();
+        return;
+    }
+    if (batch_) {
+        vkCmdFillBuffer(cmd_, b.buf, 0, VK_WHOLE_SIZE, value);
+        batch_dirty_ = true;
+        return;
+    }
     vkResetCommandBuffer(cmd_, 0);
     VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     vkBeginCommandBuffer(cmd_, &bi);
@@ -427,7 +756,8 @@ void Device::fill(const Buffer& b, uint32_t value) {
 }
 
 Kernel Device::load(const std::string& path, uint32_t subgroup) {
-    std::ifstream f(path, std::ios::binary);
+    const std::filesystem::path fs_path = u8_to_path(path);
+    std::ifstream f(fs_path, std::ios::binary);
     if (!f) throw std::runtime_error("cannot open " + path);
     std::vector<char> code((std::istreambuf_iterator<char>(f)), {});
     Kernel k;
@@ -447,7 +777,8 @@ Kernel Device::load(const std::string& path, uint32_t subgroup) {
         cpi.stage.pNext = &rss;
         cpi.stage.flags = VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT;
     }
-    k.views = std::filesystem::path(path).stem().string().rfind("d3d_", 0) == 0;
+    const std::string stem = path_to_u8(fs_path.stem());
+    k.views = stem.rfind("d3d_", 0) == 0;
     cpi.layout = k.views ? d3d_layout_ : layout_;
     if (stats_) cpi.flags |= VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR;
     const char* isa = stats_ ? getenv("ONR_ISA") : nullptr;   // directory: dump the driver's internal representations
@@ -464,9 +795,8 @@ Kernel Device::load(const std::string& path, uint32_t subgroup) {
             std::vector<std::vector<char>> data(n);
             for (uint32_t i = 0; i < n; ++i) data[i].resize(rs[i].dataSize), rs[i].pData = data[i].data();
             ir(dev_, &ei, &n, rs.data());
-            std::string stem = std::filesystem::path(path).stem().string();
             for (uint32_t i = 0; i < n; ++i) {
-                std::ofstream o(std::string(isa) + "/" + stem + "." + std::to_string(i) + ".txt", std::ios::binary);
+                std::ofstream o(u8_to_path(isa) / u8_to_path(stem + "." + std::to_string(i) + ".txt"), std::ios::binary);
                 o << rs[i].name << '\n' << rs[i].description << '\n';
                 o.write(data[i].data(), std::streamsize(data[i].size()));
             }
@@ -477,7 +807,8 @@ Kernel Device::load(const std::string& path, uint32_t subgroup) {
 
 std::vector<uint8_t> Device::pipeline_elf(const std::string& path, uint32_t subgroup) {
     if (!stats_) return {};
-    std::ifstream f(path, std::ios::binary);
+    const std::filesystem::path fs_path = u8_to_path(path);
+    std::ifstream f(fs_path, std::ios::binary);
     if (!f) throw std::runtime_error("cannot open " + path);
     std::vector<char> code((std::istreambuf_iterator<char>(f)), {});
     VkShaderModule mod = VK_NULL_HANDLE;
@@ -496,7 +827,7 @@ std::vector<uint8_t> Device::pipeline_elf(const std::string& path, uint32_t subg
         cpi.stage.pNext = &rss;
         cpi.stage.flags = VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT;
     }
-    cpi.layout = std::filesystem::path(path).stem().string().rfind("d3d_", 0) == 0 ? d3d_layout_ : layout_;
+    cpi.layout = path_to_u8(fs_path.stem()).rfind("d3d_", 0) == 0 ? d3d_layout_ : layout_;
     cpi.flags = VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR | VK_PIPELINE_CREATE_CAPTURE_INTERNAL_REPRESENTATIONS_BIT_KHR;
     VkPipeline pipe = VK_NULL_HANDLE;
     VkResult r = vkCreateComputePipelines(dev_, VK_NULL_HANDLE, 1, &cpi, nullptr, &pipe);
@@ -746,14 +1077,28 @@ void Device::set_texture(uint32_t slot, const Image& i, VkSampler s) {
 }
 
 void Device::use_views(uint32_t slot) {
-    slot %= kViewSlots;
     if (!vpool_) {
-        VkDescriptorPoolSize ps[2] = {{VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 16 * kViewSlots}, {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2 * kViewSlots}};
+        VkDescriptorPoolSize ps[2] = {{VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 16 * kViewSlots * 2},
+                                      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2 * kViewSlots * 2}};
         VkDescriptorPoolCreateInfo dpi{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
-        dpi.maxSets = kViewSlots;
+        dpi.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+        dpi.maxSets = kViewSlots * 2;
         dpi.poolSizeCount = 2;
         dpi.pPoolSizes = ps;
         check(vkCreateDescriptorPool(dev_, &dpi, nullptr, &vpool_), "vkCreateDescriptorPool");
+    }
+    if (slot >= kViewSlots) {
+        VkDescriptorSet fresh = VK_NULL_HANDLE;
+        VkDescriptorSetAllocateInfo dai{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+        dai.descriptorPool = vpool_;
+        dai.descriptorSetCount = 1;
+        dai.pSetLayouts = &d3d_set_layout_;
+        check(vkAllocateDescriptorSets(dev_, &dai, &fresh), "vkAllocateDescriptorSets");
+        Grave g;
+        g.vset = fresh;
+        bury(g);
+        views_ = fresh;
+        return;
     }
     if (!vsets_[slot]) {
         VkDescriptorSetAllocateInfo dai{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
@@ -798,6 +1143,7 @@ void Device::begin() {
 
 void Device::dispatch(const Kernel& k, const void* push, uint32_t push_size, uint32_t gx, uint32_t gy, uint32_t gz) {
     set_bound_ = true;
+    if (transfer_) barrier_wide();
     VkPipelineLayout lay = k.views ? d3d_layout_ : layout_;
     vkCmdBindPipeline(cmd_, VK_PIPELINE_BIND_POINT_COMPUTE, k.pipe);
     vkCmdBindDescriptorSets(cmd_, VK_PIPELINE_BIND_POINT_COMPUTE, lay, 0, 1, k.views ? &views_ : &set_, 0, nullptr);
@@ -836,10 +1182,27 @@ void Device::update(const Buffer& b, VkDeviceSize off, VkDeviceSize size, const 
 }
 
 void Device::bind(VkCommandBuffer c, VkQueryPool q) {
-    ++binds_;
+    current_serial_ = ++binds_;
     if (hosted_) sweep(false);
     own_cmd_ = cmd_, own_qpool_ = qpool_;
+    bound_cmd_epoch_ = 0;
+    bound_cmd_pool_ = VK_NULL_HANDLE;
+    bound_pool_epoch_ = 0;
+    if (hosted_) bind_vk_cmd_epoch(dev_, c, bound_cmd_epoch_, bound_cmd_pool_, bound_pool_epoch_);
+    if (hosted_ && (!q || !pool_retired(q))) {
+        VkQueryPoolCreateInfo qi{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+        qi.queryType = VK_QUERY_TYPE_TIMESTAMP;
+        qi.queryCount = kMaxQueries;
+        VkQueryPool fresh = VK_NULL_HANDLE;
+        check(vkCreateQueryPool(dev_, &qi, nullptr, &fresh), "vkCreateQueryPool");
+        Grave g;
+        g.qpool = fresh;
+        bury(g);
+        q = fresh;
+    }
     cmd_ = c, qpool_ = q;
+    if (hosted_ && host_query_reset_)
+        vkResetQueryPool(dev_, qpool_, 0, kMaxQueries);
     vkCmdResetQueryPool(cmd_, qpool_, 0, kMaxQueries);
     nquery_ = 0;
 }
@@ -849,7 +1212,16 @@ void Device::stamp() {
 }
 
 void Device::unbind() {
+    if (hosted_) {
+        const VkQueryPool qp = (qpool_ && qpool_ != own_qpool_) ? qpool_ : VK_NULL_HANDLE;
+        active_queries_.push_back({qp, nquery_ ? nquery_ - 1 : 0, current_serial_, cmd_, bound_cmd_epoch_, bound_cmd_pool_, bound_pool_epoch_, nquery_ > 0 && qp != VK_NULL_HANDLE, false});
+    }
+    current_serial_ = 0;
     cmd_ = own_cmd_, qpool_ = own_qpool_;
+    own_cmd_ = VK_NULL_HANDLE, own_qpool_ = VK_NULL_HANDLE;
+    bound_cmd_epoch_ = 0;
+    bound_cmd_pool_ = VK_NULL_HANDLE;
+    bound_pool_epoch_ = 0;
 }
 
 // between kernels: compute to compute only (a wider destination also syncs the command processor); after a fill or

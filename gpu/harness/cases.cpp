@@ -48,6 +48,26 @@ int run_clear(Ctx& c, const CaseFile& cf) {
             c.dev.destroy(b);
         }
     }
+    // Verify bound and unbound Gpu::fill (> 64 KB ring) zeroes a 0xFFFFFFFF-filled buffer (Item #2).
+    {
+        constexpr size_t kLargeBytes = 256 * 1024;
+        Buffer b = c.dev.create(kLargeBytes);
+        c.dev.fill(b, 0xFFFFFFFFu);
+        c.dev.fill(b, 0u);
+        auto v0 = fetch<uint32_t>(c, b, kLargeBytes / 4);
+        size_t wrong_unbound = 0;
+        for (uint32_t x : v0) wrong_unbound += (x != 0u);
+        c.dev.fill(b, 0xFFFFFFFFu);
+        c.dev.begin();
+        c.dev.fill(b, 0, kLargeBytes, 0u);
+        c.dev.submit();
+        auto v1 = fetch<uint32_t>(c, b, kLargeBytes / 4);
+        size_t wrong_bound = 0;
+        for (uint32_t x : v1) wrong_bound += (x != 0u);
+        printf("  fill 256 KB (0xFFFFFFFF -> 0): unbound wrong=%zu, bound wrong=%zu\n", wrong_unbound, wrong_bound);
+        bad += (wrong_unbound != 0) + (wrong_bound != 0);
+        c.dev.destroy(b);
+    }
     return bad != 0;
 }
 

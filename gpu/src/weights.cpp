@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 #include "opennr_rr/weights.hpp"
 
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <windows.h>
 #include <bcrypt.h>
 #include <immintrin.h>
@@ -10,12 +12,15 @@
 #include <array>
 #include <cmath>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <map>
 #include <stdexcept>
 #include <string>
 
+#ifdef _MSC_VER
 #pragma comment(lib, "bcrypt.lib")
+#endif
 
 namespace onr {
 
@@ -179,7 +184,7 @@ uint16_t f2h(float f) { return uint16_t(_mm_cvtsi128_si32(_mm_cvtps_ph(_mm_set_s
 
 bool build_weights(const std::wstring& path, Weights& w, std::string& err) {
     try {
-        std::ifstream f(path, std::ios::binary);
+        std::ifstream f(std::filesystem::path(path), std::ios::binary);
         if (!f) throw std::runtime_error("cannot read the file");
         std::vector<uint8_t> d((std::istreambuf_iterator<char>(f)), {});
         w.version = pe_version(d);

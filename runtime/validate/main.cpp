@@ -26,6 +26,7 @@
 #include <cstdio>
 #include <cctype>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <stdexcept>
 #include <string>
@@ -41,7 +42,7 @@ void hr_check(HRESULT hr, const char* what) {
 }
 
 std::vector<uint8_t> read_file(const std::wstring& p) {
-    std::ifstream f(p, std::ios::binary);
+    std::ifstream f(std::filesystem::path(p), std::ios::binary);
     if (!f) throw std::runtime_error("cannot read a scene file");
     return std::vector<uint8_t>((std::istreambuf_iterator<char>(f)), {});
 }
@@ -144,6 +145,16 @@ int wmain(int argc, wchar_t** argv) {
             if (get(ONR_RR_ABI_VERSION_3, &a2.v1)) throw std::runtime_error("OnrRrGetApi");
         }
         OnrRrApi& api = a2.v1;
+        auto note_list_reset = reinterpret_cast<void (*)(void*, void*)>(GetProcAddress(dll, "OnrRrNotifyD3d12ListReset"));
+        auto note_list_released = reinterpret_cast<void (*)(void*)>(GetProcAddress(dll, "OnrRrNotifyD3d12ListReleased"));
+        auto note_alloc_reset = reinterpret_cast<void (*)(void*)>(GetProcAddress(dll, "OnrRrNotifyD3d12AllocatorReset"));
+        auto note_alloc_released = reinterpret_cast<void (*)(void*)>(GetProcAddress(dll, "OnrRrNotifyD3d12AllocatorReleased"));
+        auto reset_pair = [&](ID3D12CommandAllocator* a, ID3D12GraphicsCommandList* l) {
+            hr_check(a->Reset(), "allocator reset");
+            if (note_alloc_reset) note_alloc_reset(a);
+            hr_check(l->Reset(a, nullptr), "list reset");
+            if (note_list_reset) note_list_reset(l, a);
+        };
         const bool half = getenv("ONR_VALIDATE_HALF") != nullptr;
         const int copies = getenv("ONR_VALIDATE_COPIES") ? std::max(0, atoi(getenv("ONR_VALIDATE_COPIES"))) : 1;
 
@@ -172,6 +183,7 @@ int wmain(int argc, wchar_t** argv) {
         for (int i = 0; i < 5; ++i) {
             hr_check(dev->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&al[i])), "allocator");
             hr_check(dev->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, al[i], nullptr, IID_PPV_ARGS(&cl[i])), "list");
+            if (note_list_reset) note_list_reset(cl[i], al[i]);
             cl[i]->Close();
         }
         ID3D12Fence* fence = nullptr;
@@ -346,6 +358,7 @@ int wmain(int argc, wchar_t** argv) {
             hr_check(dev->CreateCommandQueue(&cqd, IID_PPV_ARGS(&q2)), "queue (second)");
             hr_check(dev->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&sal)), "allocator (second)");
             hr_check(dev->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_COMPUTE, sal, nullptr, IID_PPV_ARGS(&scl)), "list (second)");
+            if (note_list_reset) note_list_reset(scl, sal);
             scl->Close();
             hr_check(dev->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&sfence)), "fence (second)");
             for (int i = 0; i < 8; ++i) stex[i] = make_tex(SW, SH, gs[i].f, gs[i].bpp, gs[i].fl, SRV);
@@ -387,8 +400,7 @@ int wmain(int argc, wchar_t** argv) {
         // the host's hop, recorded: the image buffer -> texture -> buffer on the same queue (cl[2], closed)
         auto hop_lists = [&](const OnrRrDenoisedImage& im) {
             auto* buf = static_cast<ID3D12Resource*>(im.buffer);
-            al[2]->Reset();
-            cl[2]->Reset(al[2], nullptr);
+            reset_pair(al[2], cl[2]);
             auto tr = [&](ID3D12Resource* r, D3D12_RESOURCE_STATES a, D3D12_RESOURCE_STATES b2) {
                 D3D12_RESOURCE_BARRIER t{D3D12_RESOURCE_BARRIER_TYPE_TRANSITION};
                 t.Transition = {r, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, a, b2};
@@ -492,8 +504,7 @@ int wmain(int argc, wchar_t** argv) {
             api.GetInfo(sc, &si);
             if (si.state == ONR_RR_STATE_FAILED) throw std::runtime_error(std::string("second feature failed: ") + si.message);
             const int k = s_cycle & 1, sf = int(si.frames % uint32_t(nframes));
-            sal->Reset();
-            scl->Reset(sal, nullptr);
+            reset_pair(sal, scl);
             for (int i = 0; i < 8; ++i) {
                 wchar_t p[MAX_PATH];
                 swprintf_s(p, L"%s\\%s\\%04d.raw", scene.c_str(), gs[i].dir, sf);
@@ -592,8 +603,7 @@ int wmain(int argc, wchar_t** argv) {
         uint32_t main_logged = 0;
         auto run_frame = [&](int f, bool upload_guides = true) {
             // guides into the textures
-            al[0]->Reset();
-            cl[0]->Reset(al[0], nullptr);
+            reset_pair(al[0], cl[0]);
             for (int i = 0; i < 8 && upload_guides; ++i) {
                 wchar_t p[MAX_PATH];
                 swprintf_s(p, L"%s\\%s\\%04d.raw", scene.c_str(), gs[i].dir, f);
@@ -764,8 +774,7 @@ int wmain(int argc, wchar_t** argv) {
                 }
                 cl[0]->EndQuery(ph, D3D12_QUERY_TYPE_TIMESTAMP, 1);
                 cl[0]->Close();
-                al[1]->Reset();
-                cl[1]->Reset(al[1], nullptr);
+                reset_pair(al[1], cl[1]);
                 cl[1]->EndQuery(ph, D3D12_QUERY_TYPE_TIMESTAMP, 2);
                 if (job) {
                     hop_lists(im);
@@ -797,8 +806,7 @@ int wmain(int argc, wchar_t** argv) {
                         erb = make_buf(bytes, D3D12_HEAP_TYPE_READBACK), eup = make_buf(bytes, D3D12_HEAP_TYPE_UPLOAD);
                     }
                     auto copy = [&](ID3D12Resource* dst, ID3D12Resource* src) {
-                        al[2]->Reset();
-                        cl[2]->Reset(al[2], nullptr);
+                        reset_pair(al[2], cl[2]);
                         cl[2]->CopyBufferRegion(dst, 0, src, 0, bytes);
                         cl[2]->Close();
                         ID3D12CommandList* l = cl[2];
@@ -889,8 +897,7 @@ int wmain(int argc, wchar_t** argv) {
 
             }
             cl[0]->Close();
-            al[1]->Reset();
-            cl[1]->Reset(al[1], nullptr);
+            reset_pair(al[1], cl[1]);
             cl[1]->EndQuery(ph, D3D12_QUERY_TYPE_TIMESTAMP, 2);
             if (api.RecordOutput(ctx, job, cl[1])) throw std::runtime_error("RecordOutput");
             cl[1]->EndQuery(ph, D3D12_QUERY_TYPE_TIMESTAMP, 3);
@@ -911,8 +918,7 @@ int wmain(int argc, wchar_t** argv) {
             } else {
                 uint32_t exported = 0, format = 0;
                 for (int i : {3, 4}) {
-                    al[i]->Reset();
-                    cl[i]->Reset(al[i], nullptr);
+                    reset_pair(al[i], cl[i]);
                     cl[i]->EndQuery(qh, D3D12_QUERY_TYPE_TIMESTAMP, i == 3 ? 0 : 3);
                     if (i == 4) cl[i]->ResolveQueryData(qh, D3D12_QUERY_TYPE_TIMESTAMP, 0, 4, qrb, 0);
                     cl[i]->Close();
@@ -1007,7 +1013,7 @@ int wmain(int argc, wchar_t** argv) {
             else ref.assign(size_t(opitch) * OH, 0), memcpy(ref.data(), m, ref.size());
             const uint16_t* r = reinterpret_cast<const uint16_t*>(ref.data());
             double se = 0, peak = 0;
-            size_t n = 0, eq = 0;
+            size_t n = 0, eq = 0, non_finite = 0;
             uint64_t hash = 1469598103934665603ull;
             if (re9) {
                 // the R9G9B9E5 words: the output's own, or the rgba16f output's encoding (reference)
@@ -1016,12 +1022,14 @@ int wmain(int argc, wchar_t** argv) {
                     uint32_t e = m32[k];
                     if (re9 == 2) {
                         const float c[3] = {h2f(m[4 * k]), h2f(m[4 * k + 1]), h2f(m[4 * k + 2])};
+                        if (!std::isfinite(c[0]) || !std::isfinite(c[1]) || !std::isfinite(c[2])) non_finite++;
                         e = rgb9e5_of(c);
                     }
                     hash = (hash ^ e) * 1099511628211ull;
                     for (int ch = 0; ch < 3; ++ch) {
                         double u = rgb9e5_ch(e, ch), v = h2f(r[4 * k + ch]);
-                        se += (u - v) * (u - v), peak = std::max(peak, std::fabs(v)), ++n, eq += f2h_exact(u) == r[4 * k + ch];
+                        if (!std::isfinite(u) || !std::isfinite(v)) non_finite++;
+                        else se += (u - v) * (u - v), peak = std::max(peak, std::fabs(v)), ++n, eq += f2h_exact(u) == r[4 * k + ch];
                     }
                 }
             } else
@@ -1029,19 +1037,23 @@ int wmain(int argc, wchar_t** argv) {
                     hash = (hash ^ m[i]) * 1099511628211ull;
                     if (i % 4 == 3) continue;
                     double u = h2f(m[i]), v = h2f(r[i]);
-                    se += (u - v) * (u - v), peak = std::max(peak, std::fabs(v)), ++n, eq += m[i] == r[i];
+                    if (!std::isfinite(u) || !std::isfinite(v)) non_finite++;
+                    else se += (u - v) * (u - v), peak = std::max(peak, std::fabs(v)), ++n, eq += m[i] == r[i];
                 }
             rb->Unmap(0, nullptr);
-            double db = se > 0 ? 10 * std::log10(peak * peak / (se / double(n))) : 999;
+            double db = (non_finite == 0 && n > 0 && std::isfinite(se) && std::isfinite(peak) && se >= 0.0)
+                            ? (se > 0.0 ? (peak > 0.0 ? 10 * std::log10(peak * peak / (se / double(n))) : 0.0) : 999.0)
+                            : 0.0;
+            if (!std::isfinite(db)) db = 0.0;
             lo = std::min(lo, db), hi = std::max(hi, db);
-            printf("%5d  %7.2f  %7.3f  %7.2f  %016llx\n", f, db, 100.0 * double(eq) / double(n), info.gpu_ms_last, (unsigned long long)hash);
+            printf("%5d  %7.2f  %7.3f  %7.2f  %016llx\n", f, db, n ? 100.0 * double(eq) / double(n) : 0.0, info.gpu_ms_last, (unsigned long long)hash);
             // ONR_VALIDATE_DUMP=<prefix>: every frame's output, rgba16f rows, as <prefix><frame>.raw
             if (const char* dp = getenv("ONR_VALIDATE_DUMP")) {
                 char fn[512];
                 snprintf(fn, sizeof fn, "%s%04d.raw", dp, f);
                 if (FILE* df = fopen(fn, "wb")) rb->Map(0, nullptr, reinterpret_cast<void**>(&m)), fwrite(m, 1, size_t(opitch) * OH, df), rb->Unmap(0, nullptr), fclose(df);
             }
-            bad += db < 45;
+            bad += !(db >= 45.0) || non_finite > 0;
         }
         printf("PSNR %.2f .. %.2f dB over %d frames%s\n", lo, hi, nframes, bad ? " (some below 45 dB)" : "");
         // ONR_VALIDATE_LOOP=n: the last frame n more times without new guides, for the GPU time at a steady clock (the
@@ -1124,9 +1136,21 @@ int wmain(int argc, wchar_t** argv) {
             if (enqueue_n) printf("Enqueue on the CPU: %.3f ms mean over %d calls\n", enqueue_cpu / enqueue_n, enqueue_n);
         }
         upload->Unmap(0, nullptr);
+        wait_gpu();
+        for (int i = 0; i < 5; ++i) {
+            al[i]->Reset();
+            if (note_alloc_reset) note_alloc_reset(al[i]);
+            if (note_list_released) note_list_released(cl[i]);
+            if (note_alloc_released) note_alloc_released(al[i]);
+        }
         if (idle) api.Destroy(idle);
         if (second_on) {
             if (s_maker.joinable()) s_maker.join();
+            wait_second();
+            sal->Reset();
+            if (note_alloc_reset) note_alloc_reset(sal);
+            if (note_list_released) note_list_released(scl);
+            if (note_alloc_released) note_alloc_released(sal);
             if (void* sc = s_ctx.load()) api.Destroy(sc);
             printf("second feature: %u network frames over %d cycles%s\n", s_net, s_cycle + 1, solo ? " (main lists not run)" : "");
         }
