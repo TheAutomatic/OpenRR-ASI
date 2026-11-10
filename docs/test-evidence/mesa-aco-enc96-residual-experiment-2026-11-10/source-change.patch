@@ -1,0 +1,28 @@
+--- original/onr_block_w2.glsl
++++ residual-reload/onr_block_w2.glsl
+@@ -161,10 +161,8 @@
+             xa[2 * k_] = a_.x, xa[2 * k_ + 1] = a_.y, xb[2 * k_] = b_.x, xb[2 * k_ + 1] = b_.y; } }
+ #if FP8QV
+     // and the same bytes as e4m3 B tiles (OCP codes), as the transposed body's XIN8
+-#define XIN2Y(xa, xb, ya, yb, tp, pl) MH xa, xb; QB8 ya, yb; { uvec4 w_ = U32x4View(uint64_t(pc.x)).v[plane_index(tp, int(pl) * 32 + int(hh) * 16) >> 4]; \
++#define XIN2Y(xa, xb, ya, yb, tp, pl) QB8 ya, yb; { uvec4 w_ = U32x4View(uint64_t(pc.x)).v[plane_index(tp, int(pl) * 32 + int(hh) * 16) >> 4]; \
+         [[unroll]] for (int k_ = 0; k_ < 4; ++k_) { \
+-            f16vec2 a_ = unpackFloat2x16(e4m3_lo(w_[k_])), b_ = unpackFloat2x16(e4m3_hi(w_[k_])); \
+-            xa[2 * k_] = a_.x, xa[2 * k_ + 1] = a_.y, xb[2 * k_] = b_.x, xb[2 * k_ + 1] = b_.y; \
+             uint o_ = ocp4(w_[k_]); \
+             ya[2 * k_] = uintBitsToFloate4m3EXT(uint8_t(o_ & 0xffu)), ya[2 * k_ + 1] = uintBitsToFloate4m3EXT(uint8_t((o_ >> 8) & 0xffu)); \
+             yb[2 * k_] = uintBitsToFloate4m3EXT(uint8_t((o_ >> 16) & 0xffu)), yb[2 * k_ + 1] = uintBitsToFloate4m3EXT(uint8_t(o_ >> 24)); } }
+@@ -315,6 +313,13 @@
+         { ACC o0 = ACC(0.0), o1 = ACC(0.0); ATT(rb, q10, q11, o0, o1) OUT4(o0, o1, c10, c11, c12, c13) }
+ #endif
+     }
++#if FP8QV
++    // Source input is read-only throughout attention. Reload FP16 residual here
++    // rather than keeping it live beside FP8 inputs and all Q/V accumulators.
++#define RELOAD_A(pl, a, b) XIN2(x0##a, x0##b, tpa, ra, uint(pl))
++#define RELOAD_B(pl, a, b) XIN2(x1##a, x1##b, tpb, rb, uint(pl))
++    W2P(RELOAD_A) W2P(RELOAD_B)
++#endif
+     // x1 = fma(O out^T + b, ls1, x)
+ #define RESID1(cn, xn, l) { MH a16 = MH(cn); for (int i = 0; i < a16.length(); i += 2) { \
+         precise f16vec2 v = fma(f16vec2(a16[i], a16[i + 1]), f16vec2(l), f16vec2(xn[i], xn[i + 1])); xn[i] = v.x, xn[i + 1] = v.y; } }

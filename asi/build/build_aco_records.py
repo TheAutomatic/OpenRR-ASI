@@ -96,31 +96,58 @@ def main():
     ap.add_argument('--precision', choices=('native', 'local', 'global'), default='local')
     ap.add_argument('--matrix-loads', choices=('scalar', 'vector8'), default='scalar')
     ap.add_argument('--refresh', action='store_true')
+    ap.add_argument('--capture-dir', type=Path, help='Build-only capture diagnostics (outside the package stage)')
+    ap.add_argument('--cmat-address-shaders', nargs='*', default=[],
+                    help='Exact shader stems using bounded cmat lane offsets; all others stay off')
     ns = ap.parse_args()
     cfg = json.loads(ns.toolchain.read_text())
     root = ns.out / 'gfx1201' / LAYOUT
-    raw = root / 'capture'
+    root.mkdir(parents=True, exist_ok=True)
+    raw = ns.capture_dir if ns.capture_dir else root / 'capture'
     raw.mkdir(parents=True, exist_ok=True)
     manifest_path = root/'manifest.json'
     manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
     files = sorted({p.resolve() for arg in ns.inputs for p in (arg.rglob('*.spv') if arg.is_dir() else [arg])})
+    missing_address_shaders = set(ns.cmat_address_shaders) - {p.stem for p in files}
+    if missing_address_shaders:
+        ap.error('cmat address shader inputs missing: ' + ', '.join(sorted(missing_address_shaders)))
+    if ns.cmat_address_shaders and not cfg.get('cmat_address_patch_sha256'):
+        ap.error('selected toolchain does not declare the bounded cmat address patch')
+    # Records are addressed by SPIR-V hash, so identical input bytes cannot
+    # safely request conflicting per-stem policies. Reject instead of choosing
+    # whichever path happens to be visited last.
+    input_policies = {}
+    for spv in files:
+        key = f'{fnv(spv.read_bytes()):016x}'
+        address = spv.stem in ns.cmat_address_shaders
+        if key in input_policies and input_policies[key] != address:
+            ap.error('identical SPIR-V requests conflicting cmat address policies: ' + spv.name)
+        input_policies[key] = address
     records = {}
     failures = []
     policy = dict(precision=ns.precision, matrix_loads=ns.matrix_loads, address_adaptation='assembler-dual-sentinel-v1')
+    if ns.cmat_address_shaders:
+        policy['cmat_address_shaders'] = sorted(set(ns.cmat_address_shaders))
     fingerprint = hashlib.sha256(ns.capture.read_bytes() + ns.toolchain.read_bytes() + Path(__file__).read_bytes() + json.dumps(policy,sort_keys=True).encode()).hexdigest()
     for spv in files:
         data = spv.read_bytes()
         key = f'{fnv(data):016x}'
         previous = manifest.get('records', {}).get(key)
-        if not ns.refresh and manifest.get('fingerprint') == fingerprint and previous and (root/(key+'.nrp')).exists():
-            records[key] = previous
-            continue
+        record_path = root/(key+'.nrp')
+        if not ns.refresh and manifest.get('fingerprint') == fingerprint and previous and record_path.exists():
+            if previous.get('record_sha256') == hashlib.sha256(record_path.read_bytes()).hexdigest():
+                records[key] = previous
+                continue
         prefix = raw/key
         try:
             env = dict(os.environ, VK_ICD_FILENAMES=cfg['icd'], LD_PRELOAD=cfg['shim'],
                        AMDGPU_GPU_ID='gfx1201', MESA_SHADER_CACHE_DISABLE='true',
                        LD_LIBRARY_PATH=cfg['library_path'], ONR_ACO_PRECISION=ns.precision)
             env.pop('ONR_ACO_VECTOR_LOADS', None)
+            # Never inherit a global experimental setting into unrelated shaders.
+            env.pop('ONR_ACO_CMAT_ADDRESS', None)
+            if spv.stem in ns.cmat_address_shaders:
+                env['ONR_ACO_CMAT_ADDRESS'] = '1'
             if ns.matrix_loads == 'vector8': env['ONR_ACO_VECTOR_LOADS'] = '1'
             captures=[]
             for suffix,sentinel in (('a', '0x13579bdf'), ('b', '0x2468ace1')):
@@ -142,9 +169,12 @@ def main():
             if dims[0]*dims[1]*dims[2] != info['workgroup_size']:
                 raise ValueError('workgroup mismatch')
             code, address_report = adapt_code(code, other, info['exec_bytes'], info, other_info, (log,other_log))
-            (root/(key+'.nrp')).write_bytes(pack(info, code, fnv(data)))
+            record_data = pack(info, code, fnv(data))
+            record_path.write_bytes(record_data)
             records[key] = dict(info, spv=spv.name, spv_hash=key, code_hash=f'{fnv(code):016x}',
                                 workgroup=list(dims), layout='views' if spv.stem.startswith('d3d_') else 'sampled',
+                                cmat_address=spv.stem in ns.cmat_address_shaders,
+                                record_sha256=hashlib.sha256(record_data).hexdigest(),
                                 address_report=address_report, record=key+'.nrp')
             print(f'{spv.name}: {key} {len(code)} bytes, {info["vgprs"]} VGPR, set0={info["set0"]}', flush=True)
         except (ValueError, KeyError, OSError, subprocess.SubprocessError) as e:

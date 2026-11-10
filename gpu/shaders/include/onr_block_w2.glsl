@@ -375,8 +375,8 @@ void main() {
         ACC hb0 = bias_acc_t(pc.fc1_b, j), hb1 = bias_acc_t(pc.fc1_b, j + 16u), hb2 = bias_acc_t(pc.fc1_b, j + 32u), hb3 = bias_acc_t(pc.fc1_b, j + 48u);
         ACC h00 = hb0, h01 = hb1, h02 = hb2, h03 = hb3, h10 = hb0, h11 = hb1, h12 = hb2, h13 = hb3;
 #define FC1_K(n, xa, xb) { MA f0, f1, f2, f3; MB b_; \
-            WLD(f0, pc.fc1.v, WT_FC1(j * ENC_C + (n) * 16u), WS_FC1, ROW); WLD(f1, pc.fc1.v, WT_FC1((j + 16u) * ENC_C + (n) * 16u), WS_FC1, ROW); \
-            WLD(f2, pc.fc1.v, WT_FC1((j + 32u) * ENC_C + (n) * 16u), WS_FC1, ROW); WLD(f3, pc.fc1.v, WT_FC1((j + 48u) * ENC_C + (n) * 16u), WS_FC1, ROW); \
+            WLD(f0, pc.fc1.v, FC1_TILE(j, (n)), WS_FC1, ROW); WLD(f1, pc.fc1.v, FC1_TILE((j + 16u), (n)), WS_FC1, ROW); \
+            WLD(f2, pc.fc1.v, FC1_TILE((j + 32u), (n)), WS_FC1, ROW); WLD(f3, pc.fc1.v, FC1_TILE((j + 48u), (n)), WS_FC1, ROW); \
             CPB(b_, xa) MMA(h00, f0, b_) MMA(h01, f1, b_) MMA(h02, f2, b_) MMA(h03, f3, b_) \
             CPB(b_, xb) MMA(h10, f0, b_) MMA(h11, f1, b_) MMA(h12, f2, b_) MMA(h13, f3, b_) }
 #define FC1_KN(n) FC1_K(uint(n), x0##n, x1##n)
@@ -390,7 +390,7 @@ void main() {
         ACC hb0 = bias_acc_t(pc.fc1_b, j), hb1 = bias_acc_t(pc.fc1_b, j + 16u);
         ACC h00 = hb0, h01 = hb1, h10 = hb0, h11 = hb1;
 #define FC1_K2(n) { MA f0, f1; MB b_; \
-            WLD(f0, pc.fc1.v, WT_FC1(j * ENC_C + uint(n) * 16u), WS_FC1, ROW); WLD(f1, pc.fc1.v, WT_FC1((j + 16u) * ENC_C + uint(n) * 16u), WS_FC1, ROW); \
+            WLD(f0, pc.fc1.v, FC1_TILE(j, uint(n)), WS_FC1, ROW); WLD(f1, pc.fc1.v, FC1_TILE((j + 16u), uint(n)), WS_FC1, ROW); \
             CPB(b_, x0##n) MMA(h00, f0, b_) MMA(h01, f1, b_) \
             CPB(b_, x1##n) MMA(h10, f0, b_) MMA(h11, f1, b_) }
         W2T(FC1_K2)

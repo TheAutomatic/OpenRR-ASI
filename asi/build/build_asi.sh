@@ -106,6 +106,7 @@ echo "[4/4] Building runtime SPIR-V shaders & staging package..."
 python3 asi/build/build_shaders.py "$glslang" gpu "$stage/openrr-amd/shaders"
 cp asi/openrr-amd.ini "$stage/openrr-amd.ini"
 "$cxx" -std=c++17 -O2 -shared -static -Iasi/src asi/src/optifg_ngx_proxy.cpp -o "$stage/openrr-ngx-host.dll"
+cp LICENSE THIRD_PARTY.md "$stage/"
 mkdir -p -- "$out/occ_nopad" "$out/occ_pad16k"
 "$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_FAR=2 -DLT_FAR1=2 -DLT_Q16=1 -DLT_VO=1 -DLT_SYM=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -Igpu/shaders/include gpu/shaders/enc0_stage_32_64.comp -o "$out/occ_nopad/enc0_stage_32_64_f_lt.spv" > /dev/null
 "$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_POST_PAIR=1 -DLT_POST_HW=1 -DLT_POST_LDS=1 -DLT_POST_EXPO=1 -Igpu/shaders/include gpu/shaders/post.comp -o "$out/occ_nopad/post_f_lt.spv" > /dev/null
@@ -146,8 +147,10 @@ mkdir -p -- "$out/b2_base" "$out/b2_post_exp" "$out/b2_post_log" "$out/b2_attr_r
 if [[ "${OPENRR_BUILD_ACO:-1}" == "1" ]]; then
     bash asi/build/mesa/build_capture.sh
     python3 asi/build/build_aco_records.py --out "$stage/openrr-amd/aco" \
+        --capture-dir "$out/aco-capture" \
         --precision "${OPENRR_ACO_PRECISION:-global}" --matrix-loads "${OPENRR_ACO_MATRIX_LOADS:-vector8}" \
-        "$stage/openrr-amd/shaders" "$out/occ_nopad" "$out/occ_pad16k" "$out"/b2_*
+        "$stage/openrr-amd/shaders" "$out/occ_nopad" "$out/occ_pad16k" "$out"/b2_* \
+        --cmat-address-shaders dec_dfn_96_128_fl_lt enc_stage_128_128_160_fl_lt
 fi
 echo "Built $stage/plugins/openrr-amd.asi ($(stat -c %s "$stage/plugins/openrr-amd.asi") bytes, $count Vulkan entry points resolved lazily)"
 echo "Exports: $("$objdump" -p "$stage/plugins/openrr-amd.asi" | grep -c 'InitializeASI')  Imports: $("$objdump" -p "$stage/plugins/openrr-amd.asi" | grep 'DLL Name' | awk '{print $3}' | tr '\n' ' ')"

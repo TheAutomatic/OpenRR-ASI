@@ -1,0 +1,215 @@
+{
+  "members": [
+    {
+      "path": "build/aco-runtime-trace/experiment-cmat-address/enc_stage_128_128_160_fl_lt/off/capture.code",
+      "bytes": 37248,
+      "sha256": "521059ae023f52e86a2a9e3b46c9d4c6945a79a9b1b826c95320a986a0f3eaca"
+    },
+    {
+      "path": "build/aco-runtime-trace/experiment-cmat-address/enc_stage_128_128_160_fl_lt/off/capture.json",
+      "bytes": 284,
+      "sha256": "0e932ec3907433412b02744afec82215b55ea6a4cd74adeb10ef40281ef49f63"
+    },
+    {
+      "path": "build/aco-runtime-trace/experiment-cmat-address/enc_stage_128_128_160_fl_lt/off/capture.layouts",
+      "bytes": 480,
+      "sha256": "066e0814f0125b39f87c4894575bfbb0652fd6923960febbf1a47c1e137bb12f"
+    },
+    {
+      "path": "build/aco-runtime-trace/experiment-cmat-address/enc_stage_128_128_160_fl_lt/off/compile.log",
+      "bytes": 192,
+      "sha256": "d8d49df8ea75fc3b17b39f20a840c203f2d90ba1b733475a0610566e11f96b43"
+    },
+    {
+      "path": "build/aco-runtime-trace/experiment-cmat-address/enc_stage_128_128_160_fl_lt/off/enc_stage_128_128_160_fl_lt.0.txt",
+      "bytes": 436648,
+      "sha256": "18998bff333d588f189eaecf6eb68431b9c4a3d3900790deb39421d03afd4899"
+    },
+    {
+      "path": "build/aco-runtime-trace/experiment-cmat-address/enc_stage_128_128_160_fl_lt/off/enc_stage_128_128_160_fl_lt.1.txt",
+      "bytes": 323609,
+      "sha256": "100cc82ccb1da930e1f1cd89bf24bf733da9cd9b4d9e2e35828e591defa84768"
+    },
+    {
+      "path": "build/aco-runtime-trace/experiment-cmat-address/enc_stage_128_128_160_fl_lt/off/enc_stage_128_128_160_fl_lt.2.txt",
+      "bytes": 358337,
+      "sha256": "1918be3ec50abcbb1aa3ae5cc82d9f4d4af552426b3792fc0bff5d283b48e420"
+    },
+    {
+      "path": "build/aco-runtime-trace/experiment-cmat-address/enc_stage_128_128_160_fl_lt/on/capture.code",
+      "bytes": 47712,
+      "sha256": "8236ed0696dc91b95a500639cbad715f3908c73f0fb27f3a81573f404f33e9bc"
+    },
+    {
+      "path": "build/aco-runtime-trace/experiment-cmat-address/enc_stage_128_128_160_fl_lt/on/capture.json",
+      "bytes": 284,
+      "sha256": "2a1828880be6014dbced1ec0ae4e2b593ebaadae0db9318fccce5f27073ccbc1"
+    },
+    {
+      "path": "build/aco-runtime-trace/experiment-cmat-address/enc_stage_128_128_160_fl_lt/on/capture.layouts",
+      "bytes": 480,
+      "sha256": "066e0814f0125b39f87c4894575bfbb0652fd6923960febbf1a47c1e137bb12f"
+    },
+    {
+      "path": "build/aco-runtime-trace/experiment-cmat-address/enc_stage_128_128_160_fl_lt/on/compile.log",
+      "bytes": 192,
+      "sha256": "d8d49df8ea75fc3b17b39f20a840c203f2d90ba1b733475a0610566e11f96b43"
+    },
+    {
+      "path": "build/aco-runtime-trace/experiment-cmat-address/enc_stage_128_128_160_fl_lt/on/enc_stage_128_128_160_fl_lt.0.txt",
+      "bytes": 730040,
+      "sha256": "bb1f6c79b91da3fa9371c6674c974da330273af371ff13deacae9be529fef0f6"
+    },
+    {
+      "path": "build/aco-runtime-trace/experiment-cmat-address/enc_stage_128_128_160_fl_lt/on/enc_stage_128_128_160_fl_lt.1.txt",
+      "bytes": 373804,
+      "sha256": "d0d5df7e56716ca117fd7a9a0304e729d2a0763d3fc3cef2c938e66b8a800a6f"
+    },
+    {
+      "path": "build/aco-runtime-trace/experiment-cmat-address/enc_stage_128_128_160_fl_lt/on/enc_stage_128_128_160_fl_lt.2.txt",
+      "bytes": 447445,
+      "sha256": "d66c15454ec55cf46eb8d36d02a986b8f6284f02f948ccd8420115b4d15138ea"
+    },
+    {
+      "path": "build/aco-runtime-trace/experiment-enc128-unroll/enc_stage_128_128_160_fl_lt.spv",
+      "bytes": 153288,
+      "sha256": "7d5f1c6d23126abf0a4325029b3de013581213fad743c5c19932be803ad5995c"
+    },
+    {
+      "path": "build/aco-runtime-trace/experiment-enc128-unroll/limited-off/capture.code",
+      "bytes": 37248,
+      "sha256": "521059ae023f52e86a2a9e3b46c9d4c6945a79a9b1b826c95320a986a0f3eaca"
+    },
+    {
+      "path": "build/aco-runtime-trace/experiment-enc128-unroll/limited-off/capture.json",
+      "bytes": 284,
+      "sha256": "0e932ec3907433412b02744afec82215b55ea6a4cd74adeb10ef40281ef49f63"
+    },
+    {
+      "path": "build/aco-runtime-trace/experiment-enc128-unroll/limited-off/capture.layouts",
+      "bytes": 240,
+      "sha256": "56a50220b078558932d895a8b91ca8321049df9f1e805ed86e52f99e8e2dc8f5"
+    },
+    {
+      "path": "build/aco-runtime-trace/experiment-enc128-unroll/limited-off/compile.log",
+      "bytes": 192,
+      "sha256": "d8d49df8ea75fc3b17b39f20a840c203f2d90ba1b733475a0610566e11f96b43"
+    },
+    {
+      "path": "build/aco-runtime-trace/experiment-enc128-unroll/limited-off/enc_stage_128_128_160_fl_lt.0.txt",
+      "bytes": 436665,
+      "sha256": "4dd0bdb4756fdb65c5124d201fd1c80920bfd183310dae46652a569aad78dd1f"
+    },
+    {
+      "path": "build/aco-runtime-trace/experiment-enc128-unroll/limited-off/enc_stage_128_128_160_fl_lt.1.txt",
+      "bytes": 323609,
+      "sha256": "100cc82ccb1da930e1f1cd89bf24bf733da9cd9b4d9e2e35828e591defa84768"
+    },
+    {
+      "path": "build/aco-runtime-trace/experiment-enc128-unroll/limited-off/enc_stage_128_128_160_fl_lt.2.txt",
+      "bytes": 358337,
+      "sha256": "1918be3ec50abcbb1aa3ae5cc82d9f4d4af552426b3792fc0bff5d283b48e420"
+    },
+    {
+      "path": "build/aco-runtime-trace/experiment-enc128-unroll/limited-on/capture.code",
+      "bytes": 33128,
+      "sha256": "b8adbb1fc95c4318a8c768e8af6f3cb5bd8ad5e8eec222c4fe61fbf6424e7ccc"
+    },
+    {
+      "path": "build/aco-runtime-trace/experiment-enc128-unroll/limited-on/capture.json",
+      "bytes": 284,
+      "sha256": "e2124fd8f79d0007e68949ee9ba396200a9b228b6a636925cf186f2562994756"
+    },
+    {
+      "path": "build/aco-runtime-trace/experiment-enc128-unroll/limited-on/capture.layouts",
+      "bytes": 240,
+      "sha256": "56a50220b078558932d895a8b91ca8321049df9f1e805ed86e52f99e8e2dc8f5"
+    },
+    {
+      "path": "build/aco-runtime-trace/experiment-enc128-unroll/limited-on/compile.log",
+      "bytes": 192,
+      "sha256": "d8d49df8ea75fc3b17b39f20a840c203f2d90ba1b733475a0610566e11f96b43"
+    },
+    {
+      "path": "build/aco-runtime-trace/experiment-enc128-unroll/limited-on/enc_stage_128_128_160_fl_lt.0.txt",
+      "bytes": 428699,
+      "sha256": "beb13f359d9473ba0a1f0f4b2b141a7de1d9e6be0be48e1455ddb7fb8fdf02e2"
+    },
+    {
+      "path": "build/aco-runtime-trace/experiment-enc128-unroll/limited-on/enc_stage_128_128_160_fl_lt.1.txt",
+      "bytes": 282434,
+      "sha256": "e485716b6b8f62f12a80ae6fe02babea4b7e1419d8003c1cd2dba4e64b441303"
+    },
+    {
+      "path": "build/aco-runtime-trace/experiment-enc128-unroll/limited-on/enc_stage_128_128_160_fl_lt.2.txt",
+      "bytes": 319319,
+      "sha256": "66e56a4e3f7faf8e181345a6b77f4a5f2c939b845c95676f0530e6a96fb0eddc"
+    },
+    {
+      "path": "build/aco-runtime-trace/experiment-enc128-unroll/limited.spvasm",
+      "bytes": 403457,
+      "sha256": "dc3bf3685eea4d900660a6d9b465b5f928036877eb57e493b7df21e430e1b90a"
+    },
+    {
+      "path": "build/aco-runtime-trace/experiment-enc128-unroll/nir_opt_loop_unroll.original.c",
+      "bytes": 44963,
+      "sha256": "a6ac57a0ff3a8e21206123bf3eb728c6ee7d6c788b5c7799d0358eca1a492115"
+    },
+    {
+      "path": "build/aco-runtime-trace/experiment-enc128-unroll/nir_opt_loop_unroll.probe.c",
+      "bytes": 45828,
+      "sha256": "05cf3556a2842059854388a188c1db94162b7424c16c09e27e788753a5f82482"
+    },
+    {
+      "path": "build/aco-runtime-trace/experiment-enc128-unroll/probe-off/capture.code",
+      "bytes": 37248,
+      "sha256": "521059ae023f52e86a2a9e3b46c9d4c6945a79a9b1b826c95320a986a0f3eaca"
+    },
+    {
+      "path": "build/aco-runtime-trace/experiment-enc128-unroll/probe-off/capture.json",
+      "bytes": 284,
+      "sha256": "0e932ec3907433412b02744afec82215b55ea6a4cd74adeb10ef40281ef49f63"
+    },
+    {
+      "path": "build/aco-runtime-trace/experiment-enc128-unroll/probe-off/capture.layouts",
+      "bytes": 480,
+      "sha256": "066e0814f0125b39f87c4894575bfbb0652fd6923960febbf1a47c1e137bb12f"
+    },
+    {
+      "path": "build/aco-runtime-trace/experiment-enc128-unroll/probe-off/probe.log",
+      "bytes": 233072,
+      "sha256": "dbb1b65f0a8c908e076f0475000ccce5e25344145f361ee7a5b8f52daf78bee4"
+    },
+    {
+      "path": "build/aco-runtime-trace/experiment-enc128-unroll/probe-on/capture.code",
+      "bytes": 47712,
+      "sha256": "8236ed0696dc91b95a500639cbad715f3908c73f0fb27f3a81573f404f33e9bc"
+    },
+    {
+      "path": "build/aco-runtime-trace/experiment-enc128-unroll/probe-on/capture.json",
+      "bytes": 284,
+      "sha256": "2a1828880be6014dbced1ec0ae4e2b593ebaadae0db9318fccce5f27073ccbc1"
+    },
+    {
+      "path": "build/aco-runtime-trace/experiment-enc128-unroll/probe-on/capture.layouts",
+      "bytes": 480,
+      "sha256": "066e0814f0125b39f87c4894575bfbb0652fd6923960febbf1a47c1e137bb12f"
+    },
+    {
+      "path": "build/aco-runtime-trace/experiment-enc128-unroll/probe-on/probe.log",
+      "bytes": 56186,
+      "sha256": "cba5a2599cbcc88dce8725591ad5b8788a3030110aa6bb10299b98f113794852"
+    },
+    {
+      "path": "docs/test-evidence/mesa-aco-enc128-unroll-2026-11-10/loop-source.patch",
+      "bytes": 407,
+      "sha256": "2687050b4bd1be6864630362a0a6710206b384ada0bb9f8d4dd8a8385a5845b3"
+    },
+    {
+      "path": "docs/test-evidence/mesa-aco-enc128-unroll-2026-11-10/screen.json",
+      "bytes": 18811,
+      "sha256": "a9d75288fbda3c0444aa58105498c174bf6f19dc281c00d538fdc6c736072acb"
+    }
+  ],
+  "zip_sha256": "29520c558700ed570ca395607d753b0fbac564b09017f6faa3864b11ffad9659"
+}

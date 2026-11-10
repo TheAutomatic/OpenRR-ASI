@@ -1,0 +1,22 @@
+[
+  {
+    "shader": "enc_stage_96_128_128_f.spv",
+    "matches": "unchanged baseline",
+    "sha256": "1d9bdb5d42535f7249d0b8c304b28710c27e5faf0b54a4b2b9105e258a9d9e7e"
+  },
+  {
+    "shader": "enc_stage_96_128_128_fl.spv",
+    "matches": "unchanged baseline",
+    "sha256": "cb3df96a5822d5e514c96c29ab40998acd76688e6b1aabcb9da37db675e4b4d2"
+  },
+  {
+    "shader": "enc_stage_96_128_128_f_lt.spv",
+    "matches": "unchanged baseline",
+    "sha256": "ffda7cc144e7e9867eb9ae0960525cba12c696851b325f96b301cc5f60139702"
+  },
+  {
+    "shader": "enc_stage_96_128_128_fl_lt.spv",
+    "matches": "tested candidate",
+    "sha256": "375f68a5b9b379d61d5bdd7d37123b651de38480b78c267f206ebf71a76f5717"
+  }
+]

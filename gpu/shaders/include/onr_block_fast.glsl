@@ -94,6 +94,9 @@
 #ifndef J_UNROLL
 #define J_UNROLL
 #endif
+#ifndef MLP_SLICE_LOOP
+#define MLP_SLICE_LOOP J_UNROLL
+#endif
 #define FOR_NT(M) M(c0, TILE(0u)) F1(M) F2(M) F3(M) F4(M) F5(M) F6(M) F7(M) F8(M) F9(M)
 
 // Transposed body (TR, SPLIT 1): every product is computed as its transpose, D^T = W A^T, so the activations
@@ -906,7 +909,7 @@ void main() {
 #else
 #define SLICE 32u
 #endif
-    J_UNROLL for (uint j = 0u; j < LT_HID; j += SLICE) {
+    MLP_SLICE_LOOP for (uint j = 0u; j < LT_HID; j += SLICE) {
         // hidden slice h^T [SLICE neurons][16 rows] = fc1 x1^T + b, GELU in registers
         ACC h0 = bias_acc_t(pc.fc1_b, j), h1 = bias_acc_t(pc.fc1_b, j + 16u);
 #if MLP64
@@ -1380,7 +1383,11 @@ void main() {
             f16vec4 im = F16x4Buf(uint64_t(pc.dfn_in)).v[pi];
             for (int c = 0; c < 3; ++c) {
                 precise float e = exp2(float(lds[pr + ln * 16u + uint(c)]) * uintBitsToFloat(0xbfb8aa3bu));
+#ifdef ENC_DFN_SIG_RCP
+                float16_t g = float16_t(SIG_RCP(e + 1.0));
+#else
                 float16_t g = float16_t(rcp_rn(e + 1.0));
+#endif
                 precise float16_t gs = g * sd;
                 precise float16_t v = im[c] * gs;
                 o[c] = min(v, 65504.0hf);

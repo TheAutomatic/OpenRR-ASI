@@ -1,0 +1,17 @@
+--- original/onr_block_w2.glsl
++++ candidate/onr_block_w2.glsl
+@@ -430,9 +430,11 @@
+     // x^T tiles into the LDS [16][4 C] (one 16-byte store per lane and channel tile); pooled (16 x Co) = A mrg^T + b,
+     // output tiles split between the subgroups, then through the LDS to the e4m3 planes
+     WG_SYNC();
+-#define MST(xn, t0, n) { MH h_ = xn; uint t_ = (t0) + (ln & 15u); \
+-        uint a_ = ((t_ >> 4) * 4u + ((t_ & 7u) >> 1)) * 4u * ENC_C + ((((t_ >> 3) & 1u) << 1) + (t_ & 1u)) * ENC_C + (n) * 16u + 8u * hh; \
+-        lds4[a_ >> 3] = uvec4(packFloat2x16(f16vec2(h_[0], h_[1])), packFloat2x16(f16vec2(h_[2], h_[3])), \
++#define MST(xn, t0, n) { MH h_ = xn; \
++        uint row_ = ((t0) >> 4) * 4u + ((ln >> 1) & 3u); \
++        uint sub_ = ((ln >> 2) & 2u) | (ln & 1u); \
++        uint idx_ = row_ * (ENC_C / 2u) + sub_ * (ENC_C / 8u) + (n) * 2u + hh; \
++        lds4[idx_] = uvec4(packFloat2x16(f16vec2(h_[0], h_[1])), packFloat2x16(f16vec2(h_[2], h_[3])), \
+             packFloat2x16(f16vec2(h_[4], h_[5])), packFloat2x16(f16vec2(h_[6], h_[7]))); }
+ #define MST_A(n) MST(x0##n, ra, uint(n))
+ #define MST_B(n) MST(x1##n, rb, uint(n))

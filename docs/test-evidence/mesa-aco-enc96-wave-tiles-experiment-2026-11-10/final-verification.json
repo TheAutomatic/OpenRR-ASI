@@ -1,0 +1,18 @@
+{
+  "cpu_tests": 18,
+  "cpu_passed": true,
+  "python_compile_passed": true,
+  "powershell_parse_passed": true,
+  "git_diff_check_passed": true,
+  "retained_source_spv": "f3817f3fb0a26545",
+  "source_sha256": "375f68a5b9b379d61d5bdd7d37123b651de38480b78c267f206ebf71a76f5717",
+  "extended_correctness_frames": 292,
+  "extended_exact_frames": 292,
+  "trace6_readbacks_per_compiler": 69,
+  "trace139_readbacks_per_side": 69,
+  "timing_pairs": 6,
+  "warmup": 48,
+  "steady": 240,
+  "drs": 64,
+  "committed": false
+}

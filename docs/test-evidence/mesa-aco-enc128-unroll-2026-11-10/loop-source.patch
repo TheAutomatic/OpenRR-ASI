@@ -1,0 +1,11 @@
+--- a/onr_block_fast.glsl
++++ b/onr_block_fast.glsl
+@@ -863,7 +863,7 @@
+ #else
+ #define SLICE 32u
+ #endif
+-    J_UNROLL for (uint j = 0u; j < LT_HID; j += SLICE) {
++    [[dont_unroll]] for (uint j = 0u; j < LT_HID; j += SLICE) {
+         // hidden slice h^T [SLICE neurons][16 rows] = fc1 x1^T + b, GELU in registers
+         ACC h0 = bias_acc_t(pc.fc1_b, j), h1 = bias_acc_t(pc.fc1_b, j + 16u);
+ #if MLP64

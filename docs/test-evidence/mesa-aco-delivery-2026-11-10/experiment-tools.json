@@ -1,0 +1,300 @@
+{
+  "sha256": "f86f820539270deacd21ddf642a949ae4fe253c0c352fbd3e716ded2cf9c4cc2",
+  "members": [
+    {
+      "path": "asi/tests/address_screen_archive.py",
+      "bytes": 2832,
+      "sha256": "f367bc5be1597fb1aec1bd864970bc538303842cd6328d73a4c1a8efd0b6b72e"
+    },
+    {
+      "path": "asi/tests/address_screen_build.py",
+      "bytes": 6323,
+      "sha256": "698a8565302d13d0f9a877cd3f616371ddd9235757afdeba55384b9401e144e9"
+    },
+    {
+      "path": "asi/tests/analyze_enc96_ir.py",
+      "bytes": 1465,
+      "sha256": "1e39c25d93363897aee80aca5f3453c135f66a24e0d4af2373a3cde683f10c2c"
+    },
+    {
+      "path": "asi/tests/analyze_enc96_mlp16.py",
+      "bytes": 1136,
+      "sha256": "d82918634a5dbced3be922fa8cdedbef3de57002a62fe6b6d169f1bc80d8e033"
+    },
+    {
+      "path": "asi/tests/analyze_enc96_projection_tile_offset.py",
+      "bytes": 1111,
+      "sha256": "df9e527d35eb391737f97b27092c38b697f1be5b55bf988634d464d23340ad3e"
+    },
+    {
+      "path": "asi/tests/analyze_enc96_projection_tiled.py",
+      "bytes": 1103,
+      "sha256": "43ae57f850496e93c2085a8bf5db27482eb0520213de3b1b13d84f48631fd976"
+    },
+    {
+      "path": "asi/tests/analyze_enc96_qv_serial.py",
+      "bytes": 1100,
+      "sha256": "60aee648f377b5fd99f86a566579035e31ba3831530fcc3bb4d8e693e636dc9f"
+    },
+    {
+      "path": "asi/tests/analyze_enc96_residual_reload.py",
+      "bytes": 1089,
+      "sha256": "c73abfea9cd07c42e6fe0b0b42b58a111e55ba186d9f5ab79a47470e2f9cbf5f"
+    },
+    {
+      "path": "asi/tests/analyze_enc96_wave_tiles.py",
+      "bytes": 1125,
+      "sha256": "6feb2ab6712748d25a3e5116e02ac4aa8eb3538c21670d3633ebacbb81f862bb"
+    },
+    {
+      "path": "asi/tests/archive_address_dec96_trace.py",
+      "bytes": 1738,
+      "sha256": "a3284a53e604d7277c69b2aa4ed05f12f56700738695ffe2ad8f4002be037363"
+    },
+    {
+      "path": "asi/tests/archive_cmat_trace6.py",
+      "bytes": 1456,
+      "sha256": "c30299a957b4b77698c49e486db15da43abd2e2b86c815b9357d74bd18e4a823"
+    },
+    {
+      "path": "asi/tests/archive_enc96_review.py",
+      "bytes": 1635,
+      "sha256": "5ef385d6f999b55da74d457ec70e45633dea21436d23dbcde7e04e53839bd62c"
+    },
+    {
+      "path": "asi/tests/archive_enc96_trace139.py",
+      "bytes": 1533,
+      "sha256": "3a14a202b754604e1c58cae08c0392119b711841139e6753efbb52ec59017370"
+    },
+    {
+      "path": "asi/tests/archive_retained_combination.py",
+      "bytes": 1967,
+      "sha256": "4190efcbc2efff450f6db5b185c4c686d6a5ddcc67cfb99a905563cfb03643bc"
+    },
+    {
+      "path": "asi/tests/archive_unroll_retained.py",
+      "bytes": 2351,
+      "sha256": "c14de8a8af70f6d6a8d30f28d978ab45bccfea410bbf4769f91a4947e6737b0d"
+    },
+    {
+      "path": "asi/tests/capture_enc128_loop_probe.py",
+      "bytes": 1125,
+      "sha256": "b6076f73edec5fd4dc9d19eaf1fbf2dc9296b987dc720832e2e309a40525d333"
+    },
+    {
+      "path": "asi/tests/cleanup_completed_enc96.ps1",
+      "bytes": 1982,
+      "sha256": "dd4842bd3cdbee3e026f8f643cdb6bdfa0f9ddd5f7979a4c4b52c6cf347e6940"
+    },
+    {
+      "path": "asi/tests/cmat_address_screen.py",
+      "bytes": 2610,
+      "sha256": "2dbeda8cde44096b261c9ad5d683171523d6496004288482b903c5107256b71b"
+    },
+    {
+      "path": "asi/tests/enc128_unroll_screen.py",
+      "bytes": 3748,
+      "sha256": "90f6035085830cf0f70f74b6d605e3713d8d6c26907a155ebe59a14b514379fc"
+    },
+    {
+      "path": "asi/tests/enc96_experiment_source.py",
+      "bytes": 2491,
+      "sha256": "68026c6f0029cac11710bb61ea123d960b81fd71abaf179ea7c6f7561d46f2ff"
+    },
+    {
+      "path": "asi/tests/inspect_enc96_aco.py",
+      "bytes": 1331,
+      "sha256": "de86b00630d866dfb358ffcc6f30465df9b2b5507b8991112254155ce812959a"
+    },
+    {
+      "path": "asi/tests/isolate_cmat_toolchain.py",
+      "bytes": 1363,
+      "sha256": "051364a42fc4c47f634a5ebd59e7739698b9687923b4e769c9f8031f207f881f"
+    },
+    {
+      "path": "asi/tests/prepare_cmat_address_candidates.py",
+      "bytes": 2496,
+      "sha256": "031bc6242b25b2ed77ce28110b0395ed0afe56a6cdd2497303fbf71ebb83ad66"
+    },
+    {
+      "path": "asi/tests/prepare_enc128_loop_probe.py",
+      "bytes": 1841,
+      "sha256": "ff19e5ce10d93e0043f0cb4c5b986e463e998e660fe992f070467dea5fff63af"
+    },
+    {
+      "path": "asi/tests/prepare_enc128_unroll_candidate.py",
+      "bytes": 1780,
+      "sha256": "5e13bc375f133a5485187a8eb18b310ac05bec5516fdfd04b516f07fcc12ebbc"
+    },
+    {
+      "path": "asi/tests/prepare_enc96_experiment.py",
+      "bytes": 2726,
+      "sha256": "4712b0343748a5b1854791c5ff3f8d930d9605e776c4fcadbfca50abff7b7348"
+    },
+    {
+      "path": "asi/tests/prepare_enc96_mlp16.py",
+      "bytes": 2411,
+      "sha256": "edbdac405c4d0048a6382ed0184aadc7655a60c51c7925405fcf78e956cf3944"
+    },
+    {
+      "path": "asi/tests/prepare_enc96_projection_tile_offset.py",
+      "bytes": 2054,
+      "sha256": "571686d1e788f0c5375f037840ff723020bff4b02b80315e571239e4ed89e680"
+    },
+    {
+      "path": "asi/tests/prepare_enc96_projection_tiled.py",
+      "bytes": 2041,
+      "sha256": "0d3abbf09200476882714d0e9daaa511c0299b75d5d8c6fd5e07b072e253e845"
+    },
+    {
+      "path": "asi/tests/prepare_enc96_qv_rebase.py",
+      "bytes": 2128,
+      "sha256": "4c601efe52858993f346260c641af14ccb8f20e74c8f2e2f8933c26d99fd078c"
+    },
+    {
+      "path": "asi/tests/prepare_enc96_qv_serial.py",
+      "bytes": 2847,
+      "sha256": "003cae0e77d1d2206fb30cf60bc177e64f1a8084b6d4ad9eb254d5a1d5b69c1c"
+    },
+    {
+      "path": "asi/tests/prepare_enc96_residual_reload.py",
+      "bytes": 2901,
+      "sha256": "06c50a4c833a7d2d8be91280f6900728b279f6f52ac1440dc67dd6af1e765066"
+    },
+    {
+      "path": "asi/tests/prepare_enc96_wave_rcp.py",
+      "bytes": 1562,
+      "sha256": "17d5b168124460446e0594fcf4e2e64d8c5e2e8823f649e5c6617fa6351a59c3"
+    },
+    {
+      "path": "asi/tests/prepare_enc96_wave_tiles.py",
+      "bytes": 1504,
+      "sha256": "2101798d8a5df80174b7fae4bf52a649c27833b9753332c6483536146e80875c"
+    },
+    {
+      "path": "asi/tests/run_enc96_mlp16_timing.ps1",
+      "bytes": 2748,
+      "sha256": "257147d09dc7e3e4f5239694009fc2f0656212bd1279f19bccb51c2467ceb010"
+    },
+    {
+      "path": "asi/tests/run_enc96_projection_tile_timing.ps1",
+      "bytes": 2792,
+      "sha256": "8bfd99256677b7cfd6314366e87797314f56d4fb71a898ad54d35481246498f2"
+    },
+    {
+      "path": "asi/tests/run_enc96_qv_serial_timing.ps1",
+      "bytes": 2760,
+      "sha256": "8419371f986b5c3ab08c31ce047444c2763c989060a3457abea4155439b17ed5"
+    },
+    {
+      "path": "asi/tests/run_enc96_residual_timing.ps1",
+      "bytes": 2771,
+      "sha256": "e5c58a4257f99b0e8218c7bb3607d04aa2b16fc3bfa870453cbb45d21f46af41"
+    },
+    {
+      "path": "asi/tests/run_enc96_timing.ps1",
+      "bytes": 2738,
+      "sha256": "ae2b818bdfb8f26e1a262c259044d88cf7ab2296d9aa51d34fd0f5a46541aab2"
+    },
+    {
+      "path": "asi/tests/run_enc96_wave_long_correctness.ps1",
+      "bytes": 2138,
+      "sha256": "bec26257d833a4f22ea539f7451acdc2896d86bf881efc62b0087b03134bee90"
+    },
+    {
+      "path": "asi/tests/run_enc96_wave_tiles_timing.ps1",
+      "bytes": 2873,
+      "sha256": "babfaece5284b51cfa1507d106e2a3e4e800141da46f4ff54edfae8bac225610"
+    },
+    {
+      "path": "asi/tests/summarize_cmat_address.py",
+      "bytes": 2999,
+      "sha256": "2d041eb11e77a1567e53981f8b7bf9d66b90de1f051e7552803d41cfb4389d50"
+    },
+    {
+      "path": "asi/tests/summarize_enc128_unroll.py",
+      "bytes": 2588,
+      "sha256": "c336a19c1689f7b4f2eb7418cd0193cfe833a540632992c5808ba49abc6d1044"
+    },
+    {
+      "path": "asi/tests/summarize_enc96_experiment.py",
+      "bytes": 3246,
+      "sha256": "200e8279c1d9181519880cfbdd6b15e6bceecde61447a7e576bb58c3a750f110"
+    },
+    {
+      "path": "asi/tests/summarize_enc96_long_correctness.py",
+      "bytes": 2150,
+      "sha256": "dd2f92ce4076469b0438e9ccdca3c02bcad091a2d0d1fb38a293d34833755718"
+    },
+    {
+      "path": "asi/tests/summarize_enc96_mlp16.py",
+      "bytes": 3244,
+      "sha256": "88d02070e9b6e8ee48f36d308b262bde9029c1cb997d4a18427d8f43ddd31ea0"
+    },
+    {
+      "path": "asi/tests/summarize_enc96_profile.py",
+      "bytes": 1662,
+      "sha256": "f3de38912ac8371da165a20e3793cea9135dc714b177e9ae8cb916127427a2a8"
+    },
+    {
+      "path": "asi/tests/summarize_enc96_projection_tile.py",
+      "bytes": 3341,
+      "sha256": "c3fc3b81e9e02153c0d8f0dcfe5f9b54b12a2aefca5e4406a3bbeb83f2a33f72"
+    },
+    {
+      "path": "asi/tests/summarize_enc96_qv_serial.py",
+      "bytes": 3280,
+      "sha256": "73eca098205de8ff378f04cbc7658a4b4ba255a6691603f04a7b68bc003dc427"
+    },
+    {
+      "path": "asi/tests/summarize_enc96_residual.py",
+      "bytes": 3278,
+      "sha256": "236d3cb3e55f66b40fd068c08d8513ab1dc90446fdd9a4c624ea85e9113c766d"
+    },
+    {
+      "path": "asi/tests/summarize_enc96_wave_confirmation.py",
+      "bytes": 2310,
+      "sha256": "90fea4e51d3fc5d51a90cb39d4f37b55a434b58f198c5ee850c8cba07e874936"
+    },
+    {
+      "path": "asi/tests/summarize_enc96_wave_rcp.py",
+      "bytes": 3737,
+      "sha256": "c40922f0316416bb759a3b9f4151c7c889de3566a6d8680116c37f731a781611"
+    },
+    {
+      "path": "asi/tests/summarize_enc96_wave_tiles.py",
+      "bytes": 3282,
+      "sha256": "889b6b3e7c3ea2eb44951e3c61eb81403affe622d50a554a303afb9f3302a7a5"
+    },
+    {
+      "path": "asi/tests/verify_address_retained_source.py",
+      "bytes": 2769,
+      "sha256": "19a96d6bc9f55e67026a19fe7197101af7885d57fe452a6b1be37bb2f2012ec0"
+    },
+    {
+      "path": "asi/tests/verify_cmat_gpu_records.py",
+      "bytes": 1373,
+      "sha256": "8db96637795a6697c0c84c7ab915be1664c59d23e5c6089dec046aef28d8a1c6"
+    },
+    {
+      "path": "asi/tests/verify_enc96_retained_source.py",
+      "bytes": 1416,
+      "sha256": "4441f112372f754e57886cc51e9e7d9cd9a02ffb380e1bb674d2fe1412c113a8"
+    },
+    {
+      "path": "asi/tests/w2_archive_screen.py",
+      "bytes": 1531,
+      "sha256": "7ea034cba5ac5607aef60bee6aceebf227ab8c0ca1bfadcadf58b1e897ec96ff"
+    },
+    {
+      "path": "asi/tests/w2_prepare_shortlist.py",
+      "bytes": 2415,
+      "sha256": "d1c341b21e2e2b1d58acb21700fd6ed145d481b39a207b6e0bf6fbe7d5da6c65"
+    },
+    {
+      "path": "asi/tests/w2_screen.py",
+      "bytes": 3964,
+      "sha256": "a0e012f459d3258c4f1900a77f7f9d6f5f9ceab5c78a53d915611bffe37350c3"
+    }
+  ]
+}

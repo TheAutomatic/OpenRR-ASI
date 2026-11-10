@@ -1,0 +1,8 @@
+{
+  "cases": 163072,
+  "cross_4g_carries": 87022,
+  "max_stride": 143165575,
+  "lane_uniqueness": true,
+  "signed_source_indices_preserved": true,
+  "model_only": true
+}

@@ -1,0 +1,36 @@
+139: 	 v1: %121 = v_min_i32 (kill)%119, (kill)%120
+140: 	 v1: %122 = v_add3_u32 %75, %78, 16
+141: 	 v1: %123 = v_and_b32 7, %122
+142: 	 v1: %124 = v_add_u32 %82, %123
+143: 	 v1: %125 = v_ashrrev_i32 3, %122
+144: 	 v1: %126 = v_add_u32 %85, (kill)%125
+145: 	 v1: %127 = v_subrev_u32 %14, (kill)%124
+845: 	 s4: %866 = s_load_dwordx4 %12, 32 storage:buffer semantics:private,reorder
+846: 	 s1: %867,  s1: %868,  s1: %869,  s1: %870 = p_split_vector (kill)%866
+847: 	 v1: %871 = v_lshrrev_b32 4, %72
+848: 	 v1: %872 = v_lshlrev_b32 3, (is16bit)%871
+849: 	 v2: %873 = p_create_vector %872, 0
+850: 	 v2: %874 = v_lshlrev_b64 1, (kill)%873
+851: 	 v1: %875,  v1: %876 = p_split_vector (kill)%874
+919: 	 v1: %7631 = p_parallelcopy %883
+920: 	 s1: %7873 = p_parallelcopy 0x800000
+921: 	scratch_store_dword  v1: undef, %7873, (kill)%123 offset:-8388604 storage:vgpr_spill semantics:private
+922: 	scratch_store_dword  v1: undef, %7873, (kill)%871 offset:-8388608 storage:vgpr_spill semantics:private
+923: 	p_logical_end
+924: 	p_branch BB13
+925: BB13
+926: /* logical preds: BB12, BB18, / linear preds: BB12, BB18, / kind: uniform, loop-header, */
+4105: 	 v1: %4747 = v_lshlrev_b32 4, (is16bit)(kill)%4746
+4106: 	ds_write_b128 (kill)%4747, (kill)%4745 storage:shared
+4107: 	 v1: %7871 = scratch_load_dword  v1: undef, %7873 offset:-8388604 storage:vgpr_spill semantics:private
+4108: 	 v1: %4748 = v_lshrrev_b32 1, (kill)%7871
+4109: 	 v1: %4749 = v_lshrrev_b32 4, %122
+4110: 	 v1: %4750 = v_lshl_add_u32 (is16bit)(kill)%4749, 2, (kill)%4748
+4111: 	 v1: %4751 = v_and_b32 1, %122
+5552: 	p_barrier_signal storage:shared semantics:release scope:workgroup exec_scope:workgroup
+5553: 	p_barrier_wait storage:shared semantics:acquire scope:workgroup exec_scope:workgroup
+5554: 	 v1: %7872 = scratch_load_dword  v1: undef, (kill)%7873 offset:-8388608 storage:vgpr_spill semantics:private
+5555: 	 v1: %7003 = v_lshl_add_u32 (is16bit)(kill)%7872, 10, (kill)%4787
+5556: 	 v1: %7004 = v_add_lshl_u32 (kill)%7003, (kill)%75, 1
+5557: 	ds_write_b16 %7004, (kill)%6896 storage:shared
+5558: 	ds_write_b16 %7004, (kill)%6897 offset0:256 storage:shared

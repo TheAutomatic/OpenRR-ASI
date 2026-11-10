@@ -1,0 +1,8 @@
+{
+  "steady": 48,
+  "warmup": 24,
+  "drs": 24,
+  "candidate_role": "variant",
+  "round": 2,
+  "baseline_role": "original"
+}

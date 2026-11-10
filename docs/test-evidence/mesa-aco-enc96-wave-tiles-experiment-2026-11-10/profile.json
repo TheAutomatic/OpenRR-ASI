@@ -1,0 +1,26 @@
+[
+  {
+    "round": 0,
+    "role": "original",
+    "samples": 596,
+    "target_ms": 0.2293
+  },
+  {
+    "round": 0,
+    "role": "variant",
+    "samples": 596,
+    "target_ms": 0.1738
+  },
+  {
+    "round": 1,
+    "role": "variant",
+    "samples": 596,
+    "target_ms": 0.1744
+  },
+  {
+    "round": 1,
+    "role": "original",
+    "samples": 596,
+    "target_ms": 0.2294
+  }
+]

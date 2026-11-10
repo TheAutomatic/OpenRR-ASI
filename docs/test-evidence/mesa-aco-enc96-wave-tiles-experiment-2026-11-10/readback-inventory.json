@@ -1,0 +1,110 @@
+[
+  {
+    "run": "enc96-wave-long-correctness",
+    "bin_count": 584,
+    "bytes": 9687859200.0,
+    "review_status": "Hashes and small summaries archived; raw readbacks retained for review"
+  },
+  {
+    "run": "enc96-wave-rcp-long-correctness",
+    "bin_count": 584,
+    "bytes": 9687859200.0,
+    "review_status": "Hashes and small summaries archived; raw readbacks retained for review"
+  },
+  {
+    "run": "enc96-wave-rcp-trace-139",
+    "bin_count": 138,
+    "bytes": 906232384.0,
+    "review_status": "Hashes and small summaries archived; raw readbacks retained for review"
+  },
+  {
+    "run": "enc96-wave-trace-139",
+    "bin_count": 138,
+    "bytes": 906232384.0,
+    "review_status": "Hashes and small summaries archived; raw readbacks retained for review"
+  },
+  {
+    "run": "fast-enc96-address-control",
+    "bin_count": 40,
+    "bytes": 663552000.0,
+    "review_status": "Hashes and small summaries archived; raw readbacks retained for review"
+  },
+  {
+    "run": "fast-enc96-address-trace-6",
+    "bin_count": 178,
+    "bytes": 1569784384.0,
+    "review_status": "Hashes and small summaries archived; raw readbacks retained for review"
+  },
+  {
+    "run": "fast-enc96-mlp16-control",
+    "bin_count": 40,
+    "bytes": 663552000.0,
+    "review_status": "Hashes and small summaries archived; raw readbacks retained for review"
+  },
+  {
+    "run": "fast-enc96-mlp16-trace-6",
+    "bin_count": 178,
+    "bytes": 1569784384.0,
+    "review_status": "Hashes and small summaries archived; raw readbacks retained for review"
+  },
+  {
+    "run": "fast-enc96-projection-tile-control",
+    "bin_count": 40,
+    "bytes": 663552000.0,
+    "review_status": "Hashes and small summaries archived; raw readbacks retained for review"
+  },
+  {
+    "run": "fast-enc96-projection-tile-trace-6",
+    "bin_count": 178,
+    "bytes": 1569784384.0,
+    "review_status": "Hashes and small summaries archived; raw readbacks retained for review"
+  },
+  {
+    "run": "fast-enc96-qv-serial-control",
+    "bin_count": 40,
+    "bytes": 663552000.0,
+    "review_status": "Hashes and small summaries archived; raw readbacks retained for review"
+  },
+  {
+    "run": "fast-enc96-qv-serial-trace-6",
+    "bin_count": 178,
+    "bytes": 1569784384.0,
+    "review_status": "Hashes and small summaries archived; raw readbacks retained for review"
+  },
+  {
+    "run": "fast-enc96-residual-control",
+    "bin_count": 40,
+    "bytes": 663552000.0,
+    "review_status": "Hashes and small summaries archived; raw readbacks retained for review"
+  },
+  {
+    "run": "fast-enc96-residual-trace-6",
+    "bin_count": 178,
+    "bytes": 1569784384.0,
+    "review_status": "Hashes and small summaries archived; raw readbacks retained for review"
+  },
+  {
+    "run": "fast-enc96-wave-rcp-control",
+    "bin_count": 40,
+    "bytes": 663552000.0,
+    "review_status": "Hashes and small summaries archived; raw readbacks retained for review"
+  },
+  {
+    "run": "fast-enc96-wave-rcp-trace-6",
+    "bin_count": 178,
+    "bytes": 1569784384.0,
+    "review_status": "Hashes and small summaries archived; raw readbacks retained for review"
+  },
+  {
+    "run": "fast-enc96-wave-tiles-control",
+    "bin_count": 40,
+    "bytes": 663552000.0,
+    "review_status": "Hashes and small summaries archived; raw readbacks retained for review"
+  },
+  {
+    "run": "fast-enc96-wave-tiles-trace-6",
+    "bin_count": 178,
+    "bytes": 1569784384.0,
+    "review_status": "Hashes and small summaries archived; raw readbacks retained for review"
+  }
+]

@@ -1,0 +1,25 @@
+{
+  "resolution": "1280x720->1920x1080",
+  "baseline_compiler": 3,
+  "candidate_compiler": 3,
+  "fast_mode": 1,
+  "parity_coverage": "phase_last_frame",
+  "warmup": 48, "frames": 240, "drs_frames": 64,
+  "parity_passed": true,
+  "parity": {
+    "steady": {"passed": true, "baseline_non_finite": 0, "candidate_non_finite": 0, "exact_percent": 100, "max_ulp_diff": 0, "psnr_01": 999, "psnr_tonemap": 999, "p99_abs_err": 0, "max_abs_err": 0},
+    "drs": {"passed": true, "baseline_non_finite": 0, "candidate_non_finite": 0, "exact_percent": 100, "max_ulp_diff": 0, "psnr_01": 999, "psnr_tonemap": 999, "p99_abs_err": 0, "max_abs_err": 0}
+  },
+  "baseline": {"steady_median_ms": 3.77276, "steady_p95_ms": 5.33944, "drs_median_ms": 3.53696},
+  "candidate": {
+    "steady_mean_ms": 3.95873,
+    "steady_median_ms": 3.80412,
+    "steady_p95_ms": 5.4924,
+    "drs_mean_ms": 3.52969,
+    "drs_median_ms": 3.57816,
+    "drs_p95_ms": 4.67312,
+    "drs_max_ms": 5.49816,
+    "feature_vram_mb": 252,
+    "process_vram_delta_mb": 274.586
+  }
+}

@@ -1,0 +1,10 @@
+[
+  {
+    "address": "off",
+    "matches_prior_code": true
+  },
+  {
+    "address": "on",
+    "matches_prior_code": true
+  }
+]

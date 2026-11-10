@@ -1,0 +1,131 @@
+[1/4] Compiling GPU & Runtime sources...
+[2/4] Compiling ASI shell, ImGui & MinHook...
+[3/4] Generating Vulkan lazy loader & linking openrr-amd.asi...
+[4/4] Building runtime SPIR-V shaders & staging package...
+built 90 runtime SPIR-V shaders in /mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/shaders
+asi/build/mesa/global-address.patch
+ninja: Entering directory `/home/kenny/work/openrr-mesa-aco/build'
+[1/11] Generating src/git_sha1.h with a custom command
+[2/9] Compiling C object src/amd/vulkan/libvulkan_radeon.so.p/radv_descriptor_set.c.o
+[3/9] Compiling C object src/amd/vulkan/libvulkan_radeon.so.p/radv_device.c.o
+[4/9] Compiling C object src/amd/vulkan/libvulkan_radeon.so.p/nir_radv_nir_lower_descriptors.c.o
+[5/9] Compiling C object src/amd/vulkan/libvulkan_radeon.so.p/radv_shader.c.o
+[6/9] Compiling C object src/amd/vulkan/libvulkan_radeon.so.p/nir_radv_nir_lower_cooperative_matrix.c.o
+[7/9] Compiling C++ object src/amd/compiler/libaco.a.p/aco_assembler.cpp.o
+[8/9] Linking static target src/amd/compiler/libaco.a
+[9/9] Linking target src/amd/vulkan/libvulkan_radeon.so
+d3d_enc0_attr_f_lt.spv: d1e35384549e752c 26288 bytes, 96 VGPR, set0=0
+enc0_attr_f_lt.spv: d89c77ffd1eb11fa 19304 bytes, 96 VGPR, set0=-1
+enc0_attr_f_lt.spv: aaf5cb7a8ce116ff 21828 bytes, 96 VGPR, set0=-1
+dec_dfn_64_64_f_lt.spv: 52722875f5de9eb1 29116 bytes, 240 VGPR, set0=-1
+dec_up_64_64_96_f_lt.spv: 40dc71ff1cd2b848 31128 bytes, 256 VGPR, set0=-1
+enc0_attr_f_lt.spv: 904cfe3480396ab7 23284 bytes, 96 VGPR, set0=-1
+enc_stage_64_64_96_f_lt.spv: 8cca057e36e2b4cc 36640 bytes, 256 VGPR, set0=-1
+post_f_lt.spv: de6a659020e0bbba 21000 bytes, 120 VGPR, set0=0
+dec_dfn_64_64_f_lt.spv: f7d0914b380d5548 29488 bytes, 240 VGPR, set0=-1
+dec_up_64_64_96_f_lt.spv: a3a647bb92620bdc 32540 bytes, 240 VGPR, set0=-1
+enc_stage_64_64_96_f_lt.spv: 002d1b4baa5c58ce 38072 bytes, 240 VGPR, set0=-1
+post_f_lt.spv: 67c230d72edf262e 20940 bytes, 120 VGPR, set0=0
+post_f_lt.spv: 7139737ce729e99e 22284 bytes, 120 VGPR, set0=0
+dec_head_32_64_f_lt.spv: 3eccd9693a0d87ef 23584 bytes, 192 VGPR, set0=-1
+dec_up_32_64_64_f_lt.spv: b7dd12c10dab8afb 25552 bytes, 216 VGPR, set0=-1
+enc0_stage_32_64_f_lt.spv: 0705fad577a0f8a7 25412 bytes, 192 VGPR, set0=-1
+enc_stage_64_64_96_f_lt.spv: 8cca057e36e2b4cc 36640 bytes, 256 VGPR, set0=-1
+post_f_lt.spv: 67c230d72edf262e 20940 bytes, 120 VGPR, set0=0
+dec_head_32_64_f_lt.spv: eeaf87e31357ade8 23584 bytes, 192 VGPR, set0=-1
+dec_up_32_64_64_f_lt.spv: c1903b8e5c9adc74 25436 bytes, 256 VGPR, set0=-1
+enc0_stage_32_64_f_lt.spv: 49348e1aab50da5f 25412 bytes, 192 VGPR, set0=-1
+enc_stage_64_64_96_f_lt.spv: 03e17cddd77f0e90 36640 bytes, 256 VGPR, set0=-1
+post_f_lt.spv: ee9810da3013871c 20940 bytes, 120 VGPR, set0=0
+ae.spv: 8053435623e90df5 1572 bytes, 24 VGPR, set0=-1
+clear_range.spv: cffca948d4b28dac 220 bytes, 24 VGPR, set0=-1
+d3d_ae.spv: 176dd5c87be9b223 1664 bytes, 24 VGPR, set0=0
+d3d_downsample.spv: fa1ab80252e2a7e5 2980 bytes, 48 VGPR, set0=0
+d3d_downsample_lt.spv: b8457d1fbeb4e9e3 2604 bytes, 48 VGPR, set0=0
+d3d_downsample_tl.spv: 66226a06cd06c7f3 10600 bytes, 96 VGPR, set0=0
+d3d_downsample_tl_lt.spv: 518e6587dc9e69b8 10220 bytes, 96 VGPR, set0=0
+d3d_enc0_attr_f.spv: b3655442fe0ad69e 30540 bytes, 96 VGPR, set0=0
+d3d_enc0_attr_f_lt.spv: 1d6fd9f4cc1c893c 28444 bytes, 96 VGPR, set0=0
+d3d_enc0_attr_f_w.spv: fc15342056305889 30608 bytes, 96 VGPR, set0=0
+d3d_enc0_attr_f_w_lt.spv: 2bfe14fa9a6e5624 28504 bytes, 96 VGPR, set0=0
+d3d_ingest.spv: 055cdb1ca00ecf88 30660 bytes, 48 VGPR, set0=0
+d3d_pack.spv: 37b54dc8375d23da 3600 bytes, 24 VGPR, set0=0
+dec_dfn_128_128_f.spv: a536c1aee1b5b373 28192 bytes, 256 VGPR, set0=-1
+dec_dfn_128_128_f_lt.spv: 28bc7057f2b8ac76 27732 bytes, 256 VGPR, set0=-1
+dec_dfn_128_128_fl.spv: 095787dd4133557e 29592 bytes, 256 VGPR, set0=-1
+dec_dfn_128_128_fl_lt.spv: 4ecf3b5cd58f6a11 29256 bytes, 256 VGPR, set0=-1
+dec_dfn_160_256_f.spv: 81d017418fe547af 23140 bytes, 192 VGPR, set0=-1
+dec_dfn_160_256_f_lt.spv: c29f41aeb581fce8 22984 bytes, 192 VGPR, set0=-1
+dec_dfn_160_256_fl.spv: a89b668e3da09f5b 24644 bytes, 192 VGPR, set0=-1
+dec_dfn_160_256_fl_lt.spv: 6bc90aef575d98cf 24488 bytes, 192 VGPR, set0=-1
+dec_dfn_64_64_f.spv: 777985d1831329ca 29676 bytes, 240 VGPR, set0=-1
+dec_dfn_64_64_f_lt.spv: 52722875f5de9eb1 29116 bytes, 240 VGPR, set0=-1
+dec_dfn_96_128_f.spv: 50c4593efddb5754 26204 bytes, 256 VGPR, set0=-1
+dec_dfn_96_128_f_lt.spv: 941882166ce09254 25992 bytes, 256 VGPR, set0=-1
+dec_dfn_96_128_fl.spv: 608c28c0029891f3 27784 bytes, 256 VGPR, set0=-1
+dec_dfn_96_128_fl_lt.spv: 607b418f7ed5346e 24392 bytes, 256 VGPR, set0=-1
+dec_head_32_64_f.spv: b799ea871f0212a5 27196 bytes, 192 VGPR, set0=-1
+dec_head_32_64_f_lt.spv: 3eccd9693a0d87ef 23584 bytes, 192 VGPR, set0=-1
+dec_up_128_128_160_f.spv: 8207a2a6f176a4d8 27364 bytes, 256 VGPR, set0=-1
+dec_up_128_128_160_f_lt.spv: 28e6b3fa305be4bc 26976 bytes, 256 VGPR, set0=-1
+dec_up_128_128_160_fl.spv: 6be5b3c53083b759 28708 bytes, 256 VGPR, set0=-1
+dec_up_128_128_160_fl_lt.spv: 5d05fcc3de384276 28344 bytes, 256 VGPR, set0=-1
+dec_up_160_256_160_f.spv: 6d872e31c95afce5 23320 bytes, 192 VGPR, set0=-1
+dec_up_160_256_160_f_lt.spv: d4cad4131a9d2071 23232 bytes, 192 VGPR, set0=-1
+dec_up_160_256_160_fl.spv: 09ae4164fbb15cf1 24908 bytes, 192 VGPR, set0=-1
+dec_up_160_256_160_fl_lt.spv: 360f7a5dd195af7c 24796 bytes, 192 VGPR, set0=-1
+dec_up_32_64_64_f.spv: addffdc4c6b922e8 28052 bytes, 216 VGPR, set0=-1
+dec_up_32_64_64_f_lt.spv: b7dd12c10dab8afb 25552 bytes, 216 VGPR, set0=-1
+dec_up_64_64_96_f.spv: 238fcc9bcf09fa55 31656 bytes, 256 VGPR, set0=-1
+dec_up_64_64_96_f_lt.spv: 40dc71ff1cd2b848 31128 bytes, 256 VGPR, set0=-1
+dec_up_96_128_128_f.spv: 7397e05f8c2da77a 30396 bytes, 192 VGPR, set0=-1
+dec_up_96_128_128_f_lt.spv: 79ea9a0f90a74b24 30032 bytes, 192 VGPR, set0=-1
+dec_up_96_128_128_fl.spv: 94faa2ccbba8501e 31856 bytes, 192 VGPR, set0=-1
+dec_up_96_128_128_fl_lt.spv: caa3f6091e490cda 31436 bytes, 192 VGPR, set0=-1
+dfn_export.spv: 5eff19ab0da39495 728 bytes, 24 VGPR, set0=-1
+dfn_export_lt.spv: 8cadc24c9e03891b 660 bytes, 24 VGPR, set0=-1
+dfn_import.spv: 92deee5eb00fde72 3252 bytes, 24 VGPR, set0=-1
+dfn_import_lt.spv: 9494ed55ba8520ba 3124 bytes, 24 VGPR, set0=-1
+downsample.spv: 1868a527fddfb730 3152 bytes, 48 VGPR, set0=-1
+downsample_lt.spv: af1b93f587f9f210 2796 bytes, 48 VGPR, set0=-1
+downsample_tl.spv: 71f444e6a4c8f74a 10776 bytes, 96 VGPR, set0=-1
+downsample_tl_lt.spv: 4c4d3749900919fe 10416 bytes, 96 VGPR, set0=-1
+enc0_attr_f.spv: b7ec90ad9bb77d31 25416 bytes, 96 VGPR, set0=-1
+enc0_attr_f_lt.spv: 904cfe3480396ab7 23284 bytes, 96 VGPR, set0=-1
+enc0_attr_f_w.spv: 2a1805e8888ee841 25472 bytes, 96 VGPR, set0=-1
+enc0_attr_f_w_lt.spv: 037978cdd8781555 23356 bytes, 96 VGPR, set0=-1
+enc0_stage_32_64_f.spv: 4f4d742046c9b6f1 28120 bytes, 216 VGPR, set0=-1
+enc0_stage_32_64_f_lt.spv: 0705fad577a0f8a7 25412 bytes, 192 VGPR, set0=-1
+enc0_stage_32_64_f_w.spv: da0466da433262b2 27884 bytes, 216 VGPR, set0=-1
+enc0_stage_32_64_f_w_lt.spv: a1da9aadc8fc409c 25148 bytes, 192 VGPR, set0=-1
+enc_stage_128_128_160_f.spv: f6ccd66e59440a06 35812 bytes, 240 VGPR, set0=-1
+enc_stage_128_128_160_f_lt.spv: 9cfa240f087e7153 35612 bytes, 240 VGPR, set0=-1
+enc_stage_128_128_160_fl.spv: 231bf803323201db 37508 bytes, 240 VGPR, set0=-1
+enc_stage_128_128_160_fl_lt.spv: 7637570aac01b415 33128 bytes, 240 VGPR, set0=-1
+enc_stage_160_256_0_f.spv: 0d775a6335a1b380 22216 bytes, 192 VGPR, set0=-1
+enc_stage_160_256_0_f_lt.spv: 1499d383d594a247 22108 bytes, 192 VGPR, set0=-1
+enc_stage_160_256_0_fl.spv: c5ef1c72a8fa61ac 23656 bytes, 192 VGPR, set0=-1
+enc_stage_160_256_0_fl_lt.spv: f2418b8d764403b6 23536 bytes, 192 VGPR, set0=-1
+enc_stage_160_256_160_f.spv: 38501fcf01b1e652 30052 bytes, 192 VGPR, set0=-1
+enc_stage_160_256_160_f_lt.spv: 543b3fdebddc2f1d 29936 bytes, 192 VGPR, set0=-1
+enc_stage_160_256_160_fl.spv: 4d98a31a6a7789ad 31748 bytes, 192 VGPR, set0=-1
+enc_stage_160_256_160_fl_lt.spv: d80cf61e2f2f74ec 31748 bytes, 192 VGPR, set0=-1
+enc_stage_64_64_96_f.spv: 59a8847a905b419b 36984 bytes, 256 VGPR, set0=-1
+enc_stage_64_64_96_f_lt.spv: 8cca057e36e2b4cc 36640 bytes, 256 VGPR, set0=-1
+enc_stage_96_128_128_f.spv: 8d07ac141832d300 39068 bytes, 256 VGPR, set0=-1
+enc_stage_96_128_128_f_lt.spv: 2d30684c45e56b62 38900 bytes, 256 VGPR, set0=-1
+enc_stage_96_128_128_fl.spv: 7425bd19500d6479 39716 bytes, 256 VGPR, set0=-1
+enc_stage_96_128_128_fl_lt.spv: f3817f3fb0a26545 38048 bytes, 240 VGPR, set0=-1
+ingest.spv: 83008aab2deab055 29960 bytes, 48 VGPR, set0=-1
+pack.spv: fdc5ed41ade87e02 3520 bytes, 24 VGPR, set0=-1
+pooled_history2.spv: 7fcd28c3e1986a33 2220 bytes, 24 VGPR, set0=-1
+pooled_history2_lt.spv: f9a40136548780ff 992 bytes, 24 VGPR, set0=-1
+post_dlt_f.spv: f59fecb0c6c722dd 24996 bytes, 144 VGPR, set0=0
+post_dlt_f_lt.spv: 06a7db5bd94c81e0 26032 bytes, 120 VGPR, set0=0
+post_f.spv: afe8e28b8283b96b 20696 bytes, 120 VGPR, set0=0
+post_f_lt.spv: 67c230d72edf262e 20940 bytes, 120 VGPR, set0=0
+post_tile.spv: 350eb51855cd5995 1284 bytes, 48 VGPR, set0=-1
+selftest.spv: 0c5629eb03f4fe89 180 bytes, 24 VGPR, set0=-1
+selftest_tex.spv: fcef346c12cfe86f 408 bytes, 24 VGPR, set0=0
+Built /mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/plugins/openrr-amd.asi (3322132 bytes, 104 Vulkan entry points resolved lazily)
+Exports: 1  Imports: bcrypt.dll KERNEL32.dll msvcrt.dll SHELL32.dll USER32.dll VERSION.dll 

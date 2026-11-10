@@ -1,0 +1,9 @@
+{
+  "steady": 48,
+  "candidate": "build/aco-runtime-trace/experiment-w2-screen/shortlist/dec_dfn_64_64",
+  "baseline_role": "original",
+  "warmup": 16,
+  "candidate_role": "variant",
+  "drs": 24,
+  "round": 0
+}

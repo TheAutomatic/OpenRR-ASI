@@ -1,0 +1,16 @@
+{
+  "deleted_files": 2504,
+  "reclaimed_bytes": 33240223104.0,
+  "kept_traces": [
+    "enc96-wave-trace-139",
+    "enc96-wave-rcp-trace-139",
+    "fast-enc96-wave-rcp-trace-6"
+  ],
+  "kept_long_frames": [
+    130,
+    131,
+    279
+  ],
+  "original_baseline_untouched": true,
+  "free_bytes": 78364606464
+}

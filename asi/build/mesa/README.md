@@ -23,7 +23,8 @@ From the repository directory under WSL:
     python3 asi/build/build_aco_records.py --out build/asi/stage/openrr-amd/aco \
         --precision global --matrix-loads vector8 \
         build/asi/stage/openrr-amd/shaders build/asi/occ_nopad \
-        build/asi/occ_pad16k build/asi/b2_*
+        build/asi/occ_pad16k build/asi/b2_* \
+        --cmat-address-shaders dec_dfn_96_128_fl_lt enc_stage_128_128_160_fl_lt
 
 For the complete Windows package, use OPENRR_BUILD_ACO=1 with
 asi/build/build_asi.sh. BUILD_LOCAL_ASI.cmd forwards that setting to WSL.
@@ -133,3 +134,60 @@ shader packs existing FP16 bit patterns directly to avoid an observed LLPC
 round-trip conversion corruption of the exposure attribute.
 See docs/test-evidence/mesa-aco-review-2026-11-09.md for validation boundaries
 and outstanding review items.
+
+## Retained bounded cmat address lowering
+
+build_capture.sh now applies global-address.patch after capturev4. The new
+lowering is dormant unless ONR_ACO_CMAT_ADDRESS is set. build_aco_records.py
+clears an inherited setting and enables it only for exact stems passed with
+--cmat-address-shaders. build_asi.sh selects dec_dfn_96_128_fl_lt and
+enc_stage_128_128_160_fl_lt; global/vector8 and precision remain unchanged.
+The exact selection is included in the record fingerprint and manifest.
+Toolchain JSON also binds the additional patch SHA256.
+
+The lowering retains the full64-bit pointer and signed source-index behavior;
+only provably bounded generated wave32 FP16 column-major lane offsets become
+one32-bit byte offset. Stores, LDS, transpose loads and dynamic strides stay on
+the original path. enc128's one MLP slice loop uses DontUnroll in its flow/lite
+variant because the cheaper address form otherwise crosses Mesa's unroll cost
+threshold. Other loop and global unroll policies remain unchanged.
+
+Prepared integration consists of retained enc96 one-tile/reciprocal policy,
+dec96 FC1 row/tile source factor, this enc128 loop hint, and the two exact-stem
+address records. Source/record identity and combined correctness/timing evidence
+are documented in docs/test-evidence/mesa-aco-enc128-unroll-2026-11-10.md.
+No throughput result establishes a general memory or synchronization bottleneck.
+
+## Delivery candidate and cache rules
+
+The regular isolated package entry is:
+
+    bash asi/build/build_asi.sh build/asi-delivery-candidate
+
+Leave OPENRR_ACO_PRECISION and OPENRR_ACO_MATRIX_LOADS unset for the retained
+global/vector8 default. Their overrides intentionally produce another policy
+and require separate validation. OPENRR_BUILD_ACO defaults to 1; setting it to
+0 does not produce a complete strict-ACO package. The two address stems are
+explicit in build_asi.sh, not inherited from the environment.
+
+The record fingerprint covers capture executable bytes, the producer script,
+the entire toolchain JSON (including RADV and both patch hashes), precision,
+matrix-load strategy and the sorted exact address-stem list. SPIR-V bytes
+select each record by FNV. A changed policy/toolchain invalidates the whole
+record set; a changed shader selects a new key. --refresh bypasses reuse.
+Reuse additionally requires the previous record SHA256 to match its file;
+missing, damaged or older unhashed records are recaptured. The JSON manifest
+records each shader's cmat_address flag and record SHA256. Its MessagePack
+runtime index binds the JSON hash and each SPIR-V/code hash.
+
+Regular builds put raw capture files in <build>/aco-capture, outside stage.
+Only plugin, INI, runtime SPIR-V, records and the two manifests are delivered.
+Debug symbols, unit tests, benchmark, Mesa and ABI probe fixtures remain build
+artifacts. Use a fresh output directory to avoid stale files from older stages;
+verify_aco_delivery.py rejects unexpected files and incomplete record coverage.
+
+Final package audit, tool/archive inventory, reproduced issue and validation
+boundaries are in docs/test-evidence/mesa-aco-delivery-2026-11-10.md.
+One-time experiment tools moved to that report's adjacent experiment-tools.zip;
+manage_aco_experiment_archive.py verifies and restores their exact original
+paths before historical reproduction commands are used.

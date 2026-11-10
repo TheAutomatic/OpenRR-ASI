@@ -1,0 +1,11 @@
+{
+  "mesa_commit": "96cb43121031992b85767f9c1be8f3f48e22b1d2",
+  "patch_version": 4,
+  "icd": "/home/kenny/work/openrr-mesa-aco/build/src/amd/vulkan/radeon_devenv_icd.x86_64.json",
+  "shim": "/home/kenny/work/openrr-mesa-aco/build/src/amd/drm-shim/libamdgpu_noop_drm_shim.so",
+  "library_path": "/home/kenny/src/mesa-deps/lib/x86_64-linux-gnu",
+  "radv_sha256": "1f789fa3d233a8fae7b0395468e78d87e33ab7a121dc53c992a9efc12e20d893",
+  "patch_sha256": "44b9ab78ecd6547081e3c64c5ce2b273fbd32c07bba5771627ad352b748d1d0a",
+  "cmat_address_patch_sha256": "3c3672ff7b03d921fa76197ee48fd4e624d8545f64b0da20031cb133cebcc364",
+  "cmat_address": "bounded-lane-byte-offset-v1-opt-in"
+}

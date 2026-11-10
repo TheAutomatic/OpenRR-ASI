@@ -2,8 +2,8 @@
 set -euo pipefail
 cd -- "$(dirname -- "$0")/../.."
 # Reuse existing CPU objects; leave archived ASIs and staged package untouched.
-base=build/asi
-out=build/aco-runtime-trace
+base=${OPENRR_TRACE_BASE:-build/asi}
+out=${OPENRR_TRACE_OUT:-build/aco-runtime-trace}
 mkdir -p "$out"
 cxx=x86_64-w64-mingw32-g++
 flags=(-std=c++20 -mf16c -O2 -fno-strict-aliasing -DNDEBUG -DONR_RR_STATIC -DONR_RR_BUILDING

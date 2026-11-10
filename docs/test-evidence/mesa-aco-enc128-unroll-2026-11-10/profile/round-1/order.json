@@ -1,0 +1,10 @@
+{
+  "warmup": 24,
+  "drs": 24,
+  "steady": 640,
+  "round": 1,
+  "candidate": "build/aco-runtime-trace/experiment-enc128-unroll/candidate",
+  "baseline_data": "build/aco-runtime-trace/experiment-cmat-address/dec_dfn_96_128_fl_lt/candidate/data",
+  "baseline_role": "variant",
+  "candidate_role": "original"
+}

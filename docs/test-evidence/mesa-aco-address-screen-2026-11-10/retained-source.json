@@ -1,0 +1,30 @@
+[
+  {
+    "file": "gpu/shaders/dec_dfn_96_128.comp",
+    "sha256": "027205cb129ffa92d88245127092c0b69a910add32848a0456325ff946ebf2aa"
+  },
+  {
+    "file": "gpu/shaders/enc_stage_96_128_128.comp",
+    "sha256": "10be863cd9ee0f5fecba3871dfbd0e754a2ccb0a1713173a8468360cf858e41c"
+  },
+  {
+    "file": "gpu/shaders/include/onr_block.glsl",
+    "sha256": "8d1b9b5fbe6478c9bb7f74a23eee175ecff7355f7adc501b2f35f56802793e71"
+  },
+  {
+    "file": "gpu/shaders/include/onr_block_w2.glsl",
+    "sha256": "18428489a12bf394ccb2ee9da2beb8dc646614f5e5bcf318a1e4fe4aab8b6665"
+  },
+  {
+    "file": "gpu/shaders/include/onr_block_fast.glsl",
+    "sha256": "790be164db37c636d4c2395f724f73f7710f23c50e4fd1b6a65d7593179ac431"
+  },
+  {
+    "file": "asi/tests/verify_address_retained_source.py",
+    "sha256": "19a96d6bc9f55e67026a19fe7197101af7885d57fe452a6b1be37bb2f2012ec0"
+  },
+  {
+    "file": "asi/tests/enc96_experiment_source.py",
+    "sha256": "491e4be966abf0415684ec3476562438ae0f24f6995df246a8b0481cec24cc97"
+  }
+]

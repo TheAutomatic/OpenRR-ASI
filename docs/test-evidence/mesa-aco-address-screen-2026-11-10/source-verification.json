@@ -1,0 +1,122 @@
+[
+  {
+    "shader": "enc_stage_96_128_128_f.spv",
+    "spv_fnv": "8d07ac141832d300",
+    "sha256": "1d9bdb5d42535f7249d0b8c304b28710c27e5faf0b54a4b2b9105e258a9d9e7e",
+    "matches": "build/asi/stage/openrr-amd/shaders/enc_stage_96_128_128_f.spv"
+  },
+  {
+    "shader": "enc_stage_96_128_128_f_lt.spv",
+    "spv_fnv": "2d30684c45e56b62",
+    "sha256": "ffda7cc144e7e9867eb9ae0960525cba12c696851b325f96b301cc5f60139702",
+    "matches": "build/asi/stage/openrr-amd/shaders/enc_stage_96_128_128_f_lt.spv"
+  },
+  {
+    "shader": "enc_stage_96_128_128_fl.spv",
+    "spv_fnv": "7425bd19500d6479",
+    "sha256": "cb3df96a5822d5e514c96c29ab40998acd76688e6b1aabcb9da37db675e4b4d2",
+    "matches": "build/asi/stage/openrr-amd/shaders/enc_stage_96_128_128_fl.spv"
+  },
+  {
+    "shader": "enc_stage_96_128_128_fl_lt.spv",
+    "spv_fnv": "f3817f3fb0a26545",
+    "sha256": "375f68a5b9b379d61d5bdd7d37123b651de38480b78c267f206ebf71a76f5717",
+    "matches": "build/aco-runtime-trace/experiment-enc96-wave-rcp/data/shaders/enc_stage_96_128_128_fl_lt.spv"
+  },
+  {
+    "shader": "enc_stage_128_128_160_f.spv",
+    "spv_fnv": "f6ccd66e59440a06",
+    "sha256": "d3d6deca8b76d02ecead9f1475f62781fc2e1976dd3127d4fe9b9546bcfb8261",
+    "matches": "build/asi/stage/openrr-amd/shaders/enc_stage_128_128_160_f.spv"
+  },
+  {
+    "shader": "enc_stage_128_128_160_f_lt.spv",
+    "spv_fnv": "9cfa240f087e7153",
+    "sha256": "b3a00af5a52c7262a38d2ca0107d91361ee3ee3c00e5e9b4622795cbd43c690f",
+    "matches": "build/asi/stage/openrr-amd/shaders/enc_stage_128_128_160_f_lt.spv"
+  },
+  {
+    "shader": "enc_stage_128_128_160_fl.spv",
+    "spv_fnv": "231bf803323201db",
+    "sha256": "032361b470b2311a228f0a5ac05190e889cce4120eb3a6154288d67788b9e457",
+    "matches": "build/asi/stage/openrr-amd/shaders/enc_stage_128_128_160_fl.spv"
+  },
+  {
+    "shader": "enc_stage_128_128_160_fl_lt.spv",
+    "spv_fnv": "5f78c6a07f1a5ec7",
+    "sha256": "c9baaaa56dc65abc8b221b53fae28764fbf5971547df39a4694506d1b138a075",
+    "matches": "build/asi/stage/openrr-amd/shaders/enc_stage_128_128_160_fl_lt.spv"
+  },
+  {
+    "shader": "dec_dfn_96_128_f.spv",
+    "spv_fnv": "50c4593efddb5754",
+    "sha256": "7d1fecb59beda4bf0ffafa76e30ce094404eb1028151224b183bdf1070b2a348",
+    "matches": "build/asi/stage/openrr-amd/shaders/dec_dfn_96_128_f.spv"
+  },
+  {
+    "shader": "dec_dfn_96_128_f_lt.spv",
+    "spv_fnv": "941882166ce09254",
+    "sha256": "f462c25893982e7e601aa8dd39a26b996c3e53f85eaa4c8500a6cb57a11baa0e",
+    "matches": "build/asi/stage/openrr-amd/shaders/dec_dfn_96_128_f_lt.spv"
+  },
+  {
+    "shader": "dec_dfn_96_128_fl.spv",
+    "spv_fnv": "608c28c0029891f3",
+    "sha256": "50891c88b9bc3b5c6b303a86a665086efe11dd6199e2769392629ebe35dc2194",
+    "matches": "build/asi/stage/openrr-amd/shaders/dec_dfn_96_128_fl.spv"
+  },
+  {
+    "shader": "dec_dfn_96_128_fl_lt.spv",
+    "spv_fnv": "607b418f7ed5346e",
+    "sha256": "99313d2d30c5a062e9943b69a4c04a4c318535202ff2587a38412347fb324066",
+    "matches": "build/aco-runtime-trace/experiment-address-screen/dec_dfn_96_128/candidate/data/shaders/dec_dfn_96_128_fl_lt.spv"
+  },
+  {
+    "shader": "dec_dfn_64_64_f.spv",
+    "spv_fnv": "777985d1831329ca",
+    "sha256": "c3585d2c6835c216960dbd9fc0c7fae1bef2180a6367272f9b503d43f0bd7799",
+    "matches": "build/asi/stage/openrr-amd/shaders/dec_dfn_64_64_f.spv"
+  },
+  {
+    "shader": "dec_dfn_64_64_f_lt.spv",
+    "spv_fnv": "52722875f5de9eb1",
+    "sha256": "5441a0f44bcfe657b7768d3ed1b1efc806a600ba8612949e7bb3dc114254f6f2",
+    "matches": "build/asi/stage/openrr-amd/shaders/dec_dfn_64_64_f_lt.spv"
+  },
+  {
+    "shader": "dec_up_64_64_96_f.spv",
+    "spv_fnv": "238fcc9bcf09fa55",
+    "sha256": "b93f98bcfe1135dc0c1683f9c2e1812d1192bdf88faee29a7cb13df3fe6beae7",
+    "matches": "build/asi/stage/openrr-amd/shaders/dec_up_64_64_96_f.spv"
+  },
+  {
+    "shader": "dec_up_64_64_96_f_lt.spv",
+    "spv_fnv": "40dc71ff1cd2b848",
+    "sha256": "b741d10ee6bc28499a316537f5f97ed1a171b5e9f4f9b9bda2a422704eb95d3b",
+    "matches": "build/asi/stage/openrr-amd/shaders/dec_up_64_64_96_f_lt.spv"
+  },
+  {
+    "shader": "enc_stage_64_64_96_f.spv",
+    "spv_fnv": "59a8847a905b419b",
+    "sha256": "35bc21c3ed713cd80296aef01cac937dc6d89d3af75a14ac20c7298fa3334073",
+    "matches": "build/asi/stage/openrr-amd/shaders/enc_stage_64_64_96_f.spv"
+  },
+  {
+    "shader": "enc_stage_64_64_96_f_lt.spv",
+    "spv_fnv": "8cca057e36e2b4cc",
+    "sha256": "261fa202ca06fdfddc12035f101193d62cdbcad7a6acef6379bea8e0da36d3bd",
+    "matches": "build/asi/stage/openrr-amd/shaders/enc_stage_64_64_96_f_lt.spv"
+  },
+  {
+    "shader": "dec_head_32_64_f.spv",
+    "spv_fnv": "b799ea871f0212a5",
+    "sha256": "3fd5f882ceabfed2a8630d484a3870e46fb8988387c916d2ca33f556679ce421",
+    "matches": "build/asi/stage/openrr-amd/shaders/dec_head_32_64_f.spv"
+  },
+  {
+    "shader": "dec_head_32_64_f_lt.spv",
+    "spv_fnv": "3eccd9693a0d87ef",
+    "sha256": "55a12017cfbea73db6bdfb0312d20282e45e43ca35ec829008ec478b6f2ca27e",
+    "matches": "build/asi/stage/openrr-amd/shaders/dec_head_32_64_f_lt.spv"
+  }
+]

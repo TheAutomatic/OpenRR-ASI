@@ -1,0 +1,12 @@
+W2=0 plus original W2 SIG_RCP policy for DFN gains.
+--- original/onr_block_fast.glsl
++++ wave-rcp/onr_block_fast.glsl
+@@ -1337,7 +1337,7 @@
+             f16vec4 im = F16x4Buf(uint64_t(pc.dfn_in)).v[pi];
+             for (int c = 0; c < 3; ++c) {
+                 precise float e = exp2(float(lds[pr + ln * 16u + uint(c)]) * uintBitsToFloat(0xbfb8aa3bu));
+-                float16_t g = float16_t(rcp_rn(e + 1.0));
++                float16_t g = float16_t(SIG_RCP(e + 1.0));
+                 precise float16_t gs = g * sd;
+                 precise float16_t v = im[c] * gs;
+                 o[c] = min(v, 65504.0hf);

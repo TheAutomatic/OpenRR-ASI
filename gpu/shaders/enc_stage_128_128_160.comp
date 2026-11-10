@@ -8,4 +8,9 @@
 #define ENC_K8 1
 #define ENC_STAGE 1
 #define ENC_CO 160
+// Keep only the measured flow/lite MLP slice loop rolled. The bounded
+// cmat address lowering otherwise crosses Mesa's full-unroll cost limit.
+#if defined(ENC_F32) && ENC_F32 && defined(FLOW) && FLOW && defined(LT_EXP) && LT_EXP && defined(LT_RCP) && LT_RCP && defined(LT_HM) && LT_HM
+#define MLP_SLICE_LOOP [[dont_unroll]]
+#endif
 #include "onr_block.glsl"

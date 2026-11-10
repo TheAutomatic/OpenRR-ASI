@@ -166,6 +166,9 @@ layout(local_size_x = 128 * SPLIT) in;
 #define WT(off, K, n) ((n) + ((off) / (16u * (K))) * 16u * (K) + (((off) % (K)) / 16u) * 256u)
 #define WT_OUT(off) WT(off, ENC_X, ENC_C * ENC_X)
 #define WT_FC1(off) WT(off, ENC_C, HID * ENC_C)
+#if defined(FC1_ROW_TILE) && FC1_ROW_TILE
+#define FC1_TILE(row, tile) (HID * ENC_C + (row) * ENC_C + (tile) * 256u)
+#endif
 #define WT_FC2(off) WT(off, HID, ENC_C * HID)
 #define WS_OUT 16u
 #define WS_FC1 16u
@@ -182,12 +185,20 @@ layout(local_size_x = 128 * SPLIT) in;
 #else
 #define WT_OUT(off) (off)
 #define WT_FC1(off) (off)
+#if defined(FC1_ROW_TILE) && FC1_ROW_TILE
+#define FC1_TILE(row, tile) ((row) * ENC_C + (tile) * 16u)
+#endif
 #define WT_FC2(off) (off)
 #define WS_OUT ENC_X
 #define WS_FC1 ENC_C
 #define WS_FC2 HID
 #define WT_MRG(off) (off)
 #define WS_MRG (4u * ENC_C)
+#endif
+
+// Unselected variants expand to the original offset expression.
+#ifndef FC1_TILE
+#define FC1_TILE(row, tile) WT_FC1((row) * ENC_C + (tile) * 16u)
 #endif
 
 layout(push_constant, scalar) uniform P {

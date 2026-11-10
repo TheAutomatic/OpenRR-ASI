@@ -1,0 +1,10 @@
+{
+  "baseline_data": "build/asi/stage/openrr-amd",
+  "round": 5,
+  "steady": 240,
+  "baseline_role": "variant",
+  "drs": 64,
+  "candidate": "build/aco-runtime-trace/retained-combination",
+  "warmup": 48,
+  "candidate_role": "original"
+}

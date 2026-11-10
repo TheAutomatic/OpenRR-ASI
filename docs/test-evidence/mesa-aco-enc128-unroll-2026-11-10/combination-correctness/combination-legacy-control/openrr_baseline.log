@@ -1,0 +1,73 @@
+18:49:50.645 compiler requested: LLPC
+18:49:50.645 OpenRR 0.1.2 runtime: create, output 1920x1080, render up to 1280x720, shaders C:\Users\Kenny\.codex\worktrees\mesa-aco-0101\OpenRR\build\aco-runtime-trace\retained-combination\data\shaders, weights from C:/Users/Kenny/Downloads/dlssnr_on_amd_setup/dist/weights/nvngx_dlssd.dll
+18:49:50.779 Vulkan device: AMD Radeon RX 9070 XT, driver 26.10.1 (LLPC)
+18:49:51.037 [openrr compiler] ingest spv=83008aab2deab055 compiler=LLPC
+18:49:51.040 [openrr compiler] pack spv=fdc5ed41ade87e02 compiler=LLPC
+18:49:51.041 [openrr compiler] selftest spv=0c5629eb03f4fe89 compiler=LLPC
+18:49:51.042 [openrr compiler] clear_range spv=cffca948d4b28dac compiler=LLPC
+18:49:51.043 [openrr compiler] d3d_ingest spv=055cdb1ca00ecf88 compiler=LLPC
+18:49:51.045 [openrr compiler] d3d_pack spv=37b54dc8375d23da compiler=LLPC
+18:49:51.050 D3D12 backend: self-test passed (root constants, spill table, workgroup count, indirect dispatch); 6 ELFs from the cache, 0 built, in 25 ms
+18:49:51.058 D3D12 backend: the guides are read from the game's textures and the output written in place (check passed)
+18:49:51.064 [openrr compiler] selftest_tex spv=fcef346c12cfe86f compiler=LLPC
+18:49:51.068 D3D12 backend: the post samples its history through the sampler, as on Vulkan (check passed)
+18:49:51.068 backend: D3D12 (asked for), kernels recorded into the game's command list; ELF cache C:\Users\Kenny\AppData\Local\OpenRR\cache
+18:49:51.069 frame 1: no transparency layer
+18:49:51.069 frame 1: disocclusion mask absent, SSS guide absent (both go into the first encoder)
+18:49:51.069 frame 1: responsivity mask absent, ColorBeforeTransparency absent, depth of field guide absent, reflection motion vectors absent (first encoder); transparency opacity absent, its motion vectors absent (downsample, with the layer); specular hit distance given
+18:49:51.345 weights rebuilt from C:/Users/Kenny/Downloads/dlssnr_on_amd_setup/dist/weights/nvngx_dlssd.dll (version 310.9.1.0) in 277 ms
+18:49:51.346 [openrr compiler] pooled_history2 spv=7fcd28c3e1986a33 compiler=LLPC
+18:49:51.347 [openrr compiler] ae spv=8053435623e90df5 compiler=LLPC
+18:49:51.348 [openrr compiler] enc0_attr_f spv=b7ec90ad9bb77d31 compiler=LLPC
+18:49:51.717 [openrr compiler] post_f spv=afe8e28b8283b96b compiler=LLPC
+18:49:51.719 [openrr compiler] downsample spv=1868a527fddfb730 compiler=LLPC
+18:49:51.720 [openrr compiler] downsample_tl spv=71f444e6a4c8f74a compiler=LLPC
+18:49:51.722 [openrr compiler] post_tile spv=350eb51855cd5995 compiler=LLPC
+18:49:51.723 [openrr compiler] dfn_export spv=5eff19ab0da39495 compiler=LLPC
+18:49:51.723 [openrr compiler] dfn_import spv=92deee5eb00fde72 compiler=LLPC
+18:49:51.724 [openrr compiler] post_dlt_f spv=f59fecb0c6c722dd compiler=LLPC
+18:49:51.728 [openrr compiler] enc0_stage_32_64_f spv=4f4d742046c9b6f1 compiler=LLPC
+18:49:51.733 [openrr compiler] enc_stage_64_64_96_f spv=59a8847a905b419b compiler=LLPC
+18:49:51.737 [openrr compiler] enc_stage_96_128_128_f spv=8d07ac141832d300 compiler=LLPC
+18:49:51.741 [openrr compiler] enc_stage_128_128_160_f spv=f6ccd66e59440a06 compiler=LLPC
+18:49:51.744 [openrr compiler] enc_stage_160_256_160_f spv=38501fcf01b1e652 compiler=LLPC
+18:49:51.748 [openrr compiler] enc_stage_160_256_0_f spv=0d775a6335a1b380 compiler=LLPC
+18:49:51.751 [openrr compiler] dec_up_160_256_160_f spv=6d872e31c95afce5 compiler=LLPC
+18:49:51.754 [openrr compiler] dec_dfn_160_256_f spv=81d017418fe547af compiler=LLPC
+18:49:51.757 [openrr compiler] dec_up_128_128_160_f spv=8207a2a6f176a4d8 compiler=LLPC
+18:49:51.760 [openrr compiler] dec_dfn_128_128_f spv=a536c1aee1b5b373 compiler=LLPC
+18:49:51.764 [openrr compiler] dec_up_96_128_128_f spv=7397e05f8c2da77a compiler=LLPC
+18:49:51.767 [openrr compiler] dec_dfn_96_128_f spv=50c4593efddb5754 compiler=LLPC
+18:49:51.770 [openrr compiler] dec_up_64_64_96_f spv=238fcc9bcf09fa55 compiler=LLPC
+18:49:51.774 [openrr compiler] dec_dfn_64_64_f spv=777985d1831329ca compiler=LLPC
+18:49:51.777 [openrr compiler] dec_up_32_64_64_f spv=addffdc4c6b922e8 compiler=LLPC
+18:49:51.781 [openrr compiler] dec_head_32_64_f spv=b799ea871f0212a5 compiler=LLPC
+18:49:51.785 [openrr compiler] d3d_downsample spv=fa1ab80252e2a7e5 compiler=LLPC
+18:49:51.786 [openrr compiler] d3d_downsample_tl spv=66226a06cd06c7f3 compiler=LLPC
+18:49:51.788 [openrr compiler] d3d_enc0_attr_f spv=b3655442fe0ad69e compiler=LLPC
+18:49:52.253 [openrr compiler] d3d_ae spv=176dd5c87be9b223 compiler=LLPC
+18:49:52.254 [openrr compiler] enc0_attr_f_w spv=2a1805e8888ee841 compiler=LLPC
+18:49:52.619 [openrr compiler] enc0_stage_32_64_f_w spv=da0466da433262b2 compiler=LLPC
+18:49:52.625 [openrr compiler] d3d_enc0_attr_f_w spv=fc15342056305889 compiler=LLPC
+18:49:53.081 [openrr compiler] enc_stage_96_128_128_fl spv=7425bd19500d6479 compiler=LLPC
+18:49:53.084 [openrr compiler] enc_stage_128_128_160_fl spv=231bf803323201db compiler=LLPC
+18:49:53.088 [openrr compiler] enc_stage_160_256_160_fl spv=4d98a31a6a7789ad compiler=LLPC
+18:49:53.091 [openrr compiler] enc_stage_160_256_0_fl spv=c5ef1c72a8fa61ac compiler=LLPC
+18:49:53.095 [openrr compiler] dec_up_160_256_160_fl spv=09ae4164fbb15cf1 compiler=LLPC
+18:49:53.099 [openrr compiler] dec_dfn_160_256_fl spv=a89b668e3da09f5b compiler=LLPC
+18:49:53.102 [openrr compiler] dec_up_128_128_160_fl spv=6be5b3c53083b759 compiler=LLPC
+18:49:53.106 [openrr compiler] dec_dfn_128_128_fl spv=095787dd4133557e compiler=LLPC
+18:49:53.109 [openrr compiler] dec_up_96_128_128_fl spv=94faa2ccbba8501e compiler=LLPC
+18:49:53.111 [openrr compiler] dec_dfn_96_128_fl spv=608c28c0029891f3 compiler=LLPC
+18:49:53.116 network kernels ready on D3D12 (26 pipelines: 39 ELFs from the cache, 4 built) in 1.8 s
+18:49:53.157 ready
+18:49:53.185 network sized: render 1280x720 (grid 1280x736), output 1920x1080, internal 2880x1620
+18:49:53.186 VRAM: this feature 252 MB (1 features alive); the game's process 334 MB of a 15419 MB budget
+18:49:53.186 small levels: row flags
+18:49:53.186 runtime paths: direct_guides=1 direct_output=1 sampler=1 flow=1
+18:49:53.186 frame 1: render 1280x720 -> 1920x1080, fast mode off, D3D12, GPU raw 0.04 ms (p50 0.04, p95 0.04 of 1), clean 0.04 ms (average 0.04 ms; mean since the last line: ingest 0.000, network 0.00, pack 0.000)
+18:49:57.798 network sized: render 1088x612 (grid 1088x640), output 1920x1080, internal 2880x1620
+18:49:57.799 VRAM: this feature 252 MB (1 features alive); the game's process 334 MB of a 15419 MB budget
+18:49:59.174 network sized: render 1280x720 (grid 1280x736), output 1920x1080, internal 2880x1620
+18:49:59.176 VRAM: this feature 252 MB (1 features alive); the game's process 334 MB of a 15419 MB budget
+18:50:00.898 destroy after 30 network frames

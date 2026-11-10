@@ -7,4 +7,9 @@
 #define ENC_X 128
 #define ENC_K8 1
 #define DEC_DFN 1
+// Measured flow/lite path: use known FC1 row/tile indices directly.
+// Integer addresses and all floating-point operations remain identical.
+#if defined(ENC_F32) && ENC_F32 && defined(FLOW) && FLOW && defined(LT_EXP) && LT_EXP && defined(LT_RCP) && LT_RCP && defined(LT_HM) && LT_HM
+#define FC1_ROW_TILE 1
+#endif
 #include "onr_block.glsl"

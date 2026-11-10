@@ -1,0 +1,11 @@
+--- original/onr_block_w2.glsl
++++ projection-tiled/onr_block_w2.glsl
+@@ -294,7 +294,7 @@
+             WLD(wo_, pc.wout.v, WT_OUT(uint(n) * 16u * ENC_X + hd * 32u + 16u), WS_OUT, ROW); MMA(c0##n, wo_, ba1) MMA(c1##n, wo_, bb1) }
+ #if NT == 6
+             // the wout fragments of channel tile n + 1 issued before the products of tile n
+-#define OLD(f_, n, hl) WLD(f_, pc.wout.v, uint(n) * 16u * ENC_X + hd * 32u + (hl) * 16u, ENC_X, ROW);
++#define OLD(f_, n, hl) WLD(f_, pc.wout.v, ENC_C * ENC_X + uint(n) * 16u * ENC_X + hd * 512u + (hl) * 256u, 16u, ROW);
+ #define OMM(n, f0_, f1_) MMA(c0##n, f0_, ba0) MMA(c1##n, f0_, bb0) MMA(c0##n, f1_, ba1) MMA(c1##n, f1_, bb1)
+             { MA p0, p1, q0, q1;
+               OLD(p0, 0, 0) OLD(p1, 0, 1) OLD(q0, 1, 0) OLD(q1, 1, 1)

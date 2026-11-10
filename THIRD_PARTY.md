@@ -120,3 +120,15 @@ Full license text in `asi/third_party/inter/LICENSE.txt`.
 
 Copyright (c) 2015-2025 The Khronos Group Inc. Licensed under the Apache License, Version 2.0.
 Full license text in `asi/third_party/vulkan/LICENSE.md`.
+
+---
+
+## 6. Mesa RADV / ACO (offline build tool)
+
+Offline shader records are generated with Mesa 26.2.4, pinned to
+`96cb43121031992b85767f9c1be8f3f48e22b1d2`, with the source patches in
+`asi/build/mesa/`. Mesa RADV/ACO sources used here retain their upstream MIT
+license notices. The package includes generated shader records; Mesa shared
+libraries, the noop DRM shim and the capture executable are build tools and
+are not distributed in the Windows stage. See `asi/build/mesa/README.md` for
+patch provenance and reproducible build instructions.

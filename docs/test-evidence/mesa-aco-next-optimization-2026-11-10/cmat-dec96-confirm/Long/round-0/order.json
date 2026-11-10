@@ -1,0 +1,10 @@
+{
+  "baseline_data": "build/aco-runtime-trace/experiment-address-screen/dec_dfn_96_128/candidate/data",
+  "candidate_role": "variant",
+  "candidate": "build/aco-runtime-trace/experiment-cmat-address/dec_dfn_96_128_fl_lt/candidate",
+  "baseline_role": "original",
+  "warmup": 48,
+  "round": 0,
+  "drs": 64,
+  "steady": 240
+}

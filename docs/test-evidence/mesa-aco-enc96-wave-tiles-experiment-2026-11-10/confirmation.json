@@ -1,0 +1,96 @@
+{
+  "rounds": [
+    {
+      "round": 0,
+      "first": "original",
+      "original_steady_ms": 3.75552,
+      "original_drs_ms": 3.54992,
+      "variant_steady_ms": 3.74076,
+      "variant_drs_ms": 3.52764
+    },
+    {
+      "round": 1,
+      "first": "variant",
+      "variant_steady_ms": 3.73576,
+      "variant_drs_ms": 3.56864,
+      "original_steady_ms": 3.76528,
+      "original_drs_ms": 3.52884
+    },
+    {
+      "round": 2,
+      "first": "original",
+      "original_steady_ms": 3.76836,
+      "original_drs_ms": 3.55028,
+      "variant_steady_ms": 3.73348,
+      "variant_drs_ms": 3.507
+    },
+    {
+      "round": 3,
+      "first": "variant",
+      "variant_steady_ms": 3.73864,
+      "variant_drs_ms": 3.52176,
+      "original_steady_ms": 3.76668,
+      "original_drs_ms": 3.5362
+    },
+    {
+      "round": 4,
+      "first": "original",
+      "original_steady_ms": 3.7234,
+      "original_drs_ms": 3.49772,
+      "variant_steady_ms": 3.7248,
+      "variant_drs_ms": 3.47188
+    },
+    {
+      "round": 5,
+      "first": "variant",
+      "variant_steady_ms": 3.71732,
+      "variant_drs_ms": 3.51848,
+      "original_steady_ms": 3.76136,
+      "original_drs_ms": 3.53332
+    }
+  ],
+  "statistics": {
+    "steady": {
+      "original": {
+        "median_ms": 3.76332,
+        "min_ms": 3.7234,
+        "max_ms": 3.76836
+      },
+      "variant": {
+        "median_ms": 3.73462,
+        "min_ms": 3.71732,
+        "max_ms": 3.74076
+      },
+      "change_percent": -0.7626244911408064,
+      "paired_change_percent": [
+        -0.3930214723926517,
+        -0.784005439170532,
+        -0.9256015879586799,
+        -0.7444221436384235,
+        0.037600042971486225,
+        -1.1708530956887842
+      ]
+    },
+    "drs": {
+      "original": {
+        "median_ms": 3.53476,
+        "min_ms": 3.49772,
+        "max_ms": 3.55028
+      },
+      "variant": {
+        "median_ms": 3.52012,
+        "min_ms": 3.47188,
+        "max_ms": 3.56864
+      },
+      "change_percent": -0.4141723907705175,
+      "paired_change_percent": [
+        -0.6276197773470993,
+        1.1278493782659327,
+        -1.219058778462534,
+        -0.40834794412081266,
+        -0.7387669681964248,
+        -0.4200015849116445
+      ]
+    }
+  }
+}

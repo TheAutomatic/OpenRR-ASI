@@ -1,0 +1,239 @@
+{
+  "production_source": [
+    {
+      "path": "gpu/shaders/enc_stage_96_128_128.comp",
+      "bytes": 783,
+      "sha256": "10be863cd9ee0f5fecba3871dfbd0e754a2ccb0a1713173a8468360cf858e41c"
+    },
+    {
+      "path": "gpu/shaders/dec_dfn_96_128.comp",
+      "bytes": 655,
+      "sha256": "027205cb129ffa92d88245127092c0b69a910add32848a0456325ff946ebf2aa"
+    },
+    {
+      "path": "gpu/shaders/enc_stage_128_128_160.comp",
+      "bytes": 699,
+      "sha256": "8a4abc87ca04251ead4b22c529c2249fbb1c28fa4bd5c03a274c3c228eb3d296"
+    },
+    {
+      "path": "gpu/shaders/include/onr_block.glsl",
+      "bytes": 51156,
+      "sha256": "8d1b9b5fbe6478c9bb7f74a23eee175ecff7355f7adc501b2f35f56802793e71"
+    },
+    {
+      "path": "gpu/shaders/include/onr_block_fast.glsl",
+      "bytes": 67125,
+      "sha256": "f126dcfbf6dd9ba2cda5e7e7c6ee4e4679662ccaceb78b368e68157496c99c2b"
+    },
+    {
+      "path": "gpu/shaders/include/onr_block_w2.glsl",
+      "bytes": 31798,
+      "sha256": "18428489a12bf394ccb2ee9da2beb8dc646614f5e5bcf318a1e4fe4aab8b6665"
+    }
+  ],
+  "mesa_patch": [
+    {
+      "path": "asi/build/mesa/prepare_global_address.py",
+      "bytes": 2417,
+      "sha256": "8a95a1d7c412fa77622cb96d88940d282dfc3292582435c81cee47dfa87e0539"
+    },
+    {
+      "path": "asi/build/mesa/global-address.patch",
+      "bytes": 2199,
+      "sha256": "3c3672ff7b03d921fa76197ee48fd4e624d8545f64b0da20031cb133cebcc364"
+    }
+  ],
+  "build_configuration": [
+    {
+      "path": "asi/build/build_asi.sh",
+      "bytes": 11183,
+      "sha256": "84fc6a656b3396e084969f3e48bccac81bbeef5b9107fdc9e4a4d4eba6a6b37a"
+    },
+    {
+      "path": "asi/build/build_aco_records.py",
+      "bytes": 10946,
+      "sha256": "f89951038843d39c0c885d777dfafe1915432daa3b7a765142a2a0bbf47aeeab"
+    },
+    {
+      "path": "asi/build/mesa/build_capture.sh",
+      "bytes": 2407,
+      "sha256": "ca23f3287b2430468249aa1c11dcb3233e9bc0fd004eaeb93de6997a307b8a36"
+    }
+  ],
+  "retained_validation_tools": [
+    {
+      "path": "asi/build/build_runtime_trace.sh",
+      "bytes": 1982,
+      "sha256": "e4687681feec1c84d059a7e72789e64ab8f32ead32f6ef5c04068a33fdde169d"
+    },
+    {
+      "path": "asi/build/build_delivery_probe.sh",
+      "bytes": 726,
+      "sha256": "cbad8305a6c580a498505dd0f0d5d43736b24980dd1c8ef66e0ed8d215668597"
+    },
+    {
+      "path": "asi/tests/run_runtime_trace_batch.ps1",
+      "bytes": 5403,
+      "sha256": "c458c427859c87434ed5e2a944f9e1e04308d454f6af5ccb21122d96adef752e"
+    },
+    {
+      "path": "asi/tests/run_aco_screen.ps1",
+      "bytes": 3791,
+      "sha256": "bc83e1a36cd6f4c12ae3ab70fecc9973fbf27e57b6ecbcf7e3a30b4bf4561da0"
+    },
+    {
+      "path": "asi/tests/summarize_aco_screen.py",
+      "bytes": 2732,
+      "sha256": "5d921ebe4b7f6cb5beddbf174f87b989fd6d5d3d259275af67b3730b78ea1cd4"
+    },
+    {
+      "path": "asi/tests/cleanup_aco_screen.ps1",
+      "bytes": 2442,
+      "sha256": "6255e390dca4ce7739b935c5a56c82550a75f1d790a25bec74d20e2a276a3157"
+    },
+    {
+      "path": "asi/tests/cmat_address_boundaries.py",
+      "bytes": 1545,
+      "sha256": "6f4a5617d58209f590b7fbd86a2ea5df42c0042f5a7b57d6765e7dc9b651c0d4"
+    },
+    {
+      "path": "asi/tests/capture_llpc_hotspots.cpp",
+      "bytes": 1439,
+      "sha256": "73abdd5a1a104f50ec78e538470b7d14f14fa631ac7f99c19758b27e7aeadc53"
+    },
+    {
+      "path": "asi/tests/hotspot_resources.py",
+      "bytes": 4964,
+      "sha256": "e7382723eac5a9a86bb60116701e913df01f6e60255557f12f63e3e9d4b7e09f"
+    },
+    {
+      "path": "asi/tests/verify_retained_combination.py",
+      "bytes": 1479,
+      "sha256": "0fc4da52f42dc674da70555e90b5233bd1222cc4a72f85e9f4dd1cef05d242de"
+    },
+    {
+      "path": "asi/tests/test_aco_build_policy.py",
+      "bytes": 4870,
+      "sha256": "8a9b69c2bd3842bbfd031bf5cd5eacb2e3c9c9f58ceda2ba5060e7b727eafa09"
+    },
+    {
+      "path": "asi/tests/verify_aco_delivery.py",
+      "bytes": 5566,
+      "sha256": "0e004676fe425f77b3255d172b77e45f6f0823afd266c08671cfdf03a088352e"
+    },
+    {
+      "path": "asi/tests/run_aco_delivery_smoke.ps1",
+      "bytes": 5008,
+      "sha256": "0e34eb9632310d3a0a2160e0535b3126e2019d545486e78a13dd5b6bd3b6f819"
+    },
+    {
+      "path": "asi/tests/manage_aco_experiment_archive.py",
+      "bytes": 2960,
+      "sha256": "815f4efa9d4eea6eb0a574a2dc669ad3bbc7a719d2b6cae64f016e8b1c845017"
+    },
+    {
+      "path": "asi/tests/finalize_aco_delivery_evidence.py",
+      "bytes": 5246,
+      "sha256": "3484c098802c5d40e17307fb17e7678eb462d1df353f9f02ccd9d9337c76143b"
+    }
+  ],
+  "documentation": [
+    {
+      "path": "README.md",
+      "bytes": 11385,
+      "sha256": "c87193e8178f5a50d0bffccdd30997fe324b76b3e2f4b2a3d37eaebf76c3ac8a"
+    },
+    {
+      "path": "THIRD_PARTY.md",
+      "bytes": 6250,
+      "sha256": "0ba792c4aec9eaf4e3ca75336111497802ce5b681405d94991503d0ed63090d3"
+    },
+    {
+      "path": "asi/build/mesa/README.md",
+      "bytes": 11295,
+      "sha256": "0b6661744373f8f1ef6f16987712a3ca51d77bcfd6528a28e88379810f512f31"
+    },
+    {
+      "path": "docs/test-evidence/mesa-aco-delivery-2026-11-10.md",
+      "bytes": 13480,
+      "sha256": "9baad68d1f49e467b4280a1cc07f2366e25c041dfe261d794c399eac26826720"
+    }
+  ],
+  "unchanged_build_foundation": [
+    {
+      "path": "asi/build/mesa/prepare_capture.py",
+      "bytes": 10152,
+      "sha256": "79bb73c37cfb71a681446a30db22ee820087843f47dfa6f196de90672675830b"
+    },
+    {
+      "path": "asi/build/mesa/capture.patch",
+      "bytes": 10581,
+      "sha256": "44b9ab78ecd6547081e3c64c5ce2b273fbd32c07bba5771627ad352b748d1d0a"
+    },
+    {
+      "path": "asi/build/aco_capture.cpp",
+      "bytes": 813,
+      "sha256": "975a436f409321815a651f7a74b690634d692089aa7b37ed4757041a94419d1e"
+    },
+    {
+      "path": "asi/build/build_shaders.py",
+      "bytes": 6268,
+      "sha256": "f271cffcb0ce5884d751240a84bab8ccd157e467d655f1b525488a1ab6a530e5"
+    },
+    {
+      "path": "asi/build/BUILD_LOCAL_ASI.cmd",
+      "bytes": 563,
+      "sha256": "fc61bd2f1fc57b16089dc5c79881f387ab081b663acbb80b0649934c55aa8ab4"
+    },
+    {
+      "path": "asi/tests/compare_runtime_trace.py",
+      "bytes": 10115,
+      "sha256": "7eda32d67255e5603c6038c602b3411e2c2a5e5667d017084e94630adccc4f60"
+    },
+    {
+      "path": "asi/tests/test_runtime_trace_compare.py",
+      "bytes": 3380,
+      "sha256": "3e63b88811359f5d2e9c7efe9c72b2e551b30748d0dbab6d010c91851864bfa6"
+    },
+    {
+      "path": "asi/tests/test_aco_records.py",
+      "bytes": 1962,
+      "sha256": "9a2f607b892b811075288b7ae7df352b9fc26fbdd8425c83a5a0978e6ec63664"
+    },
+    {
+      "path": "asi/tests/aco_abi.comp",
+      "bytes": 415,
+      "sha256": "e98db9cf6594d7870bc9c41323c449b30997f42bd4ebe25cc07484025786ef0b"
+    },
+    {
+      "path": "asi/tests/test_asi_units.cpp",
+      "bytes": 96059,
+      "sha256": "d327287fbe32da60f5430d89fd41881e604d315942617ecf3fa052f1e3962617"
+    },
+    {
+      "path": "runtime/bench/openrr_bench.cpp",
+      "bytes": 43661,
+      "sha256": "56936fd99525db3a9cf076b9bb66b0c1180ee4384d90a985365f99b7ac60cde2"
+    },
+    {
+      "path": "gpu/fastmode.cmake",
+      "bytes": 1623,
+      "sha256": "28d21b3d89cb94d6fe2a8eb267bdd8f83342e8eea573808409cb01a53c57eaff"
+    },
+    {
+      "path": "gpu/shaders.list",
+      "bytes": 292,
+      "sha256": "86d31a14e3044f5983370e71fe71dd280df9a548298ca34b8811d4233abcaba2"
+    },
+    {
+      "path": "gpu/CMakeLists.txt",
+      "bytes": 12899,
+      "sha256": "38ac1e2e47a86d2ff24f25e3b0abb890fc44fd7dbcfaef1ae91357347cb7e69a"
+    }
+  ],
+  "one_time_tools_archive": {
+    "manifest": "experiment-tools.json",
+    "inventory": "experiment-tool-list.json",
+    "count": 59
+  }
+}

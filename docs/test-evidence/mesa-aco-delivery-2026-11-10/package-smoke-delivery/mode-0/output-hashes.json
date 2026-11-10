@@ -1,0 +1,102 @@
+[
+  {
+    "sha256": "4E1E7E3025FFBF97D67AE2A0B0C523A444F33DDA2C27E62C5A4D8D6CA4D1F07D",
+    "bytes": 16588800,
+    "file": "candidate-steady-0.bin"
+  },
+  {
+    "sha256": "ABC7010339C573561421848888FAEC8EFFADDCC97231E8EEB191EB9616BDF3E7",
+    "bytes": 16588800,
+    "file": "candidate-steady-1.bin"
+  },
+  {
+    "sha256": "B1C8198C3CEC651C1318E86D82AFC319393BA472D97B488778F6920A3416FF55",
+    "bytes": 16588800,
+    "file": "candidate-steady-2.bin"
+  },
+  {
+    "sha256": "544277CBC44434C9CB0B9D61D8BCC21ADDAC05DA9BE444D023BA3462CBF29F13",
+    "bytes": 16588800,
+    "file": "candidate-steady-3.bin"
+  },
+  {
+    "sha256": "445DF20BC9E06D744B0052CCF9A17DA9C491E47C23E452747003DC377B6A04DC",
+    "bytes": 16588800,
+    "file": "candidate-steady-4.bin"
+  },
+  {
+    "sha256": "9698A14E737DF9291D5DD2C0B2304553B120ABAADD8D38CA5D3A038C133E12A0",
+    "bytes": 16588800,
+    "file": "candidate-steady-5.bin"
+  },
+  {
+    "sha256": "1E0839CBBE340DCFC3959AA96E86C4987D1B2B9F8F88FB9D140FBF76AFEFE561",
+    "bytes": 16588800,
+    "file": "candidate-steady-6.bin"
+  },
+  {
+    "sha256": "0090CB0BC6F6AD2013E998C4B849346BDE8DBCD183C12C06300E5D0A6841F8AA",
+    "bytes": 16588800,
+    "file": "candidate-steady-7.bin"
+  },
+  {
+    "sha256": "5A7C281EA5C04CA09DA248C51B61A00FC748C7825A165EF5CA1CFFFB11FAB9CC",
+    "bytes": 16588800,
+    "file": "candidate-drs-0.bin"
+  },
+  {
+    "sha256": "03C647D9D8D8F836C41A6A7CE18D96630F2697379C8214C645B953926D0DDEDC",
+    "bytes": 16588800,
+    "file": "candidate-drs-1.bin"
+  },
+  {
+    "sha256": "8AD415F7D9276300C5A7FCBA8962B10373110052E639A6EA44E6CE9D85408591",
+    "bytes": 16588800,
+    "file": "candidate-drs-2.bin"
+  },
+  {
+    "sha256": "C42A76AE5FE9D0AED087DAE13236378CD99444A10C54104E2084E50CCF9001D8",
+    "bytes": 16588800,
+    "file": "candidate-drs-3.bin"
+  },
+  {
+    "sha256": "C0BF74798470F1F66B414624BB14E9E65ABAAA0756CF37950AB144E144485E86",
+    "bytes": 16588800,
+    "file": "candidate-drs-4.bin"
+  },
+  {
+    "sha256": "F18BF681A61954DE1ACC7BA72BB29D9606407B84D29A6B9BA8888A27A64D5A8C",
+    "bytes": 16588800,
+    "file": "candidate-drs-5.bin"
+  },
+  {
+    "sha256": "F4BCBDA592AE0E8C5E3F2113E796C810748E2421C7A04AF4A0DF3C17388814F5",
+    "bytes": 16588800,
+    "file": "candidate-drs-6.bin"
+  },
+  {
+    "sha256": "A4CC58B8C801E0299FE5D48D472F3B346CD10267A5C830E797FC6C28EDFA95F2",
+    "bytes": 16588800,
+    "file": "candidate-drs-7.bin"
+  },
+  {
+    "sha256": "B600F5D990A0AB950E24F180CD87DA4CC07F8FE10F9106BC8FFA011287DEDF17",
+    "bytes": 16588800,
+    "file": "candidate-drs-8.bin"
+  },
+  {
+    "sha256": "3CE6005F8ADA76CE4AFA9E475BD67A67DD6DC3914061BAF689702C84CBF79608",
+    "bytes": 16588800,
+    "file": "candidate-drs-9.bin"
+  },
+  {
+    "sha256": "01CCE605456359261A7AAB14CC208DCF1B82E957B3276DCA38C18F793FD9C4FE",
+    "bytes": 16588800,
+    "file": "candidate-drs-10.bin"
+  },
+  {
+    "sha256": "84E7BF4D066687C2AADE0729523ECA5E09B482E8CAD0F35EC386A566CFD4F6E5",
+    "bytes": 16588800,
+    "file": "candidate-drs-11.bin"
+  }
+]

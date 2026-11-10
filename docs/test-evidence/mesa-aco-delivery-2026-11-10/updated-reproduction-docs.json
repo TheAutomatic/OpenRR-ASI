@@ -1,0 +1,14 @@
+[
+  "docs/test-evidence/mesa-aco-address-screen-2026-11-10.md",
+  "docs/test-evidence/mesa-aco-cmat-address-2026-11-10.md",
+  "docs/test-evidence/mesa-aco-enc128-unroll-2026-11-10.md",
+  "docs/test-evidence/mesa-aco-enc96-address-experiment-2026-11-10.md",
+  "docs/test-evidence/mesa-aco-enc96-mlp16-experiment-2026-11-10.md",
+  "docs/test-evidence/mesa-aco-enc96-projection-tile-experiment-2026-11-10.md",
+  "docs/test-evidence/mesa-aco-enc96-qv-rebase-experiment-2026-11-10.md",
+  "docs/test-evidence/mesa-aco-enc96-qv-serial-experiment-2026-11-10.md",
+  "docs/test-evidence/mesa-aco-enc96-residual-experiment-2026-11-10.md",
+  "docs/test-evidence/mesa-aco-enc96-wave-tiles-experiment-2026-11-10.md",
+  "docs/test-evidence/mesa-aco-next-optimization-2026-11-10.md",
+  "docs/test-evidence/mesa-aco-w2-screen-2026-11-10.md"
+]

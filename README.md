@@ -80,6 +80,7 @@ those before keeping it.
 | `openrr-amd.asi` | `plugins\openrr-amd.asi` |
 | `openrr-amd.ini` | `openrr-amd.ini` |
 | `openrr-amd\shaders\*.spv` | `openrr-amd\shaders\*.spv`（共 90 个 `.spv`） |
+| `openrr-amd\aco\gfx1201\openrr-d3d12-v1\` | 保持相同目录结构，包含 `.nrp`、`manifest.json` 和 `manifest.msgpack`；D3D12 全 ACO 路径必须部署 |
 | `nvngx_dlssd.dll`（**310.9.1**） | 游戏目录或 `openrr-amd\nvngx_dlssd.dll` |
 
 在 `OptiScaler.ini` 中开启 ASI 插件加载（OptiScaler 默认关闭该项）：
@@ -103,7 +104,7 @@ LoadAsiPlugins=true
 bash asi/build/build_asi.sh
 ```
 
-构建完成后，可直接发布的打包目录位于 `build/asi/stage/`（分离出的调试符号保存在 `build/asi/openrr-amd.debug`，单元测试与命令列表切分验证套件位于 `build/asi/test_asi_units.exe`）。
+构建完成后，打包目录位于 `build/asi/stage/`（分离出的调试符号保存在 `build/asi/openrr-amd.debug`，单元测试与命令列表切分验证套件位于 `build/asi/test_asi_units.exe`）。默认离线构建固定版本 Mesa 的 global/vector8 ACO 记录，需要现有 WSL Mesa 源码与依赖；详见 [ACO 构建说明](asi/build/mesa/README.md)。stage 同时包含 `LICENSE` 和 `THIRD_PARTY.md`，不包含 OptiScaler 或外部权重 DLL。独立候选使用 `bash asi/build/build_asi.sh build/asi-delivery-candidate`，审查和包级验证完成后再决定替换正式 stage。
 
 ---
 

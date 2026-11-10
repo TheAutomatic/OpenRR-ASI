@@ -1,0 +1,18 @@
+--- original/onr_block_w2.glsl
++++ qv-rebase/onr_block_w2.glsl
+@@ -192,12 +192,12 @@
+         // Q^T, V^T [dim tile][token tile] = in_a x^T, in_b x^T on e4m3 x e4m3 -> fp32, one rounding to fp16
+         ACC q00, q01, q10, q11, v00, v01, v10, v11;
+         {
+-            uint64_t wa8 = uint64_t(pc.in_a) + uint64_t(QV8_OFF), wb8 = uint64_t(pc.in_b) + uint64_t(QV8_OFF);
++            uint64_t wa8 = uint64_t(pc.in_a) + uint64_t(QV8_OFF) + uint64_t(wq), wb8 = uint64_t(pc.in_b) + uint64_t(QV8_OFF) + uint64_t(wq);
+             QC8 fq00 = QC8(0.0), fq01 = QC8(0.0), fq10 = QC8(0.0), fq11 = QC8(0.0);
+             QC8 fv00 = QC8(0.0), fv01 = QC8(0.0), fv10 = QC8(0.0), fv11 = QC8(0.0);
+ #define QV_K8(n, ya, yb) { QA8 a0_, a1_, b0_, b1_; \
+-            coopMatLoad(a0_, E4View(wa8).v, wq + (n) * 16u, ENC_C, ROW); coopMatLoad(a1_, E4View(wa8).v, wq + 16u * ENC_C + (n) * 16u, ENC_C, ROW); \
+-            coopMatLoad(b0_, E4View(wb8).v, wq + (n) * 16u, ENC_C, ROW); coopMatLoad(b1_, E4View(wb8).v, wq + 16u * ENC_C + (n) * 16u, ENC_C, ROW); \
++            coopMatLoad(a0_, E4View(wa8).v, (n) * 16u, ENC_C, ROW); coopMatLoad(a1_, E4View(wa8).v, 16u * ENC_C + (n) * 16u, ENC_C, ROW); \
++            coopMatLoad(b0_, E4View(wb8).v, (n) * 16u, ENC_C, ROW); coopMatLoad(b1_, E4View(wb8).v, 16u * ENC_C + (n) * 16u, ENC_C, ROW); \
+             MMA(fq00, a0_, ya) MMA(fq01, a1_, ya) MMA(fq10, a0_, yb) MMA(fq11, a1_, yb) \
+             MMA(fv00, b0_, ya) MMA(fv01, b1_, ya) MMA(fv10, b0_, yb) MMA(fv11, b1_, yb) }
+ #define QV_K8N(n) QV_K8(uint(n), y0##n, y1##n)

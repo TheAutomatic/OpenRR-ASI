@@ -16,6 +16,7 @@ for file in vulkan/radv_shader.c vulkan/radv_descriptor_set.c vulkan/radv_device
     git -C "$base" show "$commit:src/amd/$file" > "$work/source/src/amd/$file"
 done
 python3 asi/build/mesa/prepare_capture.py "$work/source"
+python3 asi/build/mesa/prepare_global_address.py "$work/source"
 export PKG_CONFIG_PATH="$HOME/src/mesa-deps/lib/x86_64-linux-gnu/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 if [[ ! -e $work/build/build.ninja ]]; then
     meson setup "$work/build" "$work/source" --buildtype=release \
@@ -34,5 +35,7 @@ cfg = dict(mesa_commit='96cb43121031992b85767f9c1be8f3f48e22b1d2', patch_version
            library_path=str(pathlib.Path.home()/'src/mesa-deps/lib/x86_64-linux-gnu'))
 cfg['radv_sha256'] = hashlib.sha256((w/'build/src/amd/vulkan/libvulkan_radeon.so').read_bytes()).hexdigest()
 cfg['patch_sha256'] = hashlib.sha256((r/'asi/build/mesa/capture.patch').read_bytes()).hexdigest()
+cfg['cmat_address_patch_sha256'] = hashlib.sha256((r/'asi/build/mesa/global-address.patch').read_bytes()).hexdigest()
+cfg['cmat_address'] = 'bounded-lane-byte-offset-v1-opt-in'
 (r/'build/aco-tools/toolchain.json').write_text(json.dumps(cfg, indent=2)+'\n')
 PY

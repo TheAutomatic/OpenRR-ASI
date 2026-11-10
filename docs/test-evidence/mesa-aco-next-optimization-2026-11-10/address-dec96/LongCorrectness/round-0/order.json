@@ -1,0 +1,9 @@
+{
+  "drs": 12,
+  "baseline_role": "original",
+  "round": 0,
+  "candidate_role": "variant",
+  "candidate": "build/aco-runtime-trace/experiment-address-screen/dec_dfn_96_128/candidate",
+  "steady": 280,
+  "warmup": 8
+}

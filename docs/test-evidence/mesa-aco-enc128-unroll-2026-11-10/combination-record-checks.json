@@ -1,0 +1,164 @@
+[
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/enc128-unroll/Long/round-0",
+    "combination_label": "candidate",
+    "codes": {
+      "enc_stage_96_128_128_fl_lt": "c08996618a61cd08",
+      "dec_dfn_96_128_fl_lt": "6a4ccda0cd2efb14",
+      "enc_stage_128_128_160_fl_lt": "591c303d1916df59"
+    }
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/enc128-unroll/Long/round-1",
+    "combination_label": "baseline",
+    "codes": {
+      "enc_stage_96_128_128_fl_lt": "c08996618a61cd08",
+      "dec_dfn_96_128_fl_lt": "6a4ccda0cd2efb14",
+      "enc_stage_128_128_160_fl_lt": "591c303d1916df59"
+    }
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/enc128-unroll/Long/round-2",
+    "combination_label": "candidate",
+    "codes": {
+      "enc_stage_96_128_128_fl_lt": "c08996618a61cd08",
+      "dec_dfn_96_128_fl_lt": "6a4ccda0cd2efb14",
+      "enc_stage_128_128_160_fl_lt": "591c303d1916df59"
+    }
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/enc128-unroll/Long/round-3",
+    "combination_label": "baseline",
+    "codes": {
+      "enc_stage_96_128_128_fl_lt": "c08996618a61cd08",
+      "dec_dfn_96_128_fl_lt": "6a4ccda0cd2efb14",
+      "enc_stage_128_128_160_fl_lt": "591c303d1916df59"
+    }
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/enc128-unroll/Long/round-4",
+    "combination_label": "candidate",
+    "codes": {
+      "enc_stage_96_128_128_fl_lt": "c08996618a61cd08",
+      "dec_dfn_96_128_fl_lt": "6a4ccda0cd2efb14",
+      "enc_stage_128_128_160_fl_lt": "591c303d1916df59"
+    }
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/enc128-unroll/Long/round-5",
+    "combination_label": "baseline",
+    "codes": {
+      "enc_stage_96_128_128_fl_lt": "c08996618a61cd08",
+      "dec_dfn_96_128_fl_lt": "6a4ccda0cd2efb14",
+      "enc_stage_128_128_160_fl_lt": "591c303d1916df59"
+    }
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/enc128-unroll-confirm/Long/round-0",
+    "combination_label": "candidate",
+    "codes": {
+      "enc_stage_96_128_128_fl_lt": "c08996618a61cd08",
+      "dec_dfn_96_128_fl_lt": "6a4ccda0cd2efb14",
+      "enc_stage_128_128_160_fl_lt": "591c303d1916df59"
+    }
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/enc128-unroll-confirm/Long/round-1",
+    "combination_label": "baseline",
+    "codes": {
+      "enc_stage_96_128_128_fl_lt": "c08996618a61cd08",
+      "dec_dfn_96_128_fl_lt": "6a4ccda0cd2efb14",
+      "enc_stage_128_128_160_fl_lt": "591c303d1916df59"
+    }
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/enc128-unroll-confirm/Long/round-2",
+    "combination_label": "candidate",
+    "codes": {
+      "enc_stage_96_128_128_fl_lt": "c08996618a61cd08",
+      "dec_dfn_96_128_fl_lt": "6a4ccda0cd2efb14",
+      "enc_stage_128_128_160_fl_lt": "591c303d1916df59"
+    }
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/enc128-unroll-confirm/Long/round-3",
+    "combination_label": "baseline",
+    "codes": {
+      "enc_stage_96_128_128_fl_lt": "c08996618a61cd08",
+      "dec_dfn_96_128_fl_lt": "6a4ccda0cd2efb14",
+      "enc_stage_128_128_160_fl_lt": "591c303d1916df59"
+    }
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/enc128-unroll-confirm/Long/round-4",
+    "combination_label": "candidate",
+    "codes": {
+      "enc_stage_96_128_128_fl_lt": "c08996618a61cd08",
+      "dec_dfn_96_128_fl_lt": "6a4ccda0cd2efb14",
+      "enc_stage_128_128_160_fl_lt": "591c303d1916df59"
+    }
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/enc128-unroll-confirm/Long/round-5",
+    "combination_label": "baseline",
+    "codes": {
+      "enc_stage_96_128_128_fl_lt": "c08996618a61cd08",
+      "dec_dfn_96_128_fl_lt": "6a4ccda0cd2efb14",
+      "enc_stage_128_128_160_fl_lt": "591c303d1916df59"
+    }
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/combination-final/Long/round-0",
+    "combination_label": "candidate",
+    "codes": {
+      "enc_stage_96_128_128_fl_lt": "c08996618a61cd08",
+      "dec_dfn_96_128_fl_lt": "6a4ccda0cd2efb14",
+      "enc_stage_128_128_160_fl_lt": "591c303d1916df59"
+    }
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/combination-final/Long/round-1",
+    "combination_label": "baseline",
+    "codes": {
+      "enc_stage_96_128_128_fl_lt": "c08996618a61cd08",
+      "dec_dfn_96_128_fl_lt": "6a4ccda0cd2efb14",
+      "enc_stage_128_128_160_fl_lt": "591c303d1916df59"
+    }
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/combination-final/Long/round-2",
+    "combination_label": "candidate",
+    "codes": {
+      "enc_stage_96_128_128_fl_lt": "c08996618a61cd08",
+      "dec_dfn_96_128_fl_lt": "6a4ccda0cd2efb14",
+      "enc_stage_128_128_160_fl_lt": "591c303d1916df59"
+    }
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/combination-final/Long/round-3",
+    "combination_label": "baseline",
+    "codes": {
+      "enc_stage_96_128_128_fl_lt": "c08996618a61cd08",
+      "dec_dfn_96_128_fl_lt": "6a4ccda0cd2efb14",
+      "enc_stage_128_128_160_fl_lt": "591c303d1916df59"
+    }
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/combination-final/Long/round-4",
+    "combination_label": "candidate",
+    "codes": {
+      "enc_stage_96_128_128_fl_lt": "c08996618a61cd08",
+      "dec_dfn_96_128_fl_lt": "6a4ccda0cd2efb14",
+      "enc_stage_128_128_160_fl_lt": "591c303d1916df59"
+    }
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/combination-final/Long/round-5",
+    "combination_label": "baseline",
+    "codes": {
+      "enc_stage_96_128_128_fl_lt": "c08996618a61cd08",
+      "dec_dfn_96_128_fl_lt": "6a4ccda0cd2efb14",
+      "enc_stage_128_128_160_fl_lt": "591c303d1916df59"
+    }
+  }
+]

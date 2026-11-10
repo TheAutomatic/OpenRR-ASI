@@ -2,11 +2,13 @@ param([string]$Output = 'build/aco-runtime-trace/runs',
       [ValidateSet('Baseline','Control','Trace')][string]$Stage = 'Baseline', [int]$TraceFrame = 8,
       [string]$DataDir = 'build/asi/stage/openrr-amd',
       [string]$Records = 'build/aco-review-v4/global-vector8/gfx1201/openrr-d3d12-v1',
-      [string]$TraceName = '', [string]$ReferenceName = 'fast-aligned')
+      [string]$TraceName = '', [string]$ReferenceName = 'fast-aligned',
+      [ValidateSet(0,1)][int]$ControlFastMode = 1,
+      [string]$TraceTools = 'build/aco-runtime-trace')
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 Set-Location -LiteralPath $root
-$tool = Join-Path $root 'build/aco-runtime-trace'
+$tool = Join-Path $root $TraceTools
 $runtime = Join-Path $tool 'openrr-trace.asi'
 $data = Join-Path $root $DataDir
 $env:ONR_ACO_DIR = Join-Path $root $Records
@@ -60,7 +62,7 @@ if($Stage -eq 'Baseline') {
     Write-Host 'Baseline phase complete. Inspect Fast reproduction, aligned state and Legacy exactness before Stage Trace.'
 } elseif($Stage -eq 'Control') {
     if(-not $TraceName){throw 'Control requires an explicit TraceName'}
-    $null = Run-Case $TraceName 1 1 -1
+    $null = Run-Case $TraceName $ControlFastMode 1 -1
 } else {
     foreach($name in @('fast-original-sequence','fast-aligned','legacy-aligned')) {
         $prior = Get-Content -LiteralPath (Join-Path $Output "$name/summary.json") -Raw | ConvertFrom-Json

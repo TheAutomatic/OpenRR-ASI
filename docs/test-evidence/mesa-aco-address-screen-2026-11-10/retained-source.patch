@@ -1,0 +1,106 @@
+diff --git a/gpu/shaders/dec_dfn_96_128.comp b/gpu/shaders/dec_dfn_96_128.comp
+index 66ed028..640db02 100644
+--- a/gpu/shaders/dec_dfn_96_128.comp
++++ b/gpu/shaders/dec_dfn_96_128.comp
+@@ -7,4 +7,9 @@
+ #define ENC_X 128
+ #define ENC_K8 1
+ #define DEC_DFN 1
++// Measured flow/lite path: use known FC1 row/tile indices directly.
++// Integer addresses and all floating-point operations remain identical.
++#if defined(ENC_F32) && ENC_F32 && defined(FLOW) && FLOW && defined(LT_EXP) && LT_EXP && defined(LT_RCP) && LT_RCP && defined(LT_HM) && LT_HM
++#define FC1_ROW_TILE 1
++#endif
+ #include "onr_block.glsl"
+diff --git a/gpu/shaders/enc_stage_96_128_128.comp b/gpu/shaders/enc_stage_96_128_128.comp
+index 73270eb..a2ea0f4 100644
+--- a/gpu/shaders/enc_stage_96_128_128.comp
++++ b/gpu/shaders/enc_stage_96_128_128.comp
+@@ -8,4 +8,11 @@
+ #define ENC_K8 1
+ #define ENC_STAGE 1
+ #define ENC_CO 128
++// The measured Fast flow/lite path uses one token tile per wave. On ACO
++// this reduces VGPRs 256 -> 240 and removes scratch; other variants keep W2.
++#if defined(ENC_F32) && ENC_F32 && defined(FLOW) && FLOW && defined(LT_EXP) && LT_EXP && defined(LT_RCP) && LT_RCP && defined(LT_HM) && LT_HM
++#define W2 0
++// W2's DFN uses SIG_RCP under LT_HM. Preserve that policy in this body too.
++#define ENC_DFN_SIG_RCP 1
++#endif
+ #include "onr_block.glsl"
+diff --git a/gpu/shaders/include/onr_block.glsl b/gpu/shaders/include/onr_block.glsl
+index a86d948..62c9b6f 100644
+--- a/gpu/shaders/include/onr_block.glsl
++++ b/gpu/shaders/include/onr_block.glsl
+@@ -154,6 +154,9 @@ layout(local_size_x = 128 * SPLIT) in;
+ #define WT(off, K, n) ((n) + ((off) / (16u * (K))) * 16u * (K) + (((off) % (K)) / 16u) * 256u)
+ #define WT_OUT(off) WT(off, ENC_X, ENC_C * ENC_X)
+ #define WT_FC1(off) WT(off, ENC_C, HID * ENC_C)
++#if defined(FC1_ROW_TILE) && FC1_ROW_TILE
++#define FC1_TILE(row, tile) (HID * ENC_C + (row) * ENC_C + (tile) * 256u)
++#endif
+ #define WT_FC2(off) WT(off, HID, ENC_C * HID)
+ #define WS_OUT 16u
+ #define WS_FC1 16u
+@@ -170,6 +173,9 @@ layout(local_size_x = 128 * SPLIT) in;
+ #else
+ #define WT_OUT(off) (off)
+ #define WT_FC1(off) (off)
++#if defined(FC1_ROW_TILE) && FC1_ROW_TILE
++#define FC1_TILE(row, tile) ((row) * ENC_C + (tile) * 16u)
++#endif
+ #define WT_FC2(off) (off)
+ #define WS_OUT ENC_X
+ #define WS_FC1 ENC_C
+@@ -178,6 +184,11 @@ layout(local_size_x = 128 * SPLIT) in;
+ #define WS_MRG (4u * ENC_C)
+ #endif
+ 
++// Unselected variants expand to the original offset expression.
++#ifndef FC1_TILE
++#define FC1_TILE(row, tile) WT_FC1((row) * ENC_C + (tile) * 16u)
++#endif
++
+ layout(push_constant, scalar) uniform P {
+     U8Buf x;             // input planes [C/32][H][W][32] e4m3
+     U8Buf y;             // TensorOutput planes
+diff --git a/gpu/shaders/include/onr_block_fast.glsl b/gpu/shaders/include/onr_block_fast.glsl
+index c9a6765..149263a 100644
+--- a/gpu/shaders/include/onr_block_fast.glsl
++++ b/gpu/shaders/include/onr_block_fast.glsl
+@@ -1337,7 +1337,11 @@ void main() {
+             f16vec4 im = F16x4Buf(uint64_t(pc.dfn_in)).v[pi];
+             for (int c = 0; c < 3; ++c) {
+                 precise float e = exp2(float(lds[pr + ln * 16u + uint(c)]) * uintBitsToFloat(0xbfb8aa3bu));
++#ifdef ENC_DFN_SIG_RCP
++                float16_t g = float16_t(SIG_RCP(e + 1.0));
++#else
+                 float16_t g = float16_t(rcp_rn(e + 1.0));
++#endif
+                 precise float16_t gs = g * sd;
+                 precise float16_t v = im[c] * gs;
+                 o[c] = min(v, 65504.0hf);
+diff --git a/gpu/shaders/include/onr_block_w2.glsl b/gpu/shaders/include/onr_block_w2.glsl
+index 98629cf..c039a6a 100644
+--- a/gpu/shaders/include/onr_block_w2.glsl
++++ b/gpu/shaders/include/onr_block_w2.glsl
+@@ -342,8 +342,8 @@ void main() {
+         ACC hb0 = bias_acc_t(pc.fc1_b, j), hb1 = bias_acc_t(pc.fc1_b, j + 16u), hb2 = bias_acc_t(pc.fc1_b, j + 32u), hb3 = bias_acc_t(pc.fc1_b, j + 48u);
+         ACC h00 = hb0, h01 = hb1, h02 = hb2, h03 = hb3, h10 = hb0, h11 = hb1, h12 = hb2, h13 = hb3;
+ #define FC1_K(n, xa, xb) { MA f0, f1, f2, f3; MB b_; \
+-            WLD(f0, pc.fc1.v, WT_FC1(j * ENC_C + (n) * 16u), WS_FC1, ROW); WLD(f1, pc.fc1.v, WT_FC1((j + 16u) * ENC_C + (n) * 16u), WS_FC1, ROW); \
+-            WLD(f2, pc.fc1.v, WT_FC1((j + 32u) * ENC_C + (n) * 16u), WS_FC1, ROW); WLD(f3, pc.fc1.v, WT_FC1((j + 48u) * ENC_C + (n) * 16u), WS_FC1, ROW); \
++            WLD(f0, pc.fc1.v, FC1_TILE(j, (n)), WS_FC1, ROW); WLD(f1, pc.fc1.v, FC1_TILE((j + 16u), (n)), WS_FC1, ROW); \
++            WLD(f2, pc.fc1.v, FC1_TILE((j + 32u), (n)), WS_FC1, ROW); WLD(f3, pc.fc1.v, FC1_TILE((j + 48u), (n)), WS_FC1, ROW); \
+             CPB(b_, xa) MMA(h00, f0, b_) MMA(h01, f1, b_) MMA(h02, f2, b_) MMA(h03, f3, b_) \
+             CPB(b_, xb) MMA(h10, f0, b_) MMA(h11, f1, b_) MMA(h12, f2, b_) MMA(h13, f3, b_) }
+ #define FC1_KN(n) FC1_K(uint(n), x0##n, x1##n)
+@@ -357,7 +357,7 @@ void main() {
+         ACC hb0 = bias_acc_t(pc.fc1_b, j), hb1 = bias_acc_t(pc.fc1_b, j + 16u);
+         ACC h00 = hb0, h01 = hb1, h10 = hb0, h11 = hb1;
+ #define FC1_K2(n) { MA f0, f1; MB b_; \
+-            WLD(f0, pc.fc1.v, WT_FC1(j * ENC_C + uint(n) * 16u), WS_FC1, ROW); WLD(f1, pc.fc1.v, WT_FC1((j + 16u) * ENC_C + uint(n) * 16u), WS_FC1, ROW); \
++            WLD(f0, pc.fc1.v, FC1_TILE(j, uint(n)), WS_FC1, ROW); WLD(f1, pc.fc1.v, FC1_TILE((j + 16u), uint(n)), WS_FC1, ROW); \
+             CPB(b_, x0##n) MMA(h00, f0, b_) MMA(h01, f1, b_) \
+             CPB(b_, x1##n) MMA(h10, f0, b_) MMA(h11, f1, b_) }
+         W2T(FC1_K2)

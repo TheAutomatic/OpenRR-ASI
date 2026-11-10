@@ -1,0 +1,31 @@
+--- original/onr_block_w2.glsl
++++ mlp16/onr_block_w2.glsl
+@@ -352,17 +352,17 @@
+         FC2_N(0u, h00, h10) FC2_N(1u, h01, h11) FC2_N(2u, h02, h12) FC2_N(3u, h03, h13)
+     }
+ #else
+-    // 32-neuron slices: hidden tiles h0t (token tile a), h1t (b)
+-    for (uint j = 0u; j < LT_HID; j += 32u) {
+-        ACC hb0 = bias_acc_t(pc.fc1_b, j), hb1 = bias_acc_t(pc.fc1_b, j + 16u);
+-        ACC h00 = hb0, h01 = hb1, h10 = hb0, h11 = hb1;
+-#define FC1_K2(n) { MA f0, f1; MB b_; \
+-            WLD(f0, pc.fc1.v, WT_FC1(j * ENC_C + uint(n) * 16u), WS_FC1, ROW); WLD(f1, pc.fc1.v, WT_FC1((j + 16u) * ENC_C + uint(n) * 16u), WS_FC1, ROW); \
+-            CPB(b_, x0##n) MMA(h00, f0, b_) MMA(h01, f1, b_) \
+-            CPB(b_, x1##n) MMA(h10, f0, b_) MMA(h11, f1, b_) }
+-        W2T(FC1_K2)
+-        GELU1(h00) GELU1(h01) GELU1(h10) GELU1(h11)
+-        FC2_N(0u, h00, h10) FC2_N(1u, h01, h11)
++    // ACO experiment: one hidden channel tile at a time. FC1 K and FC2 K unchanged.
++    for (uint j = 0u; j < LT_HID; j += 16u) {
++        ACC hb0 = bias_acc_t(pc.fc1_b, j);
++        ACC h00 = hb0, h10 = hb0;
++#define FC1_K16(n) { MA f0; MB b_; \
++            WLD(f0, pc.fc1.v, WT_FC1(j * ENC_C + uint(n) * 16u), WS_FC1, ROW); \
++            CPB(b_, x0##n) MMA(h00, f0, b_) \
++            CPB(b_, x1##n) MMA(h10, f0, b_) }
++        W2T(FC1_K16)
++        GELU1(h00) GELU1(h10)
++        FC2_N(0u, h00, h10)
+     }
+ #endif
+     W2T(RES_A2) W2T(RES_B2)

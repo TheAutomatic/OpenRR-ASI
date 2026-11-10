@@ -1,0 +1,142 @@
+[1/4] Compiling GPU & Runtime sources...
+[2/4] Compiling ASI shell, ImGui & MinHook...
+[3/4] Generating Vulkan lazy loader & linking openrr-amd.asi...
+[4/4] Building runtime SPIR-V shaders & staging package...
+built 90 runtime SPIR-V shaders in /mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/shaders
+asi/build/mesa/global-address.patch
+ninja: Entering directory `/home/kenny/work/openrr-mesa-aco/build'
+[1/11] Generating src/git_sha1.h with a custom command
+[2/9] Compiling C object src/amd/vulkan/libvulkan_radeon.so.p/radv_descriptor_set.c.o
+[3/9] Compiling C object src/amd/vulkan/libvulkan_radeon.so.p/radv_device.c.o
+[4/9] Compiling C object src/amd/vulkan/libvulkan_radeon.so.p/nir_radv_nir_lower_descriptors.c.o
+[5/9] Compiling C object src/amd/vulkan/libvulkan_radeon.so.p/radv_shader.c.o
+[6/9] Compiling C object src/amd/vulkan/libvulkan_radeon.so.p/nir_radv_nir_lower_cooperative_matrix.c.o
+[7/9] Compiling C++ object src/amd/compiler/libaco.a.p/aco_assembler.cpp.o
+[8/9] Linking static target src/amd/compiler/libaco.a
+[9/9] Linking target src/amd/vulkan/libvulkan_radeon.so
+d3d_enc0_attr_f_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/d1e35384549e752c.nrp'
+enc0_attr_f_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/d89c77ffd1eb11fa.nrp'
+enc0_attr_f_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/aaf5cb7a8ce116ff.nrp'
+dec_dfn_64_64_f_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/52722875f5de9eb1.nrp'
+dec_up_64_64_96_f_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/40dc71ff1cd2b848.nrp'
+enc0_attr_f_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/904cfe3480396ab7.nrp'
+enc_stage_64_64_96_f_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/8cca057e36e2b4cc.nrp'
+post_f_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/de6a659020e0bbba.nrp'
+dec_dfn_64_64_f_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/f7d0914b380d5548.nrp'
+dec_up_64_64_96_f_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/a3a647bb92620bdc.nrp'
+enc_stage_64_64_96_f_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/002d1b4baa5c58ce.nrp'
+post_f_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/67c230d72edf262e.nrp'
+post_f_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/7139737ce729e99e.nrp'
+dec_head_32_64_f_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/3eccd9693a0d87ef.nrp'
+dec_up_32_64_64_f_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/b7dd12c10dab8afb.nrp'
+enc0_stage_32_64_f_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/0705fad577a0f8a7.nrp'
+enc_stage_64_64_96_f_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/8cca057e36e2b4cc.nrp'
+post_f_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/67c230d72edf262e.nrp'
+dec_head_32_64_f_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/eeaf87e31357ade8.nrp'
+dec_up_32_64_64_f_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/c1903b8e5c9adc74.nrp'
+enc0_stage_32_64_f_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/49348e1aab50da5f.nrp'
+enc_stage_64_64_96_f_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/03e17cddd77f0e90.nrp'
+post_f_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/ee9810da3013871c.nrp'
+ae.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/8053435623e90df5.nrp'
+clear_range.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/cffca948d4b28dac.nrp'
+d3d_ae.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/176dd5c87be9b223.nrp'
+d3d_downsample.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/fa1ab80252e2a7e5.nrp'
+d3d_downsample_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/b8457d1fbeb4e9e3.nrp'
+d3d_downsample_tl.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/66226a06cd06c7f3.nrp'
+d3d_downsample_tl_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/518e6587dc9e69b8.nrp'
+d3d_enc0_attr_f.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/b3655442fe0ad69e.nrp'
+d3d_enc0_attr_f_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/1d6fd9f4cc1c893c.nrp'
+d3d_enc0_attr_f_w.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/fc15342056305889.nrp'
+d3d_enc0_attr_f_w_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/2bfe14fa9a6e5624.nrp'
+d3d_ingest.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/055cdb1ca00ecf88.nrp'
+d3d_pack.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/37b54dc8375d23da.nrp'
+dec_dfn_128_128_f.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/a536c1aee1b5b373.nrp'
+dec_dfn_128_128_f_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/28bc7057f2b8ac76.nrp'
+dec_dfn_128_128_fl.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/095787dd4133557e.nrp'
+dec_dfn_128_128_fl_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/4ecf3b5cd58f6a11.nrp'
+dec_dfn_160_256_f.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/81d017418fe547af.nrp'
+dec_dfn_160_256_f_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/c29f41aeb581fce8.nrp'
+dec_dfn_160_256_fl.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/a89b668e3da09f5b.nrp'
+dec_dfn_160_256_fl_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/6bc90aef575d98cf.nrp'
+dec_dfn_64_64_f.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/777985d1831329ca.nrp'
+dec_dfn_64_64_f_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/52722875f5de9eb1.nrp'
+dec_dfn_96_128_f.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/50c4593efddb5754.nrp'
+dec_dfn_96_128_f_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/941882166ce09254.nrp'
+dec_dfn_96_128_fl.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/608c28c0029891f3.nrp'
+dec_dfn_96_128_fl_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/607b418f7ed5346e.nrp'
+dec_head_32_64_f.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/b799ea871f0212a5.nrp'
+dec_head_32_64_f_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/3eccd9693a0d87ef.nrp'
+dec_up_128_128_160_f.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/8207a2a6f176a4d8.nrp'
+dec_up_128_128_160_f_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/28e6b3fa305be4bc.nrp'
+dec_up_128_128_160_fl.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/6be5b3c53083b759.nrp'
+dec_up_128_128_160_fl_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/5d05fcc3de384276.nrp'
+dec_up_160_256_160_f.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/6d872e31c95afce5.nrp'
+dec_up_160_256_160_f_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/d4cad4131a9d2071.nrp'
+dec_up_160_256_160_fl.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/09ae4164fbb15cf1.nrp'
+dec_up_160_256_160_fl_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/360f7a5dd195af7c.nrp'
+dec_up_32_64_64_f.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/addffdc4c6b922e8.nrp'
+dec_up_32_64_64_f_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/b7dd12c10dab8afb.nrp'
+dec_up_64_64_96_f.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/238fcc9bcf09fa55.nrp'
+dec_up_64_64_96_f_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/40dc71ff1cd2b848.nrp'
+dec_up_96_128_128_f.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/7397e05f8c2da77a.nrp'
+dec_up_96_128_128_f_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/79ea9a0f90a74b24.nrp'
+dec_up_96_128_128_fl.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/94faa2ccbba8501e.nrp'
+dec_up_96_128_128_fl_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/caa3f6091e490cda.nrp'
+dfn_export.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/5eff19ab0da39495.nrp'
+dfn_export_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/8cadc24c9e03891b.nrp'
+dfn_import.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/92deee5eb00fde72.nrp'
+dfn_import_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/9494ed55ba8520ba.nrp'
+downsample.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/1868a527fddfb730.nrp'
+downsample_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/af1b93f587f9f210.nrp'
+downsample_tl.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/71f444e6a4c8f74a.nrp'
+downsample_tl_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/4c4d3749900919fe.nrp'
+enc0_attr_f.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/b7ec90ad9bb77d31.nrp'
+enc0_attr_f_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/904cfe3480396ab7.nrp'
+enc0_attr_f_w.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/2a1805e8888ee841.nrp'
+enc0_attr_f_w_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/037978cdd8781555.nrp'
+enc0_stage_32_64_f.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/4f4d742046c9b6f1.nrp'
+enc0_stage_32_64_f_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/0705fad577a0f8a7.nrp'
+enc0_stage_32_64_f_w.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/da0466da433262b2.nrp'
+enc0_stage_32_64_f_w_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/a1da9aadc8fc409c.nrp'
+enc_stage_128_128_160_f.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/f6ccd66e59440a06.nrp'
+enc_stage_128_128_160_f_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/9cfa240f087e7153.nrp'
+enc_stage_128_128_160_fl.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/231bf803323201db.nrp'
+enc_stage_128_128_160_fl_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/7637570aac01b415.nrp'
+enc_stage_160_256_0_f.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/0d775a6335a1b380.nrp'
+enc_stage_160_256_0_f_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/1499d383d594a247.nrp'
+enc_stage_160_256_0_fl.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/c5ef1c72a8fa61ac.nrp'
+enc_stage_160_256_0_fl_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/f2418b8d764403b6.nrp'
+enc_stage_160_256_160_f.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/38501fcf01b1e652.nrp'
+enc_stage_160_256_160_f_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/543b3fdebddc2f1d.nrp'
+enc_stage_160_256_160_fl.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/4d98a31a6a7789ad.nrp'
+enc_stage_160_256_160_fl_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/d80cf61e2f2f74ec.nrp'
+enc_stage_64_64_96_f.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/59a8847a905b419b.nrp'
+enc_stage_64_64_96_f_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/8cca057e36e2b4cc.nrp'
+enc_stage_96_128_128_f.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/8d07ac141832d300.nrp'
+enc_stage_96_128_128_f_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/2d30684c45e56b62.nrp'
+enc_stage_96_128_128_fl.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/7425bd19500d6479.nrp'
+enc_stage_96_128_128_fl_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/f3817f3fb0a26545.nrp'
+ingest.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/83008aab2deab055.nrp'
+pack.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/fdc5ed41ade87e02.nrp'
+pooled_history2.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/7fcd28c3e1986a33.nrp'
+pooled_history2_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/f9a40136548780ff.nrp'
+post_dlt_f.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/f59fecb0c6c722dd.nrp'
+post_dlt_f_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/06a7db5bd94c81e0.nrp'
+post_f.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/afe8e28b8283b96b.nrp'
+post_f_lt.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/67c230d72edf262e.nrp'
+post_tile.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/350eb51855cd5995.nrp'
+selftest.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/0c5629eb03f4fe89.nrp'
+selftest_tex.spv: FAILED: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/fcef346c12cfe86f.nrp'
+Traceback (most recent call last):
+  File "/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/asi/build/build_aco_records.py", line 187, in <module>
+    if __name__ == '__main__':
+        ^^^^^^
+  File "/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/asi/build/build_aco_records.py", line 176, in main
+    records=records, failures=failures)
+  File "/usr/lib/python3.14/pathlib/__init__.py", line 810, in write_text
+    with self.open(mode='w', encoding=encoding, errors=errors, newline=newline) as f:
+         ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/pathlib/__init__.py", line 772, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi-delivery-candidate/stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/manifest.json'

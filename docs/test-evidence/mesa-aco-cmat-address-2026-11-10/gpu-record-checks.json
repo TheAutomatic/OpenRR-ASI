@@ -1,0 +1,282 @@
+[
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/cmat-enc96/Correctness/round-0",
+    "label": "baseline",
+    "role": "original",
+    "spv": "f3817f3fb0a26545",
+    "code": "c08996618a61cd08"
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/cmat-enc96/Correctness/round-0",
+    "label": "candidate",
+    "role": "variant",
+    "spv": "f3817f3fb0a26545",
+    "code": "1ba94d9e00ca5ad3"
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/cmat-enc96/Short/round-0",
+    "label": "baseline",
+    "role": "original",
+    "spv": "f3817f3fb0a26545",
+    "code": "c08996618a61cd08"
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/cmat-enc96/Short/round-0",
+    "label": "candidate",
+    "role": "variant",
+    "spv": "f3817f3fb0a26545",
+    "code": "1ba94d9e00ca5ad3"
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/cmat-enc96/Short/round-1",
+    "label": "baseline",
+    "role": "variant",
+    "spv": "f3817f3fb0a26545",
+    "code": "1ba94d9e00ca5ad3"
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/cmat-enc96/Short/round-1",
+    "label": "candidate",
+    "role": "original",
+    "spv": "f3817f3fb0a26545",
+    "code": "c08996618a61cd08"
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/cmat-dec96/Correctness/round-0",
+    "label": "baseline",
+    "role": "original",
+    "spv": "607b418f7ed5346e",
+    "code": "38ac98d35509933f"
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/cmat-dec96/Correctness/round-0",
+    "label": "candidate",
+    "role": "variant",
+    "spv": "607b418f7ed5346e",
+    "code": "6a4ccda0cd2efb14"
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/cmat-dec96/Long/round-0",
+    "label": "baseline",
+    "role": "original",
+    "spv": "607b418f7ed5346e",
+    "code": "38ac98d35509933f"
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/cmat-dec96/Long/round-0",
+    "label": "candidate",
+    "role": "variant",
+    "spv": "607b418f7ed5346e",
+    "code": "6a4ccda0cd2efb14"
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/cmat-dec96/Long/round-1",
+    "label": "baseline",
+    "role": "variant",
+    "spv": "607b418f7ed5346e",
+    "code": "6a4ccda0cd2efb14"
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/cmat-dec96/Long/round-1",
+    "label": "candidate",
+    "role": "original",
+    "spv": "607b418f7ed5346e",
+    "code": "38ac98d35509933f"
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/cmat-dec96/Long/round-2",
+    "label": "baseline",
+    "role": "original",
+    "spv": "607b418f7ed5346e",
+    "code": "38ac98d35509933f"
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/cmat-dec96/Long/round-2",
+    "label": "candidate",
+    "role": "variant",
+    "spv": "607b418f7ed5346e",
+    "code": "6a4ccda0cd2efb14"
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/cmat-dec96/Long/round-3",
+    "label": "baseline",
+    "role": "variant",
+    "spv": "607b418f7ed5346e",
+    "code": "6a4ccda0cd2efb14"
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/cmat-dec96/Long/round-3",
+    "label": "candidate",
+    "role": "original",
+    "spv": "607b418f7ed5346e",
+    "code": "38ac98d35509933f"
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/cmat-dec96/Long/round-4",
+    "label": "baseline",
+    "role": "original",
+    "spv": "607b418f7ed5346e",
+    "code": "38ac98d35509933f"
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/cmat-dec96/Long/round-4",
+    "label": "candidate",
+    "role": "variant",
+    "spv": "607b418f7ed5346e",
+    "code": "6a4ccda0cd2efb14"
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/cmat-dec96/Long/round-5",
+    "label": "baseline",
+    "role": "variant",
+    "spv": "607b418f7ed5346e",
+    "code": "6a4ccda0cd2efb14"
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/cmat-dec96/Long/round-5",
+    "label": "candidate",
+    "role": "original",
+    "spv": "607b418f7ed5346e",
+    "code": "38ac98d35509933f"
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/cmat-dec96/LongCorrectness/round-0",
+    "label": "baseline",
+    "role": "original",
+    "spv": "607b418f7ed5346e",
+    "code": "38ac98d35509933f"
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/cmat-dec96/LongCorrectness/round-0",
+    "label": "candidate",
+    "role": "variant",
+    "spv": "607b418f7ed5346e",
+    "code": "6a4ccda0cd2efb14"
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/cmat-dec96/Short/round-0",
+    "label": "baseline",
+    "role": "original",
+    "spv": "607b418f7ed5346e",
+    "code": "38ac98d35509933f"
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/cmat-dec96/Short/round-0",
+    "label": "candidate",
+    "role": "variant",
+    "spv": "607b418f7ed5346e",
+    "code": "6a4ccda0cd2efb14"
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/cmat-dec96/Short/round-1",
+    "label": "baseline",
+    "role": "variant",
+    "spv": "607b418f7ed5346e",
+    "code": "6a4ccda0cd2efb14"
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/cmat-dec96/Short/round-1",
+    "label": "candidate",
+    "role": "original",
+    "spv": "607b418f7ed5346e",
+    "code": "38ac98d35509933f"
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/cmat-dec96-confirm/Long/round-0",
+    "label": "baseline",
+    "role": "original",
+    "spv": "607b418f7ed5346e",
+    "code": "38ac98d35509933f"
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/cmat-dec96-confirm/Long/round-0",
+    "label": "candidate",
+    "role": "variant",
+    "spv": "607b418f7ed5346e",
+    "code": "6a4ccda0cd2efb14"
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/cmat-dec96-confirm/Long/round-1",
+    "label": "baseline",
+    "role": "variant",
+    "spv": "607b418f7ed5346e",
+    "code": "6a4ccda0cd2efb14"
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/cmat-dec96-confirm/Long/round-1",
+    "label": "candidate",
+    "role": "original",
+    "spv": "607b418f7ed5346e",
+    "code": "38ac98d35509933f"
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/cmat-dec96-confirm/Long/round-2",
+    "label": "baseline",
+    "role": "original",
+    "spv": "607b418f7ed5346e",
+    "code": "38ac98d35509933f"
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/cmat-dec96-confirm/Long/round-2",
+    "label": "candidate",
+    "role": "variant",
+    "spv": "607b418f7ed5346e",
+    "code": "6a4ccda0cd2efb14"
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/cmat-dec96-confirm/Long/round-3",
+    "label": "baseline",
+    "role": "variant",
+    "spv": "607b418f7ed5346e",
+    "code": "6a4ccda0cd2efb14"
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/cmat-dec96-confirm/Long/round-3",
+    "label": "candidate",
+    "role": "original",
+    "spv": "607b418f7ed5346e",
+    "code": "38ac98d35509933f"
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/cmat-dec96-confirm/Long/round-4",
+    "label": "baseline",
+    "role": "original",
+    "spv": "607b418f7ed5346e",
+    "code": "38ac98d35509933f"
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/cmat-dec96-confirm/Long/round-4",
+    "label": "candidate",
+    "role": "variant",
+    "spv": "607b418f7ed5346e",
+    "code": "6a4ccda0cd2efb14"
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/cmat-dec96-confirm/Long/round-5",
+    "label": "baseline",
+    "role": "variant",
+    "spv": "607b418f7ed5346e",
+    "code": "6a4ccda0cd2efb14"
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/cmat-dec96-confirm/Long/round-5",
+    "label": "candidate",
+    "role": "original",
+    "spv": "607b418f7ed5346e",
+    "code": "38ac98d35509933f"
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/cmat-dec96-trace6/Correctness/round-0",
+    "label": "baseline",
+    "role": "original",
+    "spv": "607b418f7ed5346e",
+    "code": "38ac98d35509933f"
+  },
+  {
+    "run": "build/aco-runtime-trace/runs-next-optimization-2026-11-10/cmat-dec96-trace6/Correctness/round-0",
+    "label": "candidate",
+    "role": "variant",
+    "spv": "607b418f7ed5346e",
+    "code": "6a4ccda0cd2efb14"
+  }
+]

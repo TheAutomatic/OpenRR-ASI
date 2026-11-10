@@ -1,0 +1,66 @@
+--- original/onr_block.glsl
++++ fc1-address/onr_block.glsl
+@@ -154,6 +154,7 @@
+ #define WT(off, K, n) ((n) + ((off) / (16u * (K))) * 16u * (K) + (((off) % (K)) / 16u) * 256u)
+ #define WT_OUT(off) WT(off, ENC_X, ENC_C * ENC_X)
+ #define WT_FC1(off) WT(off, ENC_C, HID * ENC_C)
++#define FC1_TILE(row, tile) (HID * ENC_C + (row) * ENC_C + (tile) * 256u)
+ #define WT_FC2(off) WT(off, HID, ENC_C * HID)
+ #define WS_OUT 16u
+ #define WS_FC1 16u
+@@ -170,6 +171,7 @@
+ #else
+ #define WT_OUT(off) (off)
+ #define WT_FC1(off) (off)
++#define FC1_TILE(row, tile) ((row) * ENC_C + (tile) * 16u)
+ #define WT_FC2(off) (off)
+ #define WS_OUT ENC_X
+ #define WS_FC1 ENC_C
+--- original/onr_block_fast.glsl
++++ fc1-address/onr_block_fast.glsl
+@@ -831,7 +831,7 @@
+     for (uint j = 0u; j < LT_HID; j += 32u) {
+         uint jt = j + 16u * hf;
+         ACC h0 = bias_acc_t(pc.fc1_b, jt);
+-#define FC1_T2(cn, xn, n) { MBP blo, bhi; BPREP(blo, bhi, xn) WSTEP(h0, pc.fc1.v, WT_FC1(jt * ENC_C + (n) * 16u), WS_FC1, blo, bhi) }
++#define FC1_T2(cn, xn, n) { MBP blo, bhi; BPREP(blo, bhi, xn) WSTEP(h0, pc.fc1.v, FC1_TILE(jt, (n)), WS_FC1, blo, bhi) }
+         FOR_NX(FC1_T2)
+         MH g = MH(h0);
+         for (int i = 0; i < g.length(); i += 2) { f16vec2 q = gelu2(f16vec2(g[i], g[i + 1])); g[i] = q.x, g[i + 1] = q.y; }
+@@ -869,11 +869,11 @@
+ #if MLP64
+         ACC h2 = bias_acc_t(pc.fc1_b, j + 32u), h3 = bias_acc_t(pc.fc1_b, j + 48u);
+ #define FC1_T(cn, xn, n) { MBP blo, bhi; BPREP(blo, bhi, xn) \
+-            WSTEP(h0, pc.fc1.v, WT_FC1(j * ENC_C + (n) * 16u), WS_FC1, blo, bhi) WSTEP(h1, pc.fc1.v, WT_FC1((j + 16u) * ENC_C + (n) * 16u), WS_FC1, blo, bhi) \
+-            WSTEP(h2, pc.fc1.v, WT_FC1((j + 32u) * ENC_C + (n) * 16u), WS_FC1, blo, bhi) WSTEP(h3, pc.fc1.v, WT_FC1((j + 48u) * ENC_C + (n) * 16u), WS_FC1, blo, bhi) }
++            WSTEP(h0, pc.fc1.v, FC1_TILE(j, (n)), WS_FC1, blo, bhi) WSTEP(h1, pc.fc1.v, FC1_TILE((j + 16u), (n)), WS_FC1, blo, bhi) \
++            WSTEP(h2, pc.fc1.v, FC1_TILE((j + 32u), (n)), WS_FC1, blo, bhi) WSTEP(h3, pc.fc1.v, FC1_TILE((j + 48u), (n)), WS_FC1, blo, bhi) }
+ #else
+ #define FC1_T(cn, xn, n) { MBP blo, bhi; BPREP(blo, bhi, xn) \
+-            WSTEP(h0, pc.fc1.v, WT_FC1(j * ENC_C + (n) * 16u), WS_FC1, blo, bhi) WSTEP(h1, pc.fc1.v, WT_FC1((j + 16u) * ENC_C + (n) * 16u), WS_FC1, blo, bhi) }
++            WSTEP(h0, pc.fc1.v, FC1_TILE(j, (n)), WS_FC1, blo, bhi) WSTEP(h1, pc.fc1.v, FC1_TILE((j + 16u), (n)), WS_FC1, blo, bhi) }
+ #endif
+         FOR_NX(FC1_T)
+ #define GELU_TT(h, g) MH g = MH(h); for (int i = 0; i < g.length(); i += 2) { f16vec2 q = gelu2(f16vec2(g[i], g[i + 1])); g[i] = q.x, g[i + 1] = q.y; }
+--- original/onr_block_w2.glsl
++++ fc1-address/onr_block_w2.glsl
+@@ -342,8 +342,8 @@
+         ACC hb0 = bias_acc_t(pc.fc1_b, j), hb1 = bias_acc_t(pc.fc1_b, j + 16u), hb2 = bias_acc_t(pc.fc1_b, j + 32u), hb3 = bias_acc_t(pc.fc1_b, j + 48u);
+         ACC h00 = hb0, h01 = hb1, h02 = hb2, h03 = hb3, h10 = hb0, h11 = hb1, h12 = hb2, h13 = hb3;
+ #define FC1_K(n, xa, xb) { MA f0, f1, f2, f3; MB b_; \
+-            WLD(f0, pc.fc1.v, WT_FC1(j * ENC_C + (n) * 16u), WS_FC1, ROW); WLD(f1, pc.fc1.v, WT_FC1((j + 16u) * ENC_C + (n) * 16u), WS_FC1, ROW); \
+-            WLD(f2, pc.fc1.v, WT_FC1((j + 32u) * ENC_C + (n) * 16u), WS_FC1, ROW); WLD(f3, pc.fc1.v, WT_FC1((j + 48u) * ENC_C + (n) * 16u), WS_FC1, ROW); \
++            WLD(f0, pc.fc1.v, FC1_TILE(j, (n)), WS_FC1, ROW); WLD(f1, pc.fc1.v, FC1_TILE((j + 16u), (n)), WS_FC1, ROW); \
++            WLD(f2, pc.fc1.v, FC1_TILE((j + 32u), (n)), WS_FC1, ROW); WLD(f3, pc.fc1.v, FC1_TILE((j + 48u), (n)), WS_FC1, ROW); \
+             CPB(b_, xa) MMA(h00, f0, b_) MMA(h01, f1, b_) MMA(h02, f2, b_) MMA(h03, f3, b_) \
+             CPB(b_, xb) MMA(h10, f0, b_) MMA(h11, f1, b_) MMA(h12, f2, b_) MMA(h13, f3, b_) }
+ #define FC1_KN(n) FC1_K(uint(n), x0##n, x1##n)
+@@ -357,7 +357,7 @@
+         ACC hb0 = bias_acc_t(pc.fc1_b, j), hb1 = bias_acc_t(pc.fc1_b, j + 16u);
+         ACC h00 = hb0, h01 = hb1, h10 = hb0, h11 = hb1;
+ #define FC1_K2(n) { MA f0, f1; MB b_; \
+-            WLD(f0, pc.fc1.v, WT_FC1(j * ENC_C + uint(n) * 16u), WS_FC1, ROW); WLD(f1, pc.fc1.v, WT_FC1((j + 16u) * ENC_C + uint(n) * 16u), WS_FC1, ROW); \
++            WLD(f0, pc.fc1.v, FC1_TILE(j, uint(n)), WS_FC1, ROW); WLD(f1, pc.fc1.v, FC1_TILE((j + 16u), uint(n)), WS_FC1, ROW); \
+             CPB(b_, x0##n) MMA(h00, f0, b_) MMA(h01, f1, b_) \
+             CPB(b_, x1##n) MMA(h10, f0, b_) MMA(h11, f1, b_) }
+         W2T(FC1_K2)

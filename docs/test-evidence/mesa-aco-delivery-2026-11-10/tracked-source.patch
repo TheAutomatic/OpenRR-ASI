@@ -1,0 +1,424 @@
+diff --git a/README.md b/README.md
+index 3e17bad..0e2836e 100644
+--- a/README.md
++++ b/README.md
+@@ -57,6 +57,7 @@
+ | `openrr-amd.asi` | `plugins\openrr-amd.asi` |
+ | `openrr-amd.ini` | `openrr-amd.ini` |
+ | `openrr-amd\shaders\*.spv` | `openrr-amd\shaders\*.spv`（共 90 个 `.spv`） |
++| `openrr-amd\aco\gfx1201\openrr-d3d12-v1\` | 保持相同目录结构，包含 `.nrp`、`manifest.json` 和 `manifest.msgpack`；D3D12 全 ACO 路径必须部署 |
+ | `nvngx_dlssd.dll`（**310.9.1**） | 游戏目录或 `openrr-amd\nvngx_dlssd.dll` |
+ 
+ 在 `OptiScaler.ini` 中开启 ASI 插件加载（OptiScaler 默认关闭该项）：
+@@ -80,7 +81,7 @@ LoadAsiPlugins=true
+ bash asi/build/build_asi.sh
+ ```
+ 
+-构建完成后，可直接发布的打包目录位于 `build/asi/stage/`（分离出的调试符号保存在 `build/asi/openrr-amd.debug`，单元测试与命令列表切分验证套件位于 `build/asi/test_asi_units.exe`）。
++构建完成后，打包目录位于 `build/asi/stage/`（分离出的调试符号保存在 `build/asi/openrr-amd.debug`，单元测试与命令列表切分验证套件位于 `build/asi/test_asi_units.exe`）。默认离线构建固定版本 Mesa 的 global/vector8 ACO 记录，需要现有 WSL Mesa 源码与依赖；详见 [ACO 构建说明](asi/build/mesa/README.md)。stage 同时包含 `LICENSE` 和 `THIRD_PARTY.md`，不包含 OptiScaler 或外部权重 DLL。独立候选使用 `bash asi/build/build_asi.sh build/asi-delivery-candidate`，审查和包级验证完成后再决定替换正式 stage。
+ 
+ ---
+ 
+diff --git a/THIRD_PARTY.md b/THIRD_PARTY.md
+index f8d05a5..4c95292 100644
+--- a/THIRD_PARTY.md
++++ b/THIRD_PARTY.md
+@@ -120,3 +120,15 @@ Full license text in `asi/third_party/inter/LICENSE.txt`.
+ 
+ Copyright (c) 2015-2025 The Khronos Group Inc. Licensed under the Apache License, Version 2.0.
+ Full license text in `asi/third_party/vulkan/LICENSE.md`.
++
++---
++
++## 6. Mesa RADV / ACO (offline build tool)
++
++Offline shader records are generated with Mesa 26.2.4, pinned to
++`96cb43121031992b85767f9c1be8f3f48e22b1d2`, with the source patches in
++`asi/build/mesa/`. Mesa RADV/ACO sources used here retain their upstream MIT
++license notices. The package includes generated shader records; Mesa shared
++libraries, the noop DRM shim and the capture executable are build tools and
++are not distributed in the Windows stage. See `asi/build/mesa/README.md` for
++patch provenance and reproducible build instructions.
+diff --git a/asi/build/build_aco_records.py b/asi/build/build_aco_records.py
+index 20d836c..f0b0659 100644
+--- a/asi/build/build_aco_records.py
++++ b/asi/build/build_aco_records.py
+@@ -96,31 +96,58 @@ def main():
+     ap.add_argument('--precision', choices=('native', 'local', 'global'), default='local')
+     ap.add_argument('--matrix-loads', choices=('scalar', 'vector8'), default='scalar')
+     ap.add_argument('--refresh', action='store_true')
++    ap.add_argument('--capture-dir', type=Path, help='Build-only capture diagnostics (outside the package stage)')
++    ap.add_argument('--cmat-address-shaders', nargs='*', default=[],
++                    help='Exact shader stems using bounded cmat lane offsets; all others stay off')
+     ns = ap.parse_args()
+     cfg = json.loads(ns.toolchain.read_text())
+     root = ns.out / 'gfx1201' / LAYOUT
+-    raw = root / 'capture'
++    root.mkdir(parents=True, exist_ok=True)
++    raw = ns.capture_dir if ns.capture_dir else root / 'capture'
+     raw.mkdir(parents=True, exist_ok=True)
+     manifest_path = root/'manifest.json'
+     manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
+     files = sorted({p.resolve() for arg in ns.inputs for p in (arg.rglob('*.spv') if arg.is_dir() else [arg])})
++    missing_address_shaders = set(ns.cmat_address_shaders) - {p.stem for p in files}
++    if missing_address_shaders:
++        ap.error('cmat address shader inputs missing: ' + ', '.join(sorted(missing_address_shaders)))
++    if ns.cmat_address_shaders and not cfg.get('cmat_address_patch_sha256'):
++        ap.error('selected toolchain does not declare the bounded cmat address patch')
++    # Records are addressed by SPIR-V hash, so identical input bytes cannot
++    # safely request conflicting per-stem policies. Reject instead of choosing
++    # whichever path happens to be visited last.
++    input_policies = {}
++    for spv in files:
++        key = f'{fnv(spv.read_bytes()):016x}'
++        address = spv.stem in ns.cmat_address_shaders
++        if key in input_policies and input_policies[key] != address:
++            ap.error('identical SPIR-V requests conflicting cmat address policies: ' + spv.name)
++        input_policies[key] = address
+     records = {}
+     failures = []
+     policy = dict(precision=ns.precision, matrix_loads=ns.matrix_loads, address_adaptation='assembler-dual-sentinel-v1')
++    if ns.cmat_address_shaders:
++        policy['cmat_address_shaders'] = sorted(set(ns.cmat_address_shaders))
+     fingerprint = hashlib.sha256(ns.capture.read_bytes() + ns.toolchain.read_bytes() + Path(__file__).read_bytes() + json.dumps(policy,sort_keys=True).encode()).hexdigest()
+     for spv in files:
+         data = spv.read_bytes()
+         key = f'{fnv(data):016x}'
+         previous = manifest.get('records', {}).get(key)
+-        if not ns.refresh and manifest.get('fingerprint') == fingerprint and previous and (root/(key+'.nrp')).exists():
+-            records[key] = previous
+-            continue
++        record_path = root/(key+'.nrp')
++        if not ns.refresh and manifest.get('fingerprint') == fingerprint and previous and record_path.exists():
++            if previous.get('record_sha256') == hashlib.sha256(record_path.read_bytes()).hexdigest():
++                records[key] = previous
++                continue
+         prefix = raw/key
+         try:
+             env = dict(os.environ, VK_ICD_FILENAMES=cfg['icd'], LD_PRELOAD=cfg['shim'],
+                        AMDGPU_GPU_ID='gfx1201', MESA_SHADER_CACHE_DISABLE='true',
+                        LD_LIBRARY_PATH=cfg['library_path'], ONR_ACO_PRECISION=ns.precision)
+             env.pop('ONR_ACO_VECTOR_LOADS', None)
++            # Never inherit a global experimental setting into unrelated shaders.
++            env.pop('ONR_ACO_CMAT_ADDRESS', None)
++            if spv.stem in ns.cmat_address_shaders:
++                env['ONR_ACO_CMAT_ADDRESS'] = '1'
+             if ns.matrix_loads == 'vector8': env['ONR_ACO_VECTOR_LOADS'] = '1'
+             captures=[]
+             for suffix,sentinel in (('a', '0x13579bdf'), ('b', '0x2468ace1')):
+@@ -142,9 +169,12 @@ def main():
+             if dims[0]*dims[1]*dims[2] != info['workgroup_size']:
+                 raise ValueError('workgroup mismatch')
+             code, address_report = adapt_code(code, other, info['exec_bytes'], info, other_info, (log,other_log))
+-            (root/(key+'.nrp')).write_bytes(pack(info, code, fnv(data)))
++            record_data = pack(info, code, fnv(data))
++            record_path.write_bytes(record_data)
+             records[key] = dict(info, spv=spv.name, spv_hash=key, code_hash=f'{fnv(code):016x}',
+                                 workgroup=list(dims), layout='views' if spv.stem.startswith('d3d_') else 'sampled',
++                                cmat_address=spv.stem in ns.cmat_address_shaders,
++                                record_sha256=hashlib.sha256(record_data).hexdigest(),
+                                 address_report=address_report, record=key+'.nrp')
+             print(f'{spv.name}: {key} {len(code)} bytes, {info["vgprs"]} VGPR, set0={info["set0"]}', flush=True)
+         except (ValueError, KeyError, OSError, subprocess.SubprocessError) as e:
+diff --git a/asi/build/build_asi.sh b/asi/build/build_asi.sh
+index e524a78..5fabb14 100644
+--- a/asi/build/build_asi.sh
++++ b/asi/build/build_asi.sh
+@@ -102,6 +102,7 @@ rm -f "$out/openrr-amd.debug"
+ echo "[4/4] Building runtime SPIR-V shaders & staging package..."
+ python3 asi/build/build_shaders.py "$glslang" gpu "$stage/openrr-amd/shaders"
+ cp asi/openrr-amd.ini "$stage/openrr-amd.ini"
++cp LICENSE THIRD_PARTY.md "$stage/"
+ mkdir -p -- "$out/occ_nopad" "$out/occ_pad16k"
+ "$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_FAR=2 -DLT_Q16=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -Igpu/shaders/include gpu/shaders/enc0_stage_32_64.comp -o "$out/occ_nopad/enc0_stage_32_64_f_lt.spv" > /dev/null
+ "$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_POST_PAIR=1 -DLT_POST_EXP=1 -DLT_POST_NOCORNER=1 -DLT_POST_NETH=1 -Igpu/shaders/include gpu/shaders/post.comp -o "$out/occ_nopad/post_f_lt.spv" > /dev/null
+@@ -142,8 +143,10 @@ mkdir -p -- "$out/b2_base" "$out/b2_post_exp" "$out/b2_post_log" "$out/b2_attr_r
+ if [[ "${OPENRR_BUILD_ACO:-1}" == "1" ]]; then
+     bash asi/build/mesa/build_capture.sh
+     python3 asi/build/build_aco_records.py --out "$stage/openrr-amd/aco" \
++        --capture-dir "$out/aco-capture" \
+         --precision "${OPENRR_ACO_PRECISION:-global}" --matrix-loads "${OPENRR_ACO_MATRIX_LOADS:-vector8}" \
+-        "$stage/openrr-amd/shaders" "$out/occ_nopad" "$out/occ_pad16k" "$out"/b2_*
++        "$stage/openrr-amd/shaders" "$out/occ_nopad" "$out/occ_pad16k" "$out"/b2_* \
++        --cmat-address-shaders dec_dfn_96_128_fl_lt enc_stage_128_128_160_fl_lt
+ fi
+ echo "Built $stage/plugins/openrr-amd.asi ($(stat -c %s "$stage/plugins/openrr-amd.asi") bytes, $count Vulkan entry points resolved lazily)"
+ echo "Exports: $("$objdump" -p "$stage/plugins/openrr-amd.asi" | grep -c 'InitializeASI')  Imports: $("$objdump" -p "$stage/plugins/openrr-amd.asi" | grep 'DLL Name' | awk '{print $3}' | tr '\n' ' ')"
+diff --git a/asi/build/build_runtime_trace.sh b/asi/build/build_runtime_trace.sh
+index 35b2b9b..4ebffca 100644
+--- a/asi/build/build_runtime_trace.sh
++++ b/asi/build/build_runtime_trace.sh
+@@ -2,8 +2,8 @@
+ set -euo pipefail
+ cd -- "$(dirname -- "$0")/../.."
+ # Reuse existing CPU objects; leave archived ASIs and staged package untouched.
+-base=build/asi
+-out=build/aco-runtime-trace
++base=${OPENRR_TRACE_BASE:-build/asi}
++out=${OPENRR_TRACE_OUT:-build/aco-runtime-trace}
+ mkdir -p "$out"
+ cxx=x86_64-w64-mingw32-g++
+ flags=(-std=c++20 -mf16c -O2 -fno-strict-aliasing -DNDEBUG -DONR_RR_STATIC -DONR_RR_BUILDING
+diff --git a/asi/build/mesa/README.md b/asi/build/mesa/README.md
+index c7d5ac6..e3b5287 100644
+--- a/asi/build/mesa/README.md
++++ b/asi/build/mesa/README.md
+@@ -23,7 +23,8 @@ From the repository directory under WSL:
+     python3 asi/build/build_aco_records.py --out build/asi/stage/openrr-amd/aco \
+         --precision global --matrix-loads vector8 \
+         build/asi/stage/openrr-amd/shaders build/asi/occ_nopad \
+-        build/asi/occ_pad16k build/asi/b2_*
++        build/asi/occ_pad16k build/asi/b2_* \
++        --cmat-address-shaders dec_dfn_96_128_fl_lt enc_stage_128_128_160_fl_lt
+ 
+ For the complete Windows package, use OPENRR_BUILD_ACO=1 with
+ asi/build/build_asi.sh. BUILD_LOCAL_ASI.cmd forwards that setting to WSL.
+@@ -133,3 +134,60 @@ shader packs existing FP16 bit patterns directly to avoid an observed LLPC
+ round-trip conversion corruption of the exposure attribute.
+ See docs/test-evidence/mesa-aco-review-2026-11-09.md for validation boundaries
+ and outstanding review items.
++
++## Retained bounded cmat address lowering
++
++build_capture.sh now applies global-address.patch after capturev4. The new
++lowering is dormant unless ONR_ACO_CMAT_ADDRESS is set. build_aco_records.py
++clears an inherited setting and enables it only for exact stems passed with
++--cmat-address-shaders. build_asi.sh selects dec_dfn_96_128_fl_lt and
++enc_stage_128_128_160_fl_lt; global/vector8 and precision remain unchanged.
++The exact selection is included in the record fingerprint and manifest.
++Toolchain JSON also binds the additional patch SHA256.
++
++The lowering retains the full64-bit pointer and signed source-index behavior;
++only provably bounded generated wave32 FP16 column-major lane offsets become
++one32-bit byte offset. Stores, LDS, transpose loads and dynamic strides stay on
++the original path. enc128's one MLP slice loop uses DontUnroll in its flow/lite
++variant because the cheaper address form otherwise crosses Mesa's unroll cost
++threshold. Other loop and global unroll policies remain unchanged.
++
++Prepared integration consists of retained enc96 one-tile/reciprocal policy,
++dec96 FC1 row/tile source factor, this enc128 loop hint, and the two exact-stem
++address records. Source/record identity and combined correctness/timing evidence
++are documented in docs/test-evidence/mesa-aco-enc128-unroll-2026-11-10.md.
++No throughput result establishes a general memory or synchronization bottleneck.
++
++## Delivery candidate and cache rules
++
++The regular isolated package entry is:
++
++    bash asi/build/build_asi.sh build/asi-delivery-candidate
++
++Leave OPENRR_ACO_PRECISION and OPENRR_ACO_MATRIX_LOADS unset for the retained
++global/vector8 default. Their overrides intentionally produce another policy
++and require separate validation. OPENRR_BUILD_ACO defaults to 1; setting it to
++0 does not produce a complete strict-ACO package. The two address stems are
++explicit in build_asi.sh, not inherited from the environment.
++
++The record fingerprint covers capture executable bytes, the producer script,
++the entire toolchain JSON (including RADV and both patch hashes), precision,
++matrix-load strategy and the sorted exact address-stem list. SPIR-V bytes
++select each record by FNV. A changed policy/toolchain invalidates the whole
++record set; a changed shader selects a new key. --refresh bypasses reuse.
++Reuse additionally requires the previous record SHA256 to match its file;
++missing, damaged or older unhashed records are recaptured. The JSON manifest
++records each shader's cmat_address flag and record SHA256. Its MessagePack
++runtime index binds the JSON hash and each SPIR-V/code hash.
++
++Regular builds put raw capture files in <build>/aco-capture, outside stage.
++Only plugin, INI, runtime SPIR-V, records and the two manifests are delivered.
++Debug symbols, unit tests, benchmark, Mesa and ABI probe fixtures remain build
++artifacts. Use a fresh output directory to avoid stale files from older stages;
++verify_aco_delivery.py rejects unexpected files and incomplete record coverage.
++
++Final package audit, tool/archive inventory, reproduced issue and validation
++boundaries are in docs/test-evidence/mesa-aco-delivery-2026-11-10.md.
++One-time experiment tools moved to that report's adjacent experiment-tools.zip;
++manage_aco_experiment_archive.py verifies and restores their exact original
++paths before historical reproduction commands are used.
+diff --git a/asi/build/mesa/build_capture.sh b/asi/build/mesa/build_capture.sh
+index b6d4860..bf2278c 100644
+--- a/asi/build/mesa/build_capture.sh
++++ b/asi/build/mesa/build_capture.sh
+@@ -16,6 +16,7 @@ for file in vulkan/radv_shader.c vulkan/radv_descriptor_set.c vulkan/radv_device
+     git -C "$base" show "$commit:src/amd/$file" > "$work/source/src/amd/$file"
+ done
+ python3 asi/build/mesa/prepare_capture.py "$work/source"
++python3 asi/build/mesa/prepare_global_address.py "$work/source"
+ export PKG_CONFIG_PATH="$HOME/src/mesa-deps/lib/x86_64-linux-gnu/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+ if [[ ! -e $work/build/build.ninja ]]; then
+     meson setup "$work/build" "$work/source" --buildtype=release \
+@@ -34,5 +35,7 @@ cfg = dict(mesa_commit='96cb43121031992b85767f9c1be8f3f48e22b1d2', patch_version
+            library_path=str(pathlib.Path.home()/'src/mesa-deps/lib/x86_64-linux-gnu'))
+ cfg['radv_sha256'] = hashlib.sha256((w/'build/src/amd/vulkan/libvulkan_radeon.so').read_bytes()).hexdigest()
+ cfg['patch_sha256'] = hashlib.sha256((r/'asi/build/mesa/capture.patch').read_bytes()).hexdigest()
++cfg['cmat_address_patch_sha256'] = hashlib.sha256((r/'asi/build/mesa/global-address.patch').read_bytes()).hexdigest()
++cfg['cmat_address'] = 'bounded-lane-byte-offset-v1-opt-in'
+ (r/'build/aco-tools/toolchain.json').write_text(json.dumps(cfg, indent=2)+'\n')
+ PY
+diff --git a/asi/tests/run_runtime_trace_batch.ps1 b/asi/tests/run_runtime_trace_batch.ps1
+index b3762f8..a10b522 100644
+--- a/asi/tests/run_runtime_trace_batch.ps1
++++ b/asi/tests/run_runtime_trace_batch.ps1
+@@ -2,11 +2,13 @@ param([string]$Output = 'build/aco-runtime-trace/runs',
+       [ValidateSet('Baseline','Control','Trace')][string]$Stage = 'Baseline', [int]$TraceFrame = 8,
+       [string]$DataDir = 'build/asi/stage/openrr-amd',
+       [string]$Records = 'build/aco-review-v4/global-vector8/gfx1201/openrr-d3d12-v1',
+-      [string]$TraceName = '', [string]$ReferenceName = 'fast-aligned')
++      [string]$TraceName = '', [string]$ReferenceName = 'fast-aligned',
++      [ValidateSet(0,1)][int]$ControlFastMode = 1,
++      [string]$TraceTools = 'build/aco-runtime-trace')
+ $ErrorActionPreference = 'Stop'
+ $root = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+ Set-Location -LiteralPath $root
+-$tool = Join-Path $root 'build/aco-runtime-trace'
++$tool = Join-Path $root $TraceTools
+ $runtime = Join-Path $tool 'openrr-trace.asi'
+ $data = Join-Path $root $DataDir
+ $env:ONR_ACO_DIR = Join-Path $root $Records
+@@ -60,7 +62,7 @@ if($Stage -eq 'Baseline') {
+     Write-Host 'Baseline phase complete. Inspect Fast reproduction, aligned state and Legacy exactness before Stage Trace.'
+ } elseif($Stage -eq 'Control') {
+     if(-not $TraceName){throw 'Control requires an explicit TraceName'}
+-    $null = Run-Case $TraceName 1 1 -1
++    $null = Run-Case $TraceName $ControlFastMode 1 -1
+ } else {
+     foreach($name in @('fast-original-sequence','fast-aligned','legacy-aligned')) {
+         $prior = Get-Content -LiteralPath (Join-Path $Output "$name/summary.json") -Raw | ConvertFrom-Json
+diff --git a/gpu/shaders/dec_dfn_96_128.comp b/gpu/shaders/dec_dfn_96_128.comp
+index 66ed028..640db02 100644
+--- a/gpu/shaders/dec_dfn_96_128.comp
++++ b/gpu/shaders/dec_dfn_96_128.comp
+@@ -7,4 +7,9 @@
+ #define ENC_X 128
+ #define ENC_K8 1
+ #define DEC_DFN 1
++// Measured flow/lite path: use known FC1 row/tile indices directly.
++// Integer addresses and all floating-point operations remain identical.
++#if defined(ENC_F32) && ENC_F32 && defined(FLOW) && FLOW && defined(LT_EXP) && LT_EXP && defined(LT_RCP) && LT_RCP && defined(LT_HM) && LT_HM
++#define FC1_ROW_TILE 1
++#endif
+ #include "onr_block.glsl"
+diff --git a/gpu/shaders/enc_stage_128_128_160.comp b/gpu/shaders/enc_stage_128_128_160.comp
+index ccb4f29..c843115 100644
+--- a/gpu/shaders/enc_stage_128_128_160.comp
++++ b/gpu/shaders/enc_stage_128_128_160.comp
+@@ -8,4 +8,9 @@
+ #define ENC_K8 1
+ #define ENC_STAGE 1
+ #define ENC_CO 160
++// Keep only the measured flow/lite MLP slice loop rolled. The bounded
++// cmat address lowering otherwise crosses Mesa's full-unroll cost limit.
++#if defined(ENC_F32) && ENC_F32 && defined(FLOW) && FLOW && defined(LT_EXP) && LT_EXP && defined(LT_RCP) && LT_RCP && defined(LT_HM) && LT_HM
++#define MLP_SLICE_LOOP [[dont_unroll]]
++#endif
+ #include "onr_block.glsl"
+diff --git a/gpu/shaders/enc_stage_96_128_128.comp b/gpu/shaders/enc_stage_96_128_128.comp
+index 73270eb..a2ea0f4 100644
+--- a/gpu/shaders/enc_stage_96_128_128.comp
++++ b/gpu/shaders/enc_stage_96_128_128.comp
+@@ -8,4 +8,11 @@
+ #define ENC_K8 1
+ #define ENC_STAGE 1
+ #define ENC_CO 128
++// The measured Fast flow/lite path uses one token tile per wave. On ACO
++// this reduces VGPRs 256 -> 240 and removes scratch; other variants keep W2.
++#if defined(ENC_F32) && ENC_F32 && defined(FLOW) && FLOW && defined(LT_EXP) && LT_EXP && defined(LT_RCP) && LT_RCP && defined(LT_HM) && LT_HM
++#define W2 0
++// W2's DFN uses SIG_RCP under LT_HM. Preserve that policy in this body too.
++#define ENC_DFN_SIG_RCP 1
++#endif
+ #include "onr_block.glsl"
+diff --git a/gpu/shaders/include/onr_block.glsl b/gpu/shaders/include/onr_block.glsl
+index a86d948..62c9b6f 100644
+--- a/gpu/shaders/include/onr_block.glsl
++++ b/gpu/shaders/include/onr_block.glsl
+@@ -154,6 +154,9 @@ layout(local_size_x = 128 * SPLIT) in;
+ #define WT(off, K, n) ((n) + ((off) / (16u * (K))) * 16u * (K) + (((off) % (K)) / 16u) * 256u)
+ #define WT_OUT(off) WT(off, ENC_X, ENC_C * ENC_X)
+ #define WT_FC1(off) WT(off, ENC_C, HID * ENC_C)
++#if defined(FC1_ROW_TILE) && FC1_ROW_TILE
++#define FC1_TILE(row, tile) (HID * ENC_C + (row) * ENC_C + (tile) * 256u)
++#endif
+ #define WT_FC2(off) WT(off, HID, ENC_C * HID)
+ #define WS_OUT 16u
+ #define WS_FC1 16u
+@@ -170,6 +173,9 @@ layout(local_size_x = 128 * SPLIT) in;
+ #else
+ #define WT_OUT(off) (off)
+ #define WT_FC1(off) (off)
++#if defined(FC1_ROW_TILE) && FC1_ROW_TILE
++#define FC1_TILE(row, tile) ((row) * ENC_C + (tile) * 16u)
++#endif
+ #define WT_FC2(off) (off)
+ #define WS_OUT ENC_X
+ #define WS_FC1 ENC_C
+@@ -178,6 +184,11 @@ layout(local_size_x = 128 * SPLIT) in;
+ #define WS_MRG (4u * ENC_C)
+ #endif
+ 
++// Unselected variants expand to the original offset expression.
++#ifndef FC1_TILE
++#define FC1_TILE(row, tile) WT_FC1((row) * ENC_C + (tile) * 16u)
++#endif
++
+ layout(push_constant, scalar) uniform P {
+     U8Buf x;             // input planes [C/32][H][W][32] e4m3
+     U8Buf y;             // TensorOutput planes
+diff --git a/gpu/shaders/include/onr_block_fast.glsl b/gpu/shaders/include/onr_block_fast.glsl
+index c9a6765..22f570e 100644
+--- a/gpu/shaders/include/onr_block_fast.glsl
++++ b/gpu/shaders/include/onr_block_fast.glsl
+@@ -94,6 +94,9 @@
+ #ifndef J_UNROLL
+ #define J_UNROLL
+ #endif
++#ifndef MLP_SLICE_LOOP
++#define MLP_SLICE_LOOP J_UNROLL
++#endif
+ #define FOR_NT(M) M(c0, TILE(0u)) F1(M) F2(M) F3(M) F4(M) F5(M) F6(M) F7(M) F8(M) F9(M)
+ 
+ // Transposed body (TR, SPLIT 1): every product is computed as its transpose, D^T = W A^T, so the activations
+@@ -863,7 +866,7 @@ void main() {
+ #else
+ #define SLICE 32u
+ #endif
+-    J_UNROLL for (uint j = 0u; j < LT_HID; j += SLICE) {
++    MLP_SLICE_LOOP for (uint j = 0u; j < LT_HID; j += SLICE) {
+         // hidden slice h^T [SLICE neurons][16 rows] = fc1 x1^T + b, GELU in registers
+         ACC h0 = bias_acc_t(pc.fc1_b, j), h1 = bias_acc_t(pc.fc1_b, j + 16u);
+ #if MLP64
+@@ -1337,7 +1340,11 @@ void main() {
+             f16vec4 im = F16x4Buf(uint64_t(pc.dfn_in)).v[pi];
+             for (int c = 0; c < 3; ++c) {
+                 precise float e = exp2(float(lds[pr + ln * 16u + uint(c)]) * uintBitsToFloat(0xbfb8aa3bu));
++#ifdef ENC_DFN_SIG_RCP
++                float16_t g = float16_t(SIG_RCP(e + 1.0));
++#else
+                 float16_t g = float16_t(rcp_rn(e + 1.0));
++#endif
+                 precise float16_t gs = g * sd;
+                 precise float16_t v = im[c] * gs;
+                 o[c] = min(v, 65504.0hf);
+diff --git a/gpu/shaders/include/onr_block_w2.glsl b/gpu/shaders/include/onr_block_w2.glsl
+index 98629cf..c039a6a 100644
+--- a/gpu/shaders/include/onr_block_w2.glsl
++++ b/gpu/shaders/include/onr_block_w2.glsl
+@@ -342,8 +342,8 @@ void main() {
+         ACC hb0 = bias_acc_t(pc.fc1_b, j), hb1 = bias_acc_t(pc.fc1_b, j + 16u), hb2 = bias_acc_t(pc.fc1_b, j + 32u), hb3 = bias_acc_t(pc.fc1_b, j + 48u);
+         ACC h00 = hb0, h01 = hb1, h02 = hb2, h03 = hb3, h10 = hb0, h11 = hb1, h12 = hb2, h13 = hb3;
+ #define FC1_K(n, xa, xb) { MA f0, f1, f2, f3; MB b_; \
+-            WLD(f0, pc.fc1.v, WT_FC1(j * ENC_C + (n) * 16u), WS_FC1, ROW); WLD(f1, pc.fc1.v, WT_FC1((j + 16u) * ENC_C + (n) * 16u), WS_FC1, ROW); \
+-            WLD(f2, pc.fc1.v, WT_FC1((j + 32u) * ENC_C + (n) * 16u), WS_FC1, ROW); WLD(f3, pc.fc1.v, WT_FC1((j + 48u) * ENC_C + (n) * 16u), WS_FC1, ROW); \
++            WLD(f0, pc.fc1.v, FC1_TILE(j, (n)), WS_FC1, ROW); WLD(f1, pc.fc1.v, FC1_TILE((j + 16u), (n)), WS_FC1, ROW); \
++            WLD(f2, pc.fc1.v, FC1_TILE((j + 32u), (n)), WS_FC1, ROW); WLD(f3, pc.fc1.v, FC1_TILE((j + 48u), (n)), WS_FC1, ROW); \
+             CPB(b_, xa) MMA(h00, f0, b_) MMA(h01, f1, b_) MMA(h02, f2, b_) MMA(h03, f3, b_) \
+             CPB(b_, xb) MMA(h10, f0, b_) MMA(h11, f1, b_) MMA(h12, f2, b_) MMA(h13, f3, b_) }
+ #define FC1_KN(n) FC1_K(uint(n), x0##n, x1##n)
+@@ -357,7 +357,7 @@ void main() {
+         ACC hb0 = bias_acc_t(pc.fc1_b, j), hb1 = bias_acc_t(pc.fc1_b, j + 16u);
+         ACC h00 = hb0, h01 = hb1, h10 = hb0, h11 = hb1;
+ #define FC1_K2(n) { MA f0, f1; MB b_; \
+-            WLD(f0, pc.fc1.v, WT_FC1(j * ENC_C + uint(n) * 16u), WS_FC1, ROW); WLD(f1, pc.fc1.v, WT_FC1((j + 16u) * ENC_C + uint(n) * 16u), WS_FC1, ROW); \
++            WLD(f0, pc.fc1.v, FC1_TILE(j, uint(n)), WS_FC1, ROW); WLD(f1, pc.fc1.v, FC1_TILE((j + 16u), uint(n)), WS_FC1, ROW); \
+             CPB(b_, x0##n) MMA(h00, f0, b_) MMA(h01, f1, b_) \
+             CPB(b_, x1##n) MMA(h10, f0, b_) MMA(h11, f1, b_) }
+         W2T(FC1_K2)
