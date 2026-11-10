@@ -139,10 +139,14 @@ typedef struct OnrRrCreateInfo {
     // Optional tail (size may be ONR_RR_CREATE_INFO_SIZE_V2 without it): the game's Vulkan device (ABI 5). With it
     // d3d12_device and backend are not read and the frames go through RecordVk.
     const struct OnrRrVkDevice* vk_device;
+    // Optional tail. D3D12: 0, 2 and 3 require ACO; missing/invalid records fail creation.
+    // 1 selects LLPC only for diagnostic comparisons. Vulkan keeps its native compiler.
+    uint32_t compiler;
 } OnrRrCreateInfo;
 
 #define ONR_RR_CREATE_INFO_SIZE_V1 ((uint32_t)offsetof(OnrRrCreateInfo, backend))
 #define ONR_RR_CREATE_INFO_SIZE_V2 ((uint32_t)offsetof(OnrRrCreateInfo, vk_device))
+#define ONR_RR_CREATE_INFO_SIZE_V3 ((uint32_t)offsetof(OnrRrCreateInfo, compiler))
 
 // The game's Vulkan device (ABI 5). Its instance must be Vulkan 1.3 or later and the device created with the create
 // info PrepareVkDevice gave; queue_family / queue_index: the queue FinishVkDevice named, which the host never uses.

@@ -1,0 +1,1767 @@
+{
+  "0": {
+    "view_metadata_equal": true,
+    "sampled_descriptors_equal": true,
+    "pending_push_addresses": 0,
+    "differing_buffers": [
+      {
+        "name": "18-dec_head_32_64_f_lt-tile.bin",
+        "address_data": false,
+        "bytes": 22118400,
+        "differing_bytes": 5,
+        "first_byte": 4837027,
+        "signed_zero_elements": 5,
+        "nonzero_elements": 0,
+        "nonfinite_values": 0,
+        "first_nonzero": null
+      }
+    ]
+  },
+  "1": {
+    "view_metadata_equal": true,
+    "sampled_descriptors_equal": true,
+    "pending_push_addresses": 0,
+    "differing_buffers": [
+      {
+        "name": "19-dec_head_32_64_f_lt-tile.bin",
+        "address_data": false,
+        "bytes": 22118400,
+        "differing_bytes": 1,
+        "first_byte": 18145123,
+        "signed_zero_elements": 1,
+        "nonzero_elements": 0,
+        "nonfinite_values": 0,
+        "first_nonzero": null
+      }
+    ]
+  },
+  "2": {
+    "view_metadata_equal": true,
+    "sampled_descriptors_equal": true,
+    "pending_push_addresses": 0,
+    "differing_buffers": []
+  },
+  "3": {
+    "view_metadata_equal": true,
+    "sampled_descriptors_equal": true,
+    "pending_push_addresses": 0,
+    "differing_buffers": [
+      {
+        "name": "19-dec_head_32_64_f_lt-tile.bin",
+        "address_data": false,
+        "bytes": 22118400,
+        "differing_bytes": 7,
+        "first_byte": 255811,
+        "signed_zero_elements": 7,
+        "nonzero_elements": 0,
+        "nonfinite_values": 0,
+        "first_nonzero": null
+      }
+    ]
+  },
+  "4": {
+    "view_metadata_equal": true,
+    "sampled_descriptors_equal": true,
+    "pending_push_addresses": 0,
+    "differing_buffers": []
+  },
+  "5": {
+    "view_metadata_equal": true,
+    "sampled_descriptors_equal": true,
+    "pending_push_addresses": 0,
+    "differing_buffers": []
+  },
+  "6": {
+    "view_metadata_equal": true,
+    "sampled_descriptors_equal": true,
+    "pending_push_addresses": 0,
+    "differing_buffers": [
+      {
+        "name": "3-d3d_enc0_attr_f_lt-attributes.bin",
+        "address_data": false,
+        "bytes": 54341184,
+        "differing_bytes": 1,
+        "first_byte": 23234111
+      },
+      {
+        "name": "4-enc0_stage_32_64_f_lt-tensor.bin",
+        "address_data": false,
+        "bytes": 30146624,
+        "differing_bytes": 34,
+        "first_byte": 15489240
+      },
+      {
+        "name": "5-enc_stage_64_64_96_f_lt-dfn-pool.bin",
+        "address_data": false,
+        "bytes": 471040,
+        "differing_bytes": 19,
+        "first_byte": 238456,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 19,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 119228,
+          "baseline_bits": "344b",
+          "candidate_bits": "344c",
+          "baseline": 0.268310546875,
+          "candidate": 0.2685546875
+        }
+      },
+      {
+        "name": "5-enc_stage_64_64_96_f_lt-dfn.bin",
+        "address_data": false,
+        "bytes": 1884160,
+        "differing_bytes": 49,
+        "first_byte": 953082,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 49,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 476541,
+          "baseline_bits": "34de",
+          "candidate_bits": "34dd",
+          "baseline": 0.30419921875,
+          "candidate": 0.303955078125
+        }
+      },
+      {
+        "name": "5-enc_stage_64_64_96_f_lt-pooled.bin",
+        "address_data": false,
+        "bytes": 5652480,
+        "differing_bytes": 207,
+        "first_byte": 953835
+      },
+      {
+        "name": "5-enc_stage_64_64_96_f_lt-tensor.bin",
+        "address_data": false,
+        "bytes": 15073280,
+        "differing_bytes": 288,
+        "first_byte": 3812293
+      },
+      {
+        "name": "6-enc_stage_96_128_128_fl_lt-dfn-pool.bin",
+        "address_data": false,
+        "bytes": 117760,
+        "differing_bytes": 27,
+        "first_byte": 57788,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 27,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 28894,
+          "baseline_bits": "330b",
+          "candidate_bits": "330c",
+          "baseline": 0.2200927734375,
+          "candidate": 0.22021484375
+        }
+      },
+      {
+        "name": "6-enc_stage_96_128_128_fl_lt-dfn.bin",
+        "address_data": false,
+        "bytes": 471040,
+        "differing_bytes": 169,
+        "first_byte": 230768,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 169,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 115384,
+          "baseline_bits": "3251",
+          "candidate_bits": "3250",
+          "baseline": 0.1973876953125,
+          "candidate": 0.197265625
+        }
+      },
+      {
+        "name": "6-enc_stage_96_128_128_fl_lt-pooled.bin",
+        "address_data": false,
+        "bytes": 1884160,
+        "differing_bytes": 469,
+        "first_byte": 231153
+      },
+      {
+        "name": "6-enc_stage_96_128_128_fl_lt-tensor.bin",
+        "address_data": false,
+        "bytes": 5652480,
+        "differing_bytes": 1149,
+        "first_byte": 923082
+      },
+      {
+        "name": "7-enc_stage_128_128_160_fl_lt-dfn-pool.bin",
+        "address_data": false,
+        "bytes": 29440,
+        "differing_bytes": 27,
+        "first_byte": 13548,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 27,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 6774,
+          "baseline_bits": "3306",
+          "candidate_bits": "3305",
+          "baseline": 0.219482421875,
+          "candidate": 0.2193603515625
+        }
+      },
+      {
+        "name": "7-enc_stage_128_128_160_fl_lt-dfn.bin",
+        "address_data": false,
+        "bytes": 117760,
+        "differing_bytes": 137,
+        "first_byte": 53946,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 136,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 26973,
+          "baseline_bits": "32cf",
+          "candidate_bits": "32d0",
+          "baseline": 0.2127685546875,
+          "candidate": 0.212890625
+        }
+      },
+      {
+        "name": "7-enc_stage_128_128_160_fl_lt-pooled.bin",
+        "address_data": false,
+        "bytes": 588800,
+        "differing_bytes": 633,
+        "first_byte": 54116
+      },
+      {
+        "name": "7-enc_stage_128_128_160_fl_lt-tensor.bin",
+        "address_data": false,
+        "bytes": 1884160,
+        "differing_bytes": 1955,
+        "first_byte": 215745
+      },
+      {
+        "name": "8-enc_stage_160_256_160_fl_lt-dfn-pool.bin",
+        "address_data": false,
+        "bytes": 7360,
+        "differing_bytes": 36,
+        "first_byte": 2906,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 36,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 1453,
+          "baseline_bits": "3271",
+          "candidate_bits": "3272",
+          "baseline": 0.2012939453125,
+          "candidate": 0.201416015625
+        }
+      },
+      {
+        "name": "8-enc_stage_160_256_160_fl_lt-dfn.bin",
+        "address_data": false,
+        "bytes": 29440,
+        "differing_bytes": 154,
+        "first_byte": 11568,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 153,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 5784,
+          "baseline_bits": "321c",
+          "candidate_bits": "321e",
+          "baseline": 0.19091796875,
+          "candidate": 0.191162109375
+        }
+      },
+      {
+        "name": "8-enc_stage_160_256_160_fl_lt-pooled.bin",
+        "address_data": false,
+        "bytes": 147200,
+        "differing_bytes": 769,
+        "first_byte": 11616
+      },
+      {
+        "name": "8-enc_stage_160_256_160_fl_lt-tensor.bin",
+        "address_data": false,
+        "bytes": 588800,
+        "differing_bytes": 2933,
+        "first_byte": 46290
+      },
+      {
+        "name": "9-enc_stage_160_256_0_fl_lt-dfn.bin",
+        "address_data": false,
+        "bytes": 7360,
+        "differing_bytes": 100,
+        "first_byte": 2564,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 99,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 1282,
+          "baseline_bits": "3316",
+          "candidate_bits": "3318",
+          "baseline": 0.221435546875,
+          "candidate": 0.2216796875
+        }
+      },
+      {
+        "name": "9-enc_stage_160_256_0_fl_lt-tensor.bin",
+        "address_data": false,
+        "bytes": 147200,
+        "differing_bytes": 3467,
+        "first_byte": 10240
+      },
+      {
+        "name": "10-dec_up_160_256_160_fl_lt-tensor.bin",
+        "address_data": false,
+        "bytes": 588800,
+        "differing_bytes": 10546,
+        "first_byte": 40967
+      },
+      {
+        "name": "11-dec_dfn_160_256_fl_lt-dfn.bin",
+        "address_data": false,
+        "bytes": 29440,
+        "differing_bytes": 1173,
+        "first_byte": 7684,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 1170,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 3842,
+          "baseline_bits": "32a7",
+          "candidate_bits": "32a6",
+          "baseline": 0.2078857421875,
+          "candidate": 0.207763671875
+        }
+      },
+      {
+        "name": "11-dec_dfn_160_256_fl_lt-tensor.bin",
+        "address_data": false,
+        "bytes": 588800,
+        "differing_bytes": 24386,
+        "first_byte": 30722
+      },
+      {
+        "name": "12-dec_up_128_128_160_fl_lt-tensor.bin",
+        "address_data": false,
+        "bytes": 1884160,
+        "differing_bytes": 80309,
+        "first_byte": 122890
+      },
+      {
+        "name": "13-dec_dfn_128_128_fl_lt-dfn.bin",
+        "address_data": false,
+        "bytes": 117760,
+        "differing_bytes": 6492,
+        "first_byte": 25600,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 6473,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 12800,
+          "baseline_bits": "31a1",
+          "candidate_bits": "31a2",
+          "baseline": 0.1759033203125,
+          "candidate": 0.176025390625
+        }
+      },
+      {
+        "name": "13-dec_dfn_128_128_fl_lt-tensor.bin",
+        "address_data": false,
+        "bytes": 1884160,
+        "differing_bytes": 137410,
+        "first_byte": 102404
+      },
+      {
+        "name": "14-dec_up_96_128_128_fl_lt-tensor.bin",
+        "address_data": false,
+        "bytes": 5652480,
+        "differing_bytes": 425884,
+        "first_byte": 409600
+      },
+      {
+        "name": "15-dec_dfn_96_128_fl_lt-dfn.bin",
+        "address_data": false,
+        "bytes": 471040,
+        "differing_bytes": 40944,
+        "first_byte": 92160,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 40533,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 46080,
+          "baseline_bits": "3170",
+          "candidate_bits": "316f",
+          "baseline": 0.169921875,
+          "candidate": 0.1697998046875
+        }
+      },
+      {
+        "name": "15-dec_dfn_96_128_fl_lt-tensor.bin",
+        "address_data": false,
+        "bytes": 5652480,
+        "differing_bytes": 646711,
+        "first_byte": 368642
+      },
+      {
+        "name": "16-dec_up_64_64_96_f_lt-tensor.bin",
+        "address_data": false,
+        "bytes": 15073280,
+        "differing_bytes": 1562099,
+        "first_byte": 1474563
+      },
+      {
+        "name": "17-dec_dfn_64_64_f_lt-dfn.bin",
+        "address_data": false,
+        "bytes": 1884160,
+        "differing_bytes": 201852,
+        "first_byte": 348162,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 199564,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 174081,
+          "baseline_bits": "30c0",
+          "candidate_bits": "30c1",
+          "baseline": 0.1484375,
+          "candidate": 0.1485595703125
+        }
+      },
+      {
+        "name": "17-dec_dfn_64_64_f_lt-tensor.bin",
+        "address_data": false,
+        "bytes": 15073280,
+        "differing_bytes": 2068749,
+        "first_byte": 1392692
+      },
+      {
+        "name": "18-dec_up_32_64_64_f_lt-tensor.bin",
+        "address_data": false,
+        "bytes": 31206464,
+        "differing_bytes": 3960333,
+        "first_byte": 5570569
+      },
+      {
+        "name": "19-dec_head_32_64_f_lt-ajab.bin",
+        "address_data": false,
+        "bytes": 3686400,
+        "differing_bytes": 628013,
+        "first_byte": 541492
+      },
+      {
+        "name": "19-dec_head_32_64_f_lt-aniso.bin",
+        "address_data": false,
+        "bytes": 7372800,
+        "differing_bytes": 10876,
+        "first_byte": 722288
+      },
+      {
+        "name": "19-dec_head_32_64_f_lt-hidden.bin",
+        "address_data": false,
+        "bytes": 3686464,
+        "differing_bytes": 889005,
+        "first_byte": 675844
+      },
+      {
+        "name": "19-dec_head_32_64_f_lt-mvf.bin",
+        "address_data": false,
+        "bytes": 3686400,
+        "differing_bytes": 814130,
+        "first_byte": 675859
+      },
+      {
+        "name": "19-dec_head_32_64_f_lt-tile.bin",
+        "address_data": false,
+        "bytes": 22118400,
+        "differing_bytes": 2301471,
+        "first_byte": 1568995,
+        "signed_zero_elements": 1,
+        "nonzero_elements": 1946004,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 2027527,
+          "baseline_bits": "b4aa",
+          "candidate_bits": "b4b0",
+          "baseline": -0.29150390625,
+          "candidate": -0.29296875
+        }
+      },
+      {
+        "name": "20-post_f_lt-b.bin",
+        "address_data": false,
+        "bytes": 9331200,
+        "differing_bytes": 445380,
+        "first_byte": 1693480,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 445212,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 846740,
+          "baseline_bits": "381f",
+          "candidate_bits": "3820",
+          "baseline": 0.51513671875,
+          "candidate": 0.515625
+        }
+      },
+      {
+        "name": "20-post_f_lt-down.bin",
+        "address_data": false,
+        "bytes": 4665664,
+        "differing_bytes": 44082,
+        "first_byte": 847328
+      },
+      {
+        "name": "20-post_f_lt-history.bin",
+        "address_data": false,
+        "bytes": 37324864,
+        "differing_bytes": 1679623,
+        "first_byte": 6773802,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 1674334,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 3386901,
+          "baseline_bits": "379a",
+          "candidate_bits": "379b",
+          "baseline": 0.47509765625,
+          "candidate": 0.475341796875
+        }
+      },
+      {
+        "name": "20-post_f_lt-rg.bin",
+        "address_data": false,
+        "bytes": 18662400,
+        "differing_bytes": 969640,
+        "first_byte": 3386902,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 965443,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 1693451,
+          "baseline_bits": "379a",
+          "candidate_bits": "379b",
+          "baseline": 0.47509765625,
+          "candidate": 0.475341796875
+        }
+      },
+      {
+        "name": "output.bin",
+        "address_data": false,
+        "bytes": 16588800,
+        "differing_bytes": 558277,
+        "first_byte": 2995498,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 551999,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 1497749,
+          "baseline_bits": "323b",
+          "candidate_bits": "323e",
+          "baseline": 0.1947021484375,
+          "candidate": 0.195068359375
+        }
+      }
+    ]
+  },
+  "7": {
+    "view_metadata_equal": true,
+    "sampled_descriptors_equal": true,
+    "pending_push_addresses": 0,
+    "differing_buffers": [
+      {
+        "name": "input-previous-down.bin",
+        "address_data": false,
+        "bytes": 4665664,
+        "differing_bytes": 44082,
+        "first_byte": 847328
+      },
+      {
+        "name": "input-previous-hidden.bin",
+        "address_data": false,
+        "bytes": 3686464,
+        "differing_bytes": 889005,
+        "first_byte": 675844
+      },
+      {
+        "name": "input-previous-history.bin",
+        "address_data": false,
+        "bytes": 37324864,
+        "differing_bytes": 1679623,
+        "first_byte": 6773802,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 1674334,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 3386901,
+          "baseline_bits": "379a",
+          "candidate_bits": "379b",
+          "baseline": 0.47509765625,
+          "candidate": 0.475341796875
+        }
+      },
+      {
+        "name": "1-pooled_history2_lt-pooled-history.bin",
+        "address_data": false,
+        "bytes": 1166464,
+        "differing_bytes": 10466,
+        "first_byte": 211496
+      },
+      {
+        "name": "3-d3d_enc0_attr_f_lt-attributes.bin",
+        "address_data": false,
+        "bytes": 54341184,
+        "differing_bytes": 1989666,
+        "first_byte": 8110497
+      },
+      {
+        "name": "4-enc0_stage_32_64_f_lt-dfn-pool.bin",
+        "address_data": false,
+        "bytes": 1884160,
+        "differing_bytes": 8021,
+        "first_byte": 332826,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 7983,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 166413,
+          "baseline_bits": "323e",
+          "candidate_bits": "323d",
+          "baseline": 0.195068359375,
+          "candidate": 0.1949462890625
+        }
+      },
+      {
+        "name": "4-enc0_stage_32_64_f_lt-dfn.bin",
+        "address_data": false,
+        "bytes": 7536704,
+        "differing_bytes": 24286,
+        "first_byte": 1332258,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 24155,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 666129,
+          "baseline_bits": "321f",
+          "candidate_bits": "3220",
+          "baseline": 0.1912841796875,
+          "candidate": 0.19140625
+        }
+      },
+      {
+        "name": "4-enc0_stage_32_64_f_lt-tensor.bin",
+        "address_data": false,
+        "bytes": 30146624,
+        "differing_bytes": 2316657,
+        "first_byte": 5324906
+      },
+      {
+        "name": "5-enc_stage_64_64_96_f_lt-dfn-pool.bin",
+        "address_data": false,
+        "bytes": 471040,
+        "differing_bytes": 53651,
+        "first_byte": 79360,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 52579,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 39680,
+          "baseline_bits": "31e2",
+          "candidate_bits": "31e3",
+          "baseline": 0.183837890625,
+          "candidate": 0.1839599609375
+        }
+      },
+      {
+        "name": "5-enc_stage_64_64_96_f_lt-dfn.bin",
+        "address_data": false,
+        "bytes": 1884160,
+        "differing_bytes": 226246,
+        "first_byte": 317444,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 219709,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 158722,
+          "baseline_bits": "3436",
+          "candidate_bits": "3437",
+          "baseline": 0.26318359375,
+          "candidate": 0.263427734375
+        }
+      },
+      {
+        "name": "5-enc_stage_64_64_96_f_lt-pooled.bin",
+        "address_data": false,
+        "bytes": 5652480,
+        "differing_bytes": 1212588,
+        "first_byte": 317482
+      },
+      {
+        "name": "5-enc_stage_64_64_96_f_lt-tensor.bin",
+        "address_data": false,
+        "bytes": 15073280,
+        "differing_bytes": 3175176,
+        "first_byte": 1269850
+      },
+      {
+        "name": "6-enc_stage_96_128_128_fl_lt-dfn-pool.bin",
+        "address_data": false,
+        "bytes": 117760,
+        "differing_bytes": 14449,
+        "first_byte": 19200,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 14218,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 9600,
+          "baseline_bits": "31c8",
+          "candidate_bits": "31c6",
+          "baseline": 0.1806640625,
+          "candidate": 0.180419921875
+        }
+      },
+      {
+        "name": "6-enc_stage_96_128_128_fl_lt-dfn.bin",
+        "address_data": false,
+        "bytes": 471040,
+        "differing_bytes": 62952,
+        "first_byte": 76804,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 61048,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 38402,
+          "baseline_bits": "3332",
+          "candidate_bits": "3331",
+          "baseline": 0.224853515625,
+          "candidate": 0.2247314453125
+        }
+      },
+      {
+        "name": "6-enc_stage_96_128_128_fl_lt-pooled.bin",
+        "address_data": false,
+        "bytes": 1884160,
+        "differing_bytes": 438763,
+        "first_byte": 76800
+      },
+      {
+        "name": "6-enc_stage_96_128_128_fl_lt-tensor.bin",
+        "address_data": false,
+        "bytes": 5652480,
+        "differing_bytes": 1465539,
+        "first_byte": 307213
+      },
+      {
+        "name": "7-enc_stage_128_128_160_fl_lt-dfn-pool.bin",
+        "address_data": false,
+        "bytes": 29440,
+        "differing_bytes": 3595,
+        "first_byte": 4480,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 3548,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 2240,
+          "baseline_bits": "3146",
+          "candidate_bits": "3145",
+          "baseline": 0.164794921875,
+          "candidate": 0.1646728515625
+        }
+      },
+      {
+        "name": "7-enc_stage_128_128_160_fl_lt-dfn.bin",
+        "address_data": false,
+        "bytes": 117760,
+        "differing_bytes": 15953,
+        "first_byte": 17924,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 15590,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 8962,
+          "baseline_bits": "32e5",
+          "candidate_bits": "32e6",
+          "baseline": 0.2154541015625,
+          "candidate": 0.215576171875
+        }
+      },
+      {
+        "name": "7-enc_stage_128_128_160_fl_lt-pooled.bin",
+        "address_data": false,
+        "bytes": 588800,
+        "differing_bytes": 140184,
+        "first_byte": 17922
+      },
+      {
+        "name": "7-enc_stage_128_128_160_fl_lt-tensor.bin",
+        "address_data": false,
+        "bytes": 1884160,
+        "differing_bytes": 530702,
+        "first_byte": 71680
+      },
+      {
+        "name": "8-enc_stage_160_256_160_fl_lt-dfn-pool.bin",
+        "address_data": false,
+        "bytes": 7360,
+        "differing_bytes": 1111,
+        "first_byte": 960,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 1088,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 480,
+          "baseline_bits": "3242",
+          "candidate_bits": "3246",
+          "baseline": 0.195556640625,
+          "candidate": 0.196044921875
+        }
+      },
+      {
+        "name": "8-enc_stage_160_256_160_fl_lt-dfn.bin",
+        "address_data": false,
+        "bytes": 29440,
+        "differing_bytes": 4651,
+        "first_byte": 3840,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 4482,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 1920,
+          "baseline_bits": "323a",
+          "candidate_bits": "323b",
+          "baseline": 0.194580078125,
+          "candidate": 0.1947021484375
+        }
+      },
+      {
+        "name": "8-enc_stage_160_256_160_fl_lt-pooled.bin",
+        "address_data": false,
+        "bytes": 147200,
+        "differing_bytes": 40560,
+        "first_byte": 3843
+      },
+      {
+        "name": "8-enc_stage_160_256_160_fl_lt-tensor.bin",
+        "address_data": false,
+        "bytes": 588800,
+        "differing_bytes": 178286,
+        "first_byte": 15366
+      },
+      {
+        "name": "9-enc_stage_160_256_0_fl_lt-dfn-pool.bin",
+        "address_data": false,
+        "bytes": 1840,
+        "differing_bytes": 157,
+        "first_byte": 33,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 129,
+        "nonfinite_values": 2,
+        "first_nonzero": {
+          "element": 16,
+          "baseline_bits": "1354",
+          "candidate_bits": "0154",
+          "baseline": 0.0008945465087890625,
+          "candidate": 2.0265579223632812e-05
+        }
+      },
+      {
+        "name": "9-enc_stage_160_256_0_fl_lt-dfn.bin",
+        "address_data": false,
+        "bytes": 7360,
+        "differing_bytes": 1327,
+        "first_byte": 8,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 1301,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 4,
+          "baseline_bits": "329c",
+          "candidate_bits": "329b",
+          "baseline": 0.20654296875,
+          "candidate": 0.2064208984375
+        }
+      },
+      {
+        "name": "9-enc_stage_160_256_0_fl_lt-pooled.bin",
+        "address_data": false,
+        "bytes": 7360,
+        "differing_bytes": 554,
+        "first_byte": 544
+      },
+      {
+        "name": "9-enc_stage_160_256_0_fl_lt-tensor.bin",
+        "address_data": false,
+        "bytes": 147200,
+        "differing_bytes": 56758,
+        "first_byte": 0
+      },
+      {
+        "name": "10-dec_up_160_256_160_fl_lt-tensor.bin",
+        "address_data": false,
+        "bytes": 588800,
+        "differing_bytes": 183140,
+        "first_byte": 17
+      },
+      {
+        "name": "11-dec_dfn_160_256_fl_lt-dfn.bin",
+        "address_data": false,
+        "bytes": 29440,
+        "differing_bytes": 5931,
+        "first_byte": 4,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 5837,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 2,
+          "baseline_bits": "32ee",
+          "candidate_bits": "32ed",
+          "baseline": 0.216552734375,
+          "candidate": 0.2164306640625
+        }
+      },
+      {
+        "name": "11-dec_dfn_160_256_fl_lt-tensor.bin",
+        "address_data": false,
+        "bytes": 588800,
+        "differing_bytes": 212154,
+        "first_byte": 4
+      },
+      {
+        "name": "12-dec_up_128_128_160_fl_lt-tensor.bin",
+        "address_data": false,
+        "bytes": 1884160,
+        "differing_bytes": 627062,
+        "first_byte": 6
+      },
+      {
+        "name": "13-dec_dfn_128_128_fl_lt-dfn.bin",
+        "address_data": false,
+        "bytes": 117760,
+        "differing_bytes": 23851,
+        "first_byte": 18,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 23545,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 9,
+          "baseline_bits": "3094",
+          "candidate_bits": "3095",
+          "baseline": 0.14306640625,
+          "candidate": 0.1431884765625
+        }
+      },
+      {
+        "name": "13-dec_dfn_128_128_fl_lt-tensor.bin",
+        "address_data": false,
+        "bytes": 1884160,
+        "differing_bytes": 706103,
+        "first_byte": 3
+      },
+      {
+        "name": "14-dec_up_96_128_128_fl_lt-tensor.bin",
+        "address_data": false,
+        "bytes": 5652480,
+        "differing_bytes": 1976171,
+        "first_byte": 1
+      },
+      {
+        "name": "15-dec_dfn_96_128_fl_lt-dfn.bin",
+        "address_data": false,
+        "bytes": 471040,
+        "differing_bytes": 107189,
+        "first_byte": 0,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 105391,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 0,
+          "baseline_bits": "31e7",
+          "candidate_bits": "31e9",
+          "baseline": 0.1844482421875,
+          "candidate": 0.1846923828125
+        }
+      },
+      {
+        "name": "15-dec_dfn_96_128_fl_lt-tensor.bin",
+        "address_data": false,
+        "bytes": 5652480,
+        "differing_bytes": 2246266,
+        "first_byte": 2
+      },
+      {
+        "name": "16-dec_up_64_64_96_f_lt-tensor.bin",
+        "address_data": false,
+        "bytes": 15073280,
+        "differing_bytes": 5433989,
+        "first_byte": 0
+      },
+      {
+        "name": "17-dec_dfn_64_64_f_lt-dfn.bin",
+        "address_data": false,
+        "bytes": 1884160,
+        "differing_bytes": 458755,
+        "first_byte": 0,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 451308,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 0,
+          "baseline_bits": "3075",
+          "candidate_bits": "3074",
+          "baseline": 0.1392822265625,
+          "candidate": 0.13916015625
+        }
+      },
+      {
+        "name": "17-dec_dfn_64_64_f_lt-tensor.bin",
+        "address_data": false,
+        "bytes": 15073280,
+        "differing_bytes": 6129499,
+        "first_byte": 0
+      },
+      {
+        "name": "18-dec_up_32_64_64_f_lt-tensor.bin",
+        "address_data": false,
+        "bytes": 31206464,
+        "differing_bytes": 10860379,
+        "first_byte": 2
+      },
+      {
+        "name": "19-dec_head_32_64_f_lt-ajab.bin",
+        "address_data": false,
+        "bytes": 3686400,
+        "differing_bytes": 1529324,
+        "first_byte": 3
+      },
+      {
+        "name": "19-dec_head_32_64_f_lt-aniso.bin",
+        "address_data": false,
+        "bytes": 7372800,
+        "differing_bytes": 1861700,
+        "first_byte": 1
+      },
+      {
+        "name": "19-dec_head_32_64_f_lt-hidden.bin",
+        "address_data": false,
+        "bytes": 3686464,
+        "differing_bytes": 2051195,
+        "first_byte": 0
+      },
+      {
+        "name": "19-dec_head_32_64_f_lt-mvf.bin",
+        "address_data": false,
+        "bytes": 3686400,
+        "differing_bytes": 1868070,
+        "first_byte": 1
+      },
+      {
+        "name": "19-dec_head_32_64_f_lt-tile.bin",
+        "address_data": false,
+        "bytes": 22118400,
+        "differing_bytes": 5383004,
+        "first_byte": 0,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 4373006,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 0,
+          "baseline_bits": "375c",
+          "candidate_bits": "375d",
+          "baseline": 0.4599609375,
+          "candidate": 0.460205078125
+        }
+      },
+      {
+        "name": "20-post_f_lt-b.bin",
+        "address_data": false,
+        "bytes": 9331200,
+        "differing_bytes": 1287845,
+        "first_byte": 4,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 1287367,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 2,
+          "baseline_bits": "381f",
+          "candidate_bits": "381e",
+          "baseline": 0.51513671875,
+          "candidate": 0.5146484375
+        }
+      },
+      {
+        "name": "20-post_f_lt-down.bin",
+        "address_data": false,
+        "bytes": 4665664,
+        "differing_bytes": 138909,
+        "first_byte": 57
+      },
+      {
+        "name": "20-post_f_lt-history.bin",
+        "address_data": false,
+        "bytes": 37324864,
+        "differing_bytes": 4365226,
+        "first_byte": 0,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 4348701,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 0,
+          "baseline_bits": "3762",
+          "candidate_bits": "3763",
+          "baseline": 0.46142578125,
+          "candidate": 0.461669921875
+        }
+      },
+      {
+        "name": "20-post_f_lt-rg.bin",
+        "address_data": false,
+        "bytes": 18662400,
+        "differing_bytes": 2675343,
+        "first_byte": 2,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 2661154,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 1,
+          "baseline_bits": "372c",
+          "candidate_bits": "372b",
+          "baseline": 0.4482421875,
+          "candidate": 0.447998046875
+        }
+      },
+      {
+        "name": "output.bin",
+        "address_data": false,
+        "bytes": 16588800,
+        "differing_bytes": 1549355,
+        "first_byte": 2,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 1531318,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 1,
+          "baseline_bits": "32ab",
+          "candidate_bits": "32a9",
+          "baseline": 0.2083740234375,
+          "candidate": 0.2081298828125
+        }
+      }
+    ]
+  },
+  "8": {
+    "view_metadata_equal": true,
+    "sampled_descriptors_equal": true,
+    "pending_push_addresses": 0,
+    "differing_buffers": [
+      {
+        "name": "input-previous-down.bin",
+        "address_data": false,
+        "bytes": 4665664,
+        "differing_bytes": 138909,
+        "first_byte": 57
+      },
+      {
+        "name": "input-previous-hidden.bin",
+        "address_data": false,
+        "bytes": 3686464,
+        "differing_bytes": 2051195,
+        "first_byte": 0
+      },
+      {
+        "name": "input-previous-history.bin",
+        "address_data": false,
+        "bytes": 37324864,
+        "differing_bytes": 4365226,
+        "first_byte": 0,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 4348701,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 0,
+          "baseline_bits": "3762",
+          "candidate_bits": "3763",
+          "baseline": 0.46142578125,
+          "candidate": 0.461669921875
+        }
+      },
+      {
+        "name": "1-pooled_history2_lt-pooled-history.bin",
+        "address_data": false,
+        "bytes": 1166464,
+        "differing_bytes": 32891,
+        "first_byte": 33
+      },
+      {
+        "name": "3-d3d_enc0_attr_f_lt-attributes.bin",
+        "address_data": false,
+        "bytes": 54341184,
+        "differing_bytes": 6305251,
+        "first_byte": 26
+      },
+      {
+        "name": "4-enc0_stage_32_64_f_lt-dfn-pool.bin",
+        "address_data": false,
+        "bytes": 1884160,
+        "differing_bytes": 18044,
+        "first_byte": 160,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 17965,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 80,
+          "baseline_bits": "3285",
+          "candidate_bits": "3284",
+          "baseline": 0.2037353515625,
+          "candidate": 0.20361328125
+        }
+      },
+      {
+        "name": "4-enc0_stage_32_64_f_lt-dfn.bin",
+        "address_data": false,
+        "bytes": 7536704,
+        "differing_bytes": 55652,
+        "first_byte": 64,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 55342,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 32,
+          "baseline_bits": "3180",
+          "candidate_bits": "3181",
+          "baseline": 0.171875,
+          "candidate": 0.1719970703125
+        }
+      },
+      {
+        "name": "4-enc0_stage_32_64_f_lt-tensor.bin",
+        "address_data": false,
+        "bytes": 30146624,
+        "differing_bytes": 6080460,
+        "first_byte": 0
+      },
+      {
+        "name": "5-enc_stage_64_64_96_f_lt-dfn-pool.bin",
+        "address_data": false,
+        "bytes": 471040,
+        "differing_bytes": 112046,
+        "first_byte": 0,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 109790,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 0,
+          "baseline_bits": "333c",
+          "candidate_bits": "3342",
+          "baseline": 0.22607421875,
+          "candidate": 0.226806640625
+        }
+      },
+      {
+        "name": "5-enc_stage_64_64_96_f_lt-dfn.bin",
+        "address_data": false,
+        "bytes": 1884160,
+        "differing_bytes": 473511,
+        "first_byte": 0,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 458355,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 0,
+          "baseline_bits": "3303",
+          "candidate_bits": "3313",
+          "baseline": 0.2191162109375,
+          "candidate": 0.2210693359375
+        }
+      },
+      {
+        "name": "5-enc_stage_64_64_96_f_lt-pooled.bin",
+        "address_data": false,
+        "bytes": 5652480,
+        "differing_bytes": 2638506,
+        "first_byte": 0
+      },
+      {
+        "name": "5-enc_stage_64_64_96_f_lt-tensor.bin",
+        "address_data": false,
+        "bytes": 15073280,
+        "differing_bytes": 6977635,
+        "first_byte": 0
+      },
+      {
+        "name": "6-enc_stage_96_128_128_fl_lt-dfn-pool.bin",
+        "address_data": false,
+        "bytes": 117760,
+        "differing_bytes": 28693,
+        "first_byte": 0,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 28154,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 0,
+          "baseline_bits": "3264",
+          "candidate_bits": "3263",
+          "baseline": 0.19970703125,
+          "candidate": 0.1995849609375
+        }
+      },
+      {
+        "name": "6-enc_stage_96_128_128_fl_lt-dfn.bin",
+        "address_data": false,
+        "bytes": 471040,
+        "differing_bytes": 124133,
+        "first_byte": 0,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 119954,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 0,
+          "baseline_bits": "3281",
+          "candidate_bits": "3288",
+          "baseline": 0.2032470703125,
+          "candidate": 0.2041015625
+        }
+      },
+      {
+        "name": "6-enc_stage_96_128_128_fl_lt-pooled.bin",
+        "address_data": false,
+        "bytes": 1884160,
+        "differing_bytes": 913998,
+        "first_byte": 0
+      },
+      {
+        "name": "6-enc_stage_96_128_128_fl_lt-tensor.bin",
+        "address_data": false,
+        "bytes": 5652480,
+        "differing_bytes": 3053947,
+        "first_byte": 0
+      },
+      {
+        "name": "7-enc_stage_128_128_160_fl_lt-dfn-pool.bin",
+        "address_data": false,
+        "bytes": 29440,
+        "differing_bytes": 6919,
+        "first_byte": 0,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 6834,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 0,
+          "baseline_bits": "31d4",
+          "candidate_bits": "31d6",
+          "baseline": 0.18212890625,
+          "candidate": 0.182373046875
+        }
+      },
+      {
+        "name": "7-enc_stage_128_128_160_fl_lt-dfn.bin",
+        "address_data": false,
+        "bytes": 117760,
+        "differing_bytes": 30502,
+        "first_byte": 0,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 29793,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 0,
+          "baseline_bits": "31d5",
+          "candidate_bits": "31d1",
+          "baseline": 0.1822509765625,
+          "candidate": 0.1817626953125
+        }
+      },
+      {
+        "name": "7-enc_stage_128_128_160_fl_lt-pooled.bin",
+        "address_data": false,
+        "bytes": 588800,
+        "differing_bytes": 279691,
+        "first_byte": 3
+      },
+      {
+        "name": "7-enc_stage_128_128_160_fl_lt-tensor.bin",
+        "address_data": false,
+        "bytes": 1884160,
+        "differing_bytes": 1056729,
+        "first_byte": 0
+      },
+      {
+        "name": "8-enc_stage_160_256_160_fl_lt-dfn-pool.bin",
+        "address_data": false,
+        "bytes": 7360,
+        "differing_bytes": 1971,
+        "first_byte": 0,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 1918,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 0,
+          "baseline_bits": "3252",
+          "candidate_bits": "3250",
+          "baseline": 0.197509765625,
+          "candidate": 0.197265625
+        }
+      },
+      {
+        "name": "8-enc_stage_160_256_160_fl_lt-dfn.bin",
+        "address_data": false,
+        "bytes": 29440,
+        "differing_bytes": 8273,
+        "first_byte": 0,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 7929,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 0,
+          "baseline_bits": "3264",
+          "candidate_bits": "325f",
+          "baseline": 0.19970703125,
+          "candidate": 0.1990966796875
+        }
+      },
+      {
+        "name": "8-enc_stage_160_256_160_fl_lt-pooled.bin",
+        "address_data": false,
+        "bytes": 147200,
+        "differing_bytes": 75985,
+        "first_byte": 0
+      },
+      {
+        "name": "8-enc_stage_160_256_160_fl_lt-tensor.bin",
+        "address_data": false,
+        "bytes": 588800,
+        "differing_bytes": 334944,
+        "first_byte": 0
+      },
+      {
+        "name": "9-enc_stage_160_256_0_fl_lt-dfn-pool.bin",
+        "address_data": false,
+        "bytes": 1840,
+        "differing_bytes": 200,
+        "first_byte": 29,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 157,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 14,
+          "baseline_bits": "a8ae",
+          "candidate_bits": "a9ae",
+          "baseline": -0.03656005859375,
+          "candidate": -0.04437255859375
+        }
+      },
+      {
+        "name": "9-enc_stage_160_256_0_fl_lt-dfn.bin",
+        "address_data": false,
+        "bytes": 7360,
+        "differing_bytes": 2136,
+        "first_byte": 0,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 2091,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 0,
+          "baseline_bits": "32a4",
+          "candidate_bits": "329d",
+          "baseline": 0.20751953125,
+          "candidate": 0.2066650390625
+        }
+      },
+      {
+        "name": "9-enc_stage_160_256_0_fl_lt-pooled.bin",
+        "address_data": false,
+        "bytes": 7360,
+        "differing_bytes": 759,
+        "first_byte": 545
+      },
+      {
+        "name": "9-enc_stage_160_256_0_fl_lt-tensor.bin",
+        "address_data": false,
+        "bytes": 147200,
+        "differing_bytes": 95118,
+        "first_byte": 0
+      },
+      {
+        "name": "10-dec_up_160_256_160_fl_lt-tensor.bin",
+        "address_data": false,
+        "bytes": 588800,
+        "differing_bytes": 322989,
+        "first_byte": 0
+      },
+      {
+        "name": "11-dec_dfn_160_256_fl_lt-dfn.bin",
+        "address_data": false,
+        "bytes": 29440,
+        "differing_bytes": 9387,
+        "first_byte": 0,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 9183,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 0,
+          "baseline_bits": "3224",
+          "candidate_bits": "3222",
+          "baseline": 0.19189453125,
+          "candidate": 0.191650390625
+        }
+      },
+      {
+        "name": "11-dec_dfn_160_256_fl_lt-tensor.bin",
+        "address_data": false,
+        "bytes": 588800,
+        "differing_bytes": 358008,
+        "first_byte": 0
+      },
+      {
+        "name": "12-dec_up_128_128_160_fl_lt-tensor.bin",
+        "address_data": false,
+        "bytes": 1884160,
+        "differing_bytes": 1095593,
+        "first_byte": 2
+      },
+      {
+        "name": "13-dec_dfn_128_128_fl_lt-dfn.bin",
+        "address_data": false,
+        "bytes": 117760,
+        "differing_bytes": 37631,
+        "first_byte": 0,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 37098,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 0,
+          "baseline_bits": "31c7",
+          "candidate_bits": "31c5",
+          "baseline": 0.1805419921875,
+          "candidate": 0.1802978515625
+        }
+      },
+      {
+        "name": "13-dec_dfn_128_128_fl_lt-tensor.bin",
+        "address_data": false,
+        "bytes": 1884160,
+        "differing_bytes": 1186596,
+        "first_byte": 0
+      },
+      {
+        "name": "14-dec_up_96_128_128_fl_lt-tensor.bin",
+        "address_data": false,
+        "bytes": 5652480,
+        "differing_bytes": 3365546,
+        "first_byte": 0
+      },
+      {
+        "name": "15-dec_dfn_96_128_fl_lt-dfn.bin",
+        "address_data": false,
+        "bytes": 471040,
+        "differing_bytes": 162028,
+        "first_byte": 0,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 158723,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 0,
+          "baseline_bits": "31e3",
+          "candidate_bits": "31df",
+          "baseline": 0.1839599609375,
+          "candidate": 0.1834716796875
+        }
+      },
+      {
+        "name": "15-dec_dfn_96_128_fl_lt-tensor.bin",
+        "address_data": false,
+        "bytes": 5652480,
+        "differing_bytes": 3648990,
+        "first_byte": 1
+      },
+      {
+        "name": "16-dec_up_64_64_96_f_lt-tensor.bin",
+        "address_data": false,
+        "bytes": 15073280,
+        "differing_bytes": 9082016,
+        "first_byte": 1
+      },
+      {
+        "name": "17-dec_dfn_64_64_f_lt-dfn.bin",
+        "address_data": false,
+        "bytes": 1884160,
+        "differing_bytes": 675070,
+        "first_byte": 0,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 662427,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 0,
+          "baseline_bits": "307a",
+          "candidate_bits": "3075",
+          "baseline": 0.139892578125,
+          "candidate": 0.1392822265625
+        }
+      },
+      {
+        "name": "17-dec_dfn_64_64_f_lt-tensor.bin",
+        "address_data": false,
+        "bytes": 15073280,
+        "differing_bytes": 9855265,
+        "first_byte": 1
+      },
+      {
+        "name": "18-dec_up_32_64_64_f_lt-tensor.bin",
+        "address_data": false,
+        "bytes": 31206464,
+        "differing_bytes": 17339465,
+        "first_byte": 0
+      },
+      {
+        "name": "19-dec_head_32_64_f_lt-ajab.bin",
+        "address_data": false,
+        "bytes": 3686400,
+        "differing_bytes": 2374503,
+        "first_byte": 0
+      },
+      {
+        "name": "19-dec_head_32_64_f_lt-aniso.bin",
+        "address_data": false,
+        "bytes": 7372800,
+        "differing_bytes": 3767850,
+        "first_byte": 0
+      },
+      {
+        "name": "19-dec_head_32_64_f_lt-hidden.bin",
+        "address_data": false,
+        "bytes": 3686464,
+        "differing_bytes": 3080536,
+        "first_byte": 0
+      },
+      {
+        "name": "19-dec_head_32_64_f_lt-mvf.bin",
+        "address_data": false,
+        "bytes": 3686400,
+        "differing_bytes": 2796690,
+        "first_byte": 1
+      },
+      {
+        "name": "19-dec_head_32_64_f_lt-tile.bin",
+        "address_data": false,
+        "bytes": 22118400,
+        "differing_bytes": 8250021,
+        "first_byte": 0,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 6534017,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 0,
+          "baseline_bits": "3771",
+          "candidate_bits": "3769",
+          "baseline": 0.465087890625,
+          "candidate": 0.463134765625
+        }
+      },
+      {
+        "name": "20-post_f_lt-b.bin",
+        "address_data": false,
+        "bytes": 9331200,
+        "differing_bytes": 2191600,
+        "first_byte": 4,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 2190098,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 2,
+          "baseline_bits": "381e",
+          "candidate_bits": "381f",
+          "baseline": 0.5146484375,
+          "candidate": 0.51513671875
+        }
+      },
+      {
+        "name": "20-post_f_lt-down.bin",
+        "address_data": false,
+        "bytes": 4665664,
+        "differing_bytes": 252338,
+        "first_byte": 20
+      },
+      {
+        "name": "20-post_f_lt-history.bin",
+        "address_data": false,
+        "bytes": 37324864,
+        "differing_bytes": 7010538,
+        "first_byte": 0,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 6982197,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 0,
+          "baseline_bits": "3768",
+          "candidate_bits": "3766",
+          "baseline": 0.462890625,
+          "candidate": 0.46240234375
+        }
+      },
+      {
+        "name": "20-post_f_lt-rg.bin",
+        "address_data": false,
+        "bytes": 18662400,
+        "differing_bytes": 4360736,
+        "first_byte": 0,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 4337351,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 0,
+          "baseline_bits": "3767",
+          "candidate_bits": "3765",
+          "baseline": 0.462646484375,
+          "candidate": 0.462158203125
+        }
+      },
+      {
+        "name": "output.bin",
+        "address_data": false,
+        "bytes": 16588800,
+        "differing_bytes": 2589978,
+        "first_byte": 0,
+        "signed_zero_elements": 0,
+        "nonzero_elements": 2560018,
+        "nonfinite_values": 0,
+        "first_nonzero": {
+          "element": 0,
+          "baseline_bits": "3357",
+          "candidate_bits": "3354",
+          "baseline": 0.2293701171875,
+          "candidate": 0.22900390625
+        }
+      }
+    ]
+  },
+  "attribute_case": {
+    "byte": 23234111,
+    "gid": 484043,
+    "xy": [
+      203,
+      378
+    ],
+    "record_byte": 47,
+    "baseline_byte": 110,
+    "candidate_byte": 111,
+    "xor": 1,
+    "attributes": [
+      9
+    ],
+    "baseline_record": "373737b2b2b2b2b235332c2c2c00003cb2b2b2b2b2b2b23635022e301eaf00002f1100b2b2b200300e041f06309daf6e",
+    "candidate_record": "373737b2b2b2b2b235332c2c2c00003cb2b2b2b2b2b2b23635022e301eaf00002f1100b2b2b200300e041f06309daf6f"
+  },
+  "zero_cases": [
+    {
+      "frame": 0,
+      "record_half_offsets": [
+        9
+      ]
+    },
+    {
+      "frame": 1,
+      "record_half_offsets": [
+        9
+      ]
+    },
+    {
+      "frame": 3,
+      "record_half_offsets": [
+        9
+      ]
+    }
+  ]
+}

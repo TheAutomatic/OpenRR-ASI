@@ -1,0 +1,134 @@
+[
+  {
+    "kernel": "dec_dfn_96_128_fl_lt.spv",
+    "LLPC": 0.085888,
+    "ACO": 0.147037,
+    "delta": 0.061148999999999995
+  },
+  {
+    "kernel": "enc_stage_128_128_160_fl_lt.spv",
+    "LLPC": 0.04181,
+    "ACO": 0.09205,
+    "delta": 0.05024000000000001
+  },
+  {
+    "kernel": "enc_stage_96_128_128_fl_lt.spv",
+    "LLPC": 0.172233,
+    "ACO": 0.217023,
+    "delta": 0.044789999999999996
+  },
+  {
+    "kernel": "dec_up_160_256_160_fl_lt.spv",
+    "LLPC": 0.053485,
+    "ACO": 0.093982,
+    "delta": 0.040497
+  },
+  {
+    "kernel": "enc0_stage_32_64_f_lt.spv",
+    "LLPC": 0.373188,
+    "ACO": 0.413355,
+    "delta": 0.04016699999999995
+  },
+  {
+    "kernel": "dec_head_32_64_f_lt.spv",
+    "LLPC": 0.31014,
+    "ACO": 0.346955,
+    "delta": 0.03681499999999999
+  },
+  {
+    "kernel": "dec_up_128_128_160_fl_lt.spv",
+    "LLPC": 0.085453,
+    "ACO": 0.121243,
+    "delta": 0.03579
+  },
+  {
+    "kernel": "dec_dfn_128_128_fl_lt.spv",
+    "LLPC": 0.04775,
+    "ACO": 0.080545,
+    "delta": 0.032795000000000005
+  },
+  {
+    "kernel": "dec_dfn_160_256_fl_lt.spv",
+    "LLPC": 0.046485,
+    "ACO": 0.077442,
+    "delta": 0.030957
+  },
+  {
+    "kernel": "enc0_attr_f_lt.spv",
+    "LLPC": 0.172853,
+    "ACO": 0.203578,
+    "delta": 0.030725000000000002
+  },
+  {
+    "kernel": "enc_stage_160_256_160_fl_lt.spv",
+    "LLPC": 0.05551,
+    "ACO": 0.08618,
+    "delta": 0.03067000000000001
+  },
+  {
+    "kernel": "enc_stage_160_256_0_fl_lt.spv",
+    "LLPC": 0.04534,
+    "ACO": 0.074677,
+    "delta": 0.029336999999999995
+  },
+  {
+    "kernel": "enc_stage_64_64_96_f_lt.spv",
+    "LLPC": 0.277145,
+    "ACO": 0.301853,
+    "delta": 0.024708000000000008
+  },
+  {
+    "kernel": "downsample_lt.spv",
+    "LLPC": 0.058752,
+    "ACO": 0.079915,
+    "delta": 0.021163
+  },
+  {
+    "kernel": "post_f_lt.spv",
+    "LLPC": 0.276707,
+    "ACO": 0.29274,
+    "delta": 0.01603300000000002
+  },
+  {
+    "kernel": "dec_up_64_64_96_f_lt.spv",
+    "LLPC": 0.234162,
+    "ACO": 0.249798,
+    "delta": 0.015635999999999983
+  },
+  {
+    "kernel": "dec_up_32_64_64_f_lt.spv",
+    "LLPC": 0.331252,
+    "ACO": 0.342995,
+    "delta": 0.011743000000000003
+  },
+  {
+    "kernel": "dec_dfn_64_64_f_lt.spv",
+    "LLPC": 0.206772,
+    "ACO": 0.218218,
+    "delta": 0.011445999999999984
+  },
+  {
+    "kernel": "dec_up_96_128_128_fl_lt.spv",
+    "LLPC": 0.154925,
+    "ACO": 0.160483,
+    "delta": 0.00555799999999998
+  },
+  {
+    "kernel": "ae.spv",
+    "LLPC": 0.013458,
+    "ACO": 0.01473,
+    "delta": 0.0012720000000000006
+  },
+  {
+    "kernel": "clear_range.spv",
+    "LLPC": 0.000158,
+    "ACO": 0.000228,
+    "delta": 0.00007000000000000002
+  },
+  {
+    "kernel": "pooled_history2_lt.spv",
+    "LLPC": 0.00921,
+    "ACO": 0.007812,
+    "delta": -0.001397999999999999
+  }
+]

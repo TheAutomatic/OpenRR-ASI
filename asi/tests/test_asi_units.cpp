@@ -22,10 +22,12 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <exception>
 #include <fstream>
 #include <string>
 #include <thread>
 #include <vector>
+#include "aco_compare.hpp"
 
 static int test_key_parsing() {
     int vk = 0, mods = 0;
@@ -327,6 +329,103 @@ static int test_d3d12_gpu_and_engine() {
         const char* spv_env = std::getenv("OPENRR_SPV_DIR");
         const std::string spv_dir_str = (spv_env && *spv_env) ? std::string(spv_env) : default_spv_dir;
         const char* spv_dir = spv_dir_str.c_str();
+        if (std::getenv("OPENRR_ACO_COMPARE")) return aco_compare(vk, d3d, spv_dir_str);
+        if (std::getenv("OPENRR_ACO_API_PROBE")) {
+            OnrRrApi4 api{};
+            if (OnrRrGetApi(ONR_RR_ABI_VERSION_4, &api.v3.v2.v1) != ONR_RR_OK) return 1;
+            const auto data = (bdir / "stage" / "openrr-amd").wstring();
+            const auto log = (bdir / "audit-api-runtime.log").wstring();
+            const char* old = std::getenv("ONR_RR_BACKEND");
+            const std::string saved = old ? old : "";
+            _putenv_s("ONR_RR_BACKEND", "vulkan");
+            int failed = 0;
+            for (uint32_t size : {uint32_t(ONR_RR_CREATE_INFO_SIZE_V1), uint32_t(ONR_RR_CREATE_INFO_SIZE_V3), uint32_t(sizeof(OnrRrCreateInfo))}) {
+                OnrRrCreateInfo ci{};ci.size=size;ci.d3d12_device=dev;
+                ci.max_render_width=ci.max_render_height=32;ci.output_width=ci.output_height=64;
+                ci.data_dir=data.c_str();ci.log_path=log.c_str();ci.backend=ONR_RR_BACKEND_CHOICE_AUTO;
+                // Poison fields outside the advertised old structure size.
+                ci.compiler=size<sizeof(ci)?99:0;
+                void* ctx=nullptr;uint32_t backend=99;
+                const auto rc=api.v3.v2.v1.Create(&ci,&ctx);
+                if(ctx){api.GetBackend(ctx,&backend);api.v3.v2.v1.Destroy(ctx);}
+                if(rc!=ONR_RR_OK || backend!=ONR_RR_BACKEND_VULKAN){
+                    char error[1024]{};api.v3.v2.v1.GetLastError(error,sizeof(error));
+                    std::fprintf(stderr,"FAIL API size=%u rc=%d backend=%u: %s\n",size,rc,backend,error);failed=1;
+                } else std::printf("[PASS] API size=%u: native Vulkan selected with ONR_RR_BACKEND=vulkan\n",size);
+            }
+            _putenv_s("ONR_RR_BACKEND", saved.c_str());
+            return failed;
+        }
+
+        if (std::getenv("OPENRR_ACO_PROBE")) {
+            try {
+                d3d.set_compiler(true);
+                auto k = d3d.load(spv_dir_str + "/aco_abi.spv", 0);
+                if (!k.aco) throw std::runtime_error("aco_abi silently fell back to LLPC");
+                auto out = d3d.create(57 * 64 * 4);
+                struct { uint64_t dst; uint32_t k, mid[57], last; } pc{};
+                static_assert(sizeof(pc) == 248); // trailing host alignment is not pushed
+                pc.dst = out.addr; pc.k = 17; pc.last = 0x9876;
+                for (unsigned i = 0; i < 57; ++i) pc.mid[i] = i * 31;
+                d3d.begin_own();
+                d3d.dispatch(k, &pc, 244, 57);
+                d3d.submit_own();
+                uint32_t got[57*64]{};
+                d3d.download(out, got, sizeof got);
+                for (unsigned i = 0; i < 57*64; ++i)
+                    if (got[i] != 17*i + pc.mid[(i/64)%57] + pc.last + 57*65536) {
+                        std::fprintf(stderr, "got[%u]=%u expected=%u\n", i, got[i], 17*i+pc.mid[(i/64)%57]+pc.last+57*65536);
+                        throw std::runtime_error("ACO 244-byte push/grid readback mismatch at " + std::to_string(i));
+                    }
+                d3d.destroy(k); d3d.destroy(out);
+                std::printf("[PASS] ACO 244-byte push ABI, spill pointer, inline constants, workgroup count\n");
+                auto lane = d3d.load(spv_dir_str + "/selftest.spv");
+                if (!lane.aco) throw std::runtime_error("original selftest silently fell back to LLPC");
+                auto lane_out = d3d.create(128*4);
+                pc.dst = lane_out.addr;
+                d3d.begin_own(); d3d.dispatch(lane, &pc, 244, 2); d3d.submit_own();
+                uint32_t lane_got[128]{}; d3d.download(lane_out, lane_got, sizeof lane_got);
+                for (unsigned i = 0; i < 128; ++i)
+                    if (lane_got[i] != 17*i + pc.mid[i%57] + pc.last + 2*65536)
+                        throw std::runtime_error("original ACO lane-varying push mismatch at " + std::to_string(i));
+                d3d.destroy(lane); d3d.destroy(lane_out);
+                std::printf("[PASS] Original selftest: ACO lane-varying push indexing (128 outputs)\n");
+                auto clear = d3d.load(spv_dir_str + "/clear_range.spv");
+                if (!clear.aco) throw std::runtime_error("clear_range silently fell back to LLPC");
+                auto fill = d3d.create(4096);
+                struct { uint64_t dst; uint32_t bytes, value; } cp{fill.addr, 4096, 0x31415926};
+                d3d.begin_own(); d3d.dispatch(clear, &cp, sizeof cp, 4); d3d.submit_own();
+                std::vector<uint32_t> words(1024); d3d.download(fill, words.data(), 4096);
+                for (auto w : words) if (w != cp.value) throw std::runtime_error("ACO BDA fill mismatch");
+                d3d.destroy(clear); d3d.destroy(fill);
+                std::printf("[PASS] ACO clear_range pure BDA fill\n");
+                std::string why;
+                if (!d3d.init_sampler(why)) throw std::runtime_error("sampler: " + why);
+                auto tex = d3d.load(spv_dir_str + "/selftest_tex.spv");
+                if (!tex.aco) throw std::runtime_error("selftest_tex silently fell back to LLPC");
+                auto dst = d3d.create(512*8);
+                auto sampler = d3d.sampler(true, true);
+                for (uint32_t slot : {0u, 3u, 7u}) {
+                    auto src = d3d.create(512*8+65536);
+                    std::vector<uint16_t> pixels(512*4);
+                    for (unsigned i = 0; i < pixels.size(); ++i) pixels[i] = uint16_t(0x3000 + slot*128 + i);
+                    d3d.upload(src, pixels.data(), pixels.size()*2);
+                    auto image = d3d.alias_image(src, 64, 8, VK_FORMAT_R16G16B16A16_SFLOAT, 8);
+                    d3d.set_texture(slot, image, sampler);
+                    struct { uint64_t dst; int32_t size[2]; uint32_t slot; } tp{dst.addr, {64,8}, slot};
+                    d3d.begin_own(); d3d.dispatch(tex, &tp, 20, 8); d3d.submit_own();
+                    std::vector<uint16_t> readback(pixels.size()); d3d.download(dst, readback.data(), readback.size()*2);
+                    if (readback != pixels) throw std::runtime_error("ACO descriptor array mismatch at slot " + std::to_string(slot));
+                    d3d.destroy(image); d3d.destroy(src);
+                }
+                d3d.destroy(tex); d3d.destroy(dst);
+                std::printf("[PASS] ACO sampled descriptor slots 0, 3, 7 (distinct contents)\n");
+                return 0;
+            } catch (const std::exception& e) {
+                std::fprintf(stderr, "FAIL ACO probe: %s\n", e.what());
+                return 1;
+            }
+        }
 
         onr::Kernels k_clear;
         k_clear.load(d3d, spv_dir, {"clear_range"});
@@ -1408,6 +1507,14 @@ static int test_d3d12_gpu_and_engine() {
 }
 
 int main() {
+    SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
+    std::set_terminate([] {
+        try { if (auto e = std::current_exception()) std::rethrow_exception(e); }
+        catch (const std::exception& e) { std::fprintf(stderr, "FAIL: unhandled test exception: %s\n", e.what()); }
+        catch (...) { std::fprintf(stderr, "FAIL: unknown test exception\n"); }
+        std::fflush(nullptr);
+        ExitProcess(1);
+    });
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     std::setvbuf(stderr, nullptr, _IONBF, 0);
     if (test_key_parsing() != 0) return 1;

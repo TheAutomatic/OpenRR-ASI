@@ -1,0 +1,232 @@
+{
+  "fast-attr9-full-fixed-trace-6": {
+    "baseline": [
+      {
+        "name": "input-previous-motion.bin",
+        "differing_bytes": 1075473,
+        "first": [
+          6,
+          7,
+          28,
+          29,
+          30,
+          31,
+          44,
+          45,
+          46,
+          47,
+          52,
+          53
+        ],
+        "xy": [
+          0,
+          0
+        ],
+        "channel": 3,
+        "baseline_bits": "4180",
+        "candidate_bits": "1604",
+        "baseline": -3.874301910400391e-06,
+        "candidate": 6.23464584350586e-05
+      },
+      {
+        "name": "3-d3d_enc0_attr_f_lt-motion.bin",
+        "differing_bytes": 1075473,
+        "first": [
+          6,
+          7,
+          28,
+          29,
+          30,
+          31,
+          44,
+          45,
+          46,
+          47,
+          52,
+          53
+        ],
+        "xy": [
+          0,
+          0
+        ],
+        "channel": 3,
+        "baseline_bits": "4180",
+        "candidate_bits": "1604",
+        "baseline": -3.874301910400391e-06,
+        "candidate": 6.23464584350586e-05
+      },
+      {
+        "name": "3-d3d_enc0_attr_f_lt-attributes.bin",
+        "differing_bytes": 0,
+        "first": []
+      }
+    ],
+    "candidate": [
+      {
+        "name": "input-previous-motion.bin",
+        "differing_bytes": 1075473,
+        "first": [
+          6,
+          7,
+          28,
+          29,
+          30,
+          31,
+          44,
+          45,
+          46,
+          47,
+          52,
+          53
+        ],
+        "xy": [
+          0,
+          0
+        ],
+        "channel": 3,
+        "baseline_bits": "4180",
+        "candidate_bits": "1604",
+        "baseline": -3.874301910400391e-06,
+        "candidate": 6.23464584350586e-05
+      },
+      {
+        "name": "3-d3d_enc0_attr_f_lt-motion.bin",
+        "differing_bytes": 1075473,
+        "first": [
+          6,
+          7,
+          28,
+          29,
+          30,
+          31,
+          44,
+          45,
+          46,
+          47,
+          52,
+          53
+        ],
+        "xy": [
+          0,
+          0
+        ],
+        "channel": 3,
+        "baseline_bits": "4180",
+        "candidate_bits": "1604",
+        "baseline": -3.874301910400391e-06,
+        "candidate": 6.23464584350586e-05
+      },
+      {
+        "name": "3-d3d_enc0_attr_f_lt-attributes.bin",
+        "differing_bytes": 0,
+        "first": []
+      }
+    ]
+  },
+  "fast-attr9-prepared-trace-6": {
+    "baseline": [
+      {
+        "name": "input-previous-motion.bin",
+        "differing_bytes": 0,
+        "first": []
+      },
+      {
+        "name": "3-d3d_enc0_attr_f_lt-motion.bin",
+        "differing_bytes": 1075473,
+        "first": [
+          6,
+          7,
+          28,
+          29,
+          30,
+          31,
+          44,
+          45,
+          46,
+          47,
+          52,
+          53
+        ],
+        "xy": [
+          0,
+          0
+        ],
+        "channel": 3,
+        "baseline_bits": "4180",
+        "candidate_bits": "1604",
+        "baseline": -3.874301910400391e-06,
+        "candidate": 6.23464584350586e-05
+      },
+      {
+        "name": "3-d3d_enc0_attr_f_lt-attributes.bin",
+        "differing_bytes": 566669,
+        "first": [
+          38,
+          182,
+          278,
+          326,
+          329,
+          422,
+          470,
+          473,
+          518,
+          521,
+          566,
+          569
+        ]
+      }
+    ],
+    "candidate": [
+      {
+        "name": "input-previous-motion.bin",
+        "differing_bytes": 0,
+        "first": []
+      },
+      {
+        "name": "3-d3d_enc0_attr_f_lt-motion.bin",
+        "differing_bytes": 1075473,
+        "first": [
+          6,
+          7,
+          28,
+          29,
+          30,
+          31,
+          44,
+          45,
+          46,
+          47,
+          52,
+          53
+        ],
+        "xy": [
+          0,
+          0
+        ],
+        "channel": 3,
+        "baseline_bits": "4180",
+        "candidate_bits": "1604",
+        "baseline": -3.874301910400391e-06,
+        "candidate": 6.23464584350586e-05
+      },
+      {
+        "name": "3-d3d_enc0_attr_f_lt-attributes.bin",
+        "differing_bytes": 566669,
+        "first": [
+          38,
+          182,
+          278,
+          326,
+          329,
+          422,
+          470,
+          473,
+          518,
+          521,
+          566,
+          569
+        ]
+      }
+    ]
+  }
+}

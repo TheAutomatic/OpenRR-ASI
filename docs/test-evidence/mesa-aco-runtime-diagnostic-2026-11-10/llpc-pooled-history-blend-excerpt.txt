@@ -1,0 +1,42 @@
+	global_load_b32 v49, v50, s[36:37]      ;  ee050024 00000031 00000032
+	global_load_b32 v45, v5, s[36:37]       ;  ee050024 0000002d 00000005
+	global_load_b32 v44, v51, s[36:37]      ;  ee050024 0000002c 00000033
+	global_load_b32 v5, v52, s[36:37]       ;  ee050024 00000005 00000034
+	v_mul_f32_e32 v51, 0x36802008, v36      ;  106648ff 36802008
+	s_wait_alu depctr_sa_sdst(0)            ;  bf88ff9e
+	v_fmaak_f32 v52, s4, v36, 0x3a802008    ;  5a684804 3a802008
+	v_fmamk_f32 v50, v35, 0xbb800000, v39   ;  58644f23 bb800000
+	v_mov_b32_e32 v35, v48                  ;  7e460330
+	s_and_saveexec_b64 s[4:5], s[0:1]       ;  be842100
+	s_cbranch_execz _L4584                  ;  bfa50038
+	s_wait_loadcnt 0x2                      ;  bfc00002
+	v_and_b32_e32 v35, 0x3ff, v45           ;  36465aff 000003ff
+	v_and_b32_e32 v36, 0x3ff, v49           ;  364862ff 000003ff
+	s_wait_loadcnt 0x0                      ;  bfc00000
+	v_and_b32_e32 v39, 0x3ff, v5            ;  364e0aff 000003ff
+	v_and_b32_e32 v53, 0x3ff, v44           ;  366a58ff 000003ff
+	v_cvt_f32_u32_e32 v35, v35              ;  7e460d23
+	v_cvt_f32_u32_e32 v36, v36              ;  7e480d24
+	s_delay_alu instid0(VALU_DEP_4) | instskip(NEXT) | instid1(VALU_DEP_4) ;  bf870214
+	v_cvt_f32_u32_e32 v39, v39              ;  7e4e0d27
+	v_cvt_f32_u32_e32 v53, v53              ;  7e6a0d35
+	s_delay_alu instid0(VALU_DEP_4) | instskip(NEXT) | instid1(VALU_DEP_4) ;  bf870214
+	v_mul_f32_e32 v35, v51, v35             ;  10464733
+	v_mul_f32_e32 v36, v52, v36             ;  10484934
+	s_delay_alu instid0(VALU_DEP_4) | instskip(NEXT) | instid1(VALU_DEP_4) ;  bf870214
+	v_mul_f32_e32 v39, v51, v39             ;  104e4f33
+	v_mul_f32_e32 v53, v52, v53             ;  106a6b34
+	s_delay_alu instid0(VALU_DEP_3) | instskip(NEXT) | instid1(VALU_DEP_2) ;  bf870113
+	v_add_f32_e32 v35, v35, v36             ;  06464923
+	v_add_f32_e32 v36, v39, v53             ;  06486b27
+	s_delay_alu instid0(VALU_DEP_2) | instskip(NEXT) | instid1(VALU_DEP_2) ;  bf870112
+	v_mul_f32_e32 v35, v35, v50             ;  10466523
+	v_mul_f32_e32 v36, v36, v4              ;  10480924
+	s_delay_alu instid0(VALU_DEP_1) | instskip(NEXT) | instid1(VALU_DEP_1) ;  bf870091
+	v_add_f32_e32 v35, v35, v36             ;  06464923
+	v_mul_f32_e32 v35, 0x401ccccd, v35      ;  104646ff 401ccccd
+	s_delay_alu instid0(VALU_DEP_1) | instskip(SKIP_2) | instid1(VALU_DEP_2) ;  bf870131
+	v_min_num_f32_e32 v36, 0x40400000, v35  ;  2a4846ff 40400000
+	v_cmp_u_f32_e32 vcc_lo, v35, v35        ;  7c304723
+	s_wait_alu depctr_va_vcc(0)             ;  bf88ff9d
+	v_cndmask_b32_e32 v36, v36, v35, vcc_lo ;  02484724

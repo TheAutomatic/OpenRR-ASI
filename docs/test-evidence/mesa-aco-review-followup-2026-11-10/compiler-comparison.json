@@ -1,0 +1,3047 @@
+{
+  "record_count": 93,
+  "policies": {
+    "global-vector8": {
+      "options": {
+        "subgroup": 32,
+        "require_full_subgroups": true,
+        "features": "gpu/src/vk.cpp Device::init",
+        "precision": "global",
+        "matrix_loads": "vector8",
+        "address_adaptation": "assembler-dual-sentinel-v1"
+      },
+      "scratch_records": 4,
+      "code_bytes": 2043880
+    },
+    "global-scalar": {
+      "options": {
+        "subgroup": 32,
+        "require_full_subgroups": true,
+        "features": "gpu/src/vk.cpp Device::init",
+        "precision": "global",
+        "matrix_loads": "scalar",
+        "address_adaptation": "assembler-dual-sentinel-v1"
+      },
+      "scratch_records": 8,
+      "code_bytes": 2523368
+    },
+    "local-vector8": {
+      "options": {
+        "subgroup": 32,
+        "require_full_subgroups": true,
+        "features": "gpu/src/vk.cpp Device::init",
+        "precision": "local",
+        "matrix_loads": "vector8",
+        "address_adaptation": "assembler-dual-sentinel-v1"
+      },
+      "scratch_records": 4,
+      "code_bytes": 2038056
+    },
+    "local-scalar": {
+      "options": {
+        "subgroup": 32,
+        "require_full_subgroups": true,
+        "features": "gpu/src/vk.cpp Device::init",
+        "precision": "local",
+        "matrix_loads": "scalar",
+        "address_adaptation": "assembler-dual-sentinel-v1"
+      },
+      "scratch_records": 8,
+      "code_bytes": 2517532
+    },
+    "native-scalar": {
+      "options": {
+        "subgroup": 32,
+        "require_full_subgroups": true,
+        "features": "gpu/src/vk.cpp Device::init",
+        "precision": "native",
+        "matrix_loads": "scalar",
+        "address_adaptation": "assembler-dual-sentinel-v1"
+      },
+      "scratch_records": 8,
+      "code_bytes": 2535112
+    }
+  },
+  "comparisons": {
+    "global-vector8__local-vector8": {
+      "identical_records": 68,
+      "differences": [
+        {
+          "key": "037978cdd8781555",
+          "shader": "enc0_attr_f_w_lt.spv",
+          "a": {
+            "code_hash": "a81a375ccc8c1294",
+            "exec_bytes": 23336,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "e6f5f514a567db33",
+            "exec_bytes": 22936,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "055cdb1ca00ecf88",
+          "shader": "d3d_ingest.spv",
+          "a": {
+            "code_hash": "dca7759e8fa36262",
+            "exec_bytes": 30640,
+            "vgprs": 48,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "b87e123e941eae31",
+            "exec_bytes": 30304,
+            "vgprs": 48,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "06a7db5bd94c81e0",
+          "shader": "post_dlt_f_lt.spv",
+          "a": {
+            "code_hash": "eb3f96a39187d010",
+            "exec_bytes": 26012,
+            "vgprs": 120,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "2d59d00802a307a5",
+            "exec_bytes": 25412,
+            "vgprs": 120,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "1d6fd9f4cc1c893c",
+          "shader": "d3d_enc0_attr_f_lt.spv",
+          "a": {
+            "code_hash": "573daf074f5a5b8d",
+            "exec_bytes": 28424,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "3ba29dc6f93b136c",
+            "exec_bytes": 28048,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "2a1805e8888ee841",
+          "shader": "enc0_attr_f_w.spv",
+          "a": {
+            "code_hash": "bcaff28dd23fa537",
+            "exec_bytes": 25452,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "54744c444ac32231",
+            "exec_bytes": 25016,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "2bfe14fa9a6e5624",
+          "shader": "d3d_enc0_attr_f_w_lt.spv",
+          "a": {
+            "code_hash": "59cf37228a954311",
+            "exec_bytes": 28484,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "12bb44c6e2a6402c",
+            "exec_bytes": 28108,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "37b54dc8375d23da",
+          "shader": "d3d_pack.spv",
+          "a": {
+            "code_hash": "b86afbf81420b860",
+            "exec_bytes": 3580,
+            "vgprs": 24,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "641ce5e19dde3e0e",
+            "exec_bytes": 3528,
+            "vgprs": 24,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "3eccd9693a0d87ef",
+          "shader": "dec_head_32_64_f_lt.spv",
+          "a": {
+            "code_hash": "58d151026e26b673",
+            "exec_bytes": 23564,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "48fe69f0ed591f4f",
+            "exec_bytes": 23492,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "4c4d3749900919fe",
+          "shader": "downsample_tl_lt.spv",
+          "a": {
+            "code_hash": "e495ac468ca81542",
+            "exec_bytes": 10396,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "1c318a261a4c27df",
+            "exec_bytes": 10280,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "518e6587dc9e69b8",
+          "shader": "d3d_downsample_tl_lt.spv",
+          "a": {
+            "code_hash": "00c5b54e23e485b3",
+            "exec_bytes": 10200,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "735582550208fd32",
+            "exec_bytes": 10084,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "52232b58140a0a17",
+          "shader": "enc0_attr_raw.spv",
+          "a": {
+            "code_hash": "0cbda72543e5201f",
+            "exec_bytes": 25932,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "901ac812f43c74f0",
+            "exec_bytes": 25508,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "66226a06cd06c7f3",
+          "shader": "d3d_downsample_tl.spv",
+          "a": {
+            "code_hash": "7d018158ac8dfb7e",
+            "exec_bytes": 10580,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "d4c8581337b0079d",
+            "exec_bytes": 10464,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "67c230d72edf262e",
+          "shader": "post_f_lt.spv",
+          "a": {
+            "code_hash": "b0d6c69e2691df75",
+            "exec_bytes": 20920,
+            "vgprs": 120,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "9da35d8f5ea27053",
+            "exec_bytes": 20668,
+            "vgprs": 120,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "71f444e6a4c8f74a",
+          "shader": "downsample_tl.spv",
+          "a": {
+            "code_hash": "0fe312d3121892fd",
+            "exec_bytes": 10756,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "3eae8a0f738f7f22",
+            "exec_bytes": 10640,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "83008aab2deab055",
+          "shader": "ingest.spv",
+          "a": {
+            "code_hash": "269971cd7e9e5d71",
+            "exec_bytes": 29940,
+            "vgprs": 48,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "0d91876cc32c61e4",
+            "exec_bytes": 30012,
+            "vgprs": 48,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "904cfe3480396ab7",
+          "shader": "enc0_attr_f_lt.spv",
+          "a": {
+            "code_hash": "ed6fd17230792053",
+            "exec_bytes": 23264,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "6bc8ca7ee0301520",
+            "exec_bytes": 22864,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "92deee5eb00fde72",
+          "shader": "dfn_import.spv",
+          "a": {
+            "code_hash": "8db1f7f7f5f6da23",
+            "exec_bytes": 3232,
+            "vgprs": 24,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "aa1aa048699af248",
+            "exec_bytes": 3240,
+            "vgprs": 24,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "9494ed55ba8520ba",
+          "shader": "dfn_import_lt.spv",
+          "a": {
+            "code_hash": "85ba239981a72486",
+            "exec_bytes": 3104,
+            "vgprs": 24,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "69d015f0a2662359",
+            "exec_bytes": 3112,
+            "vgprs": 24,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "afe8e28b8283b96b",
+          "shader": "post_f.spv",
+          "a": {
+            "code_hash": "0d1278ba148cd90b",
+            "exec_bytes": 20676,
+            "vgprs": 120,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "437f69faf91d1ab6",
+            "exec_bytes": 20660,
+            "vgprs": 120,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "b3655442fe0ad69e",
+          "shader": "d3d_enc0_attr_f.spv",
+          "a": {
+            "code_hash": "4816ae15222c6012",
+            "exec_bytes": 30520,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "e3d5dc7aca854dce",
+            "exec_bytes": 30116,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "b799ea871f0212a5",
+          "shader": "dec_head_32_64_f.spv",
+          "a": {
+            "code_hash": "4b3029b1f62f1b1d",
+            "exec_bytes": 27176,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "c0c73c43f62dd12c",
+            "exec_bytes": 27216,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "b7ec90ad9bb77d31",
+          "shader": "enc0_attr_f.spv",
+          "a": {
+            "code_hash": "f4095337895569dd",
+            "exec_bytes": 25396,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "21edd62583b675b4",
+            "exec_bytes": 24936,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "f59fecb0c6c722dd",
+          "shader": "post_dlt_f.spv",
+          "a": {
+            "code_hash": "c6ce80ee473311e3",
+            "exec_bytes": 24976,
+            "vgprs": 144,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "bf1f4fd205b852c5",
+            "exec_bytes": 24552,
+            "vgprs": 144,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "fc15342056305889",
+          "shader": "d3d_enc0_attr_f_w.spv",
+          "a": {
+            "code_hash": "a1a0804b84fa25b3",
+            "exec_bytes": 30588,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "1a3f0051b14d5cbd",
+            "exec_bytes": 30184,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "fdc5ed41ade87e02",
+          "shader": "pack.spv",
+          "a": {
+            "code_hash": "4094c2f3e7b854b6",
+            "exec_bytes": 3500,
+            "vgprs": 24,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "539bd26505c8f910",
+            "exec_bytes": 3444,
+            "vgprs": 24,
+            "scratch_bytes": 0
+          }
+        }
+      ]
+    },
+    "global-scalar__local-scalar": {
+      "identical_records": 68,
+      "differences": [
+        {
+          "key": "037978cdd8781555",
+          "shader": "enc0_attr_f_w_lt.spv",
+          "a": {
+            "code_hash": "a81a375ccc8c1294",
+            "exec_bytes": 23336,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "e6f5f514a567db33",
+            "exec_bytes": 22936,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "055cdb1ca00ecf88",
+          "shader": "d3d_ingest.spv",
+          "a": {
+            "code_hash": "dca7759e8fa36262",
+            "exec_bytes": 30640,
+            "vgprs": 48,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "b87e123e941eae31",
+            "exec_bytes": 30304,
+            "vgprs": 48,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "06a7db5bd94c81e0",
+          "shader": "post_dlt_f_lt.spv",
+          "a": {
+            "code_hash": "eb3f96a39187d010",
+            "exec_bytes": 26012,
+            "vgprs": 120,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "2d59d00802a307a5",
+            "exec_bytes": 25412,
+            "vgprs": 120,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "1d6fd9f4cc1c893c",
+          "shader": "d3d_enc0_attr_f_lt.spv",
+          "a": {
+            "code_hash": "573daf074f5a5b8d",
+            "exec_bytes": 28424,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "3ba29dc6f93b136c",
+            "exec_bytes": 28048,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "2a1805e8888ee841",
+          "shader": "enc0_attr_f_w.spv",
+          "a": {
+            "code_hash": "bcaff28dd23fa537",
+            "exec_bytes": 25452,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "54744c444ac32231",
+            "exec_bytes": 25016,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "2bfe14fa9a6e5624",
+          "shader": "d3d_enc0_attr_f_w_lt.spv",
+          "a": {
+            "code_hash": "59cf37228a954311",
+            "exec_bytes": 28484,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "12bb44c6e2a6402c",
+            "exec_bytes": 28108,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "37b54dc8375d23da",
+          "shader": "d3d_pack.spv",
+          "a": {
+            "code_hash": "b86afbf81420b860",
+            "exec_bytes": 3580,
+            "vgprs": 24,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "641ce5e19dde3e0e",
+            "exec_bytes": 3528,
+            "vgprs": 24,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "3eccd9693a0d87ef",
+          "shader": "dec_head_32_64_f_lt.spv",
+          "a": {
+            "code_hash": "a4ea92119c064d97",
+            "exec_bytes": 27640,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "4d27002b7151c6ed",
+            "exec_bytes": 27556,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "4c4d3749900919fe",
+          "shader": "downsample_tl_lt.spv",
+          "a": {
+            "code_hash": "e495ac468ca81542",
+            "exec_bytes": 10396,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "1c318a261a4c27df",
+            "exec_bytes": 10280,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "518e6587dc9e69b8",
+          "shader": "d3d_downsample_tl_lt.spv",
+          "a": {
+            "code_hash": "00c5b54e23e485b3",
+            "exec_bytes": 10200,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "735582550208fd32",
+            "exec_bytes": 10084,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "52232b58140a0a17",
+          "shader": "enc0_attr_raw.spv",
+          "a": {
+            "code_hash": "0cbda72543e5201f",
+            "exec_bytes": 25932,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "901ac812f43c74f0",
+            "exec_bytes": 25508,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "66226a06cd06c7f3",
+          "shader": "d3d_downsample_tl.spv",
+          "a": {
+            "code_hash": "7d018158ac8dfb7e",
+            "exec_bytes": 10580,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "d4c8581337b0079d",
+            "exec_bytes": 10464,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "67c230d72edf262e",
+          "shader": "post_f_lt.spv",
+          "a": {
+            "code_hash": "b0d6c69e2691df75",
+            "exec_bytes": 20920,
+            "vgprs": 120,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "9da35d8f5ea27053",
+            "exec_bytes": 20668,
+            "vgprs": 120,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "71f444e6a4c8f74a",
+          "shader": "downsample_tl.spv",
+          "a": {
+            "code_hash": "0fe312d3121892fd",
+            "exec_bytes": 10756,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "3eae8a0f738f7f22",
+            "exec_bytes": 10640,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "83008aab2deab055",
+          "shader": "ingest.spv",
+          "a": {
+            "code_hash": "269971cd7e9e5d71",
+            "exec_bytes": 29940,
+            "vgprs": 48,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "0d91876cc32c61e4",
+            "exec_bytes": 30012,
+            "vgprs": 48,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "904cfe3480396ab7",
+          "shader": "enc0_attr_f_lt.spv",
+          "a": {
+            "code_hash": "ed6fd17230792053",
+            "exec_bytes": 23264,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "6bc8ca7ee0301520",
+            "exec_bytes": 22864,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "92deee5eb00fde72",
+          "shader": "dfn_import.spv",
+          "a": {
+            "code_hash": "8db1f7f7f5f6da23",
+            "exec_bytes": 3232,
+            "vgprs": 24,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "aa1aa048699af248",
+            "exec_bytes": 3240,
+            "vgprs": 24,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "9494ed55ba8520ba",
+          "shader": "dfn_import_lt.spv",
+          "a": {
+            "code_hash": "85ba239981a72486",
+            "exec_bytes": 3104,
+            "vgprs": 24,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "69d015f0a2662359",
+            "exec_bytes": 3112,
+            "vgprs": 24,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "afe8e28b8283b96b",
+          "shader": "post_f.spv",
+          "a": {
+            "code_hash": "0d1278ba148cd90b",
+            "exec_bytes": 20676,
+            "vgprs": 120,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "437f69faf91d1ab6",
+            "exec_bytes": 20660,
+            "vgprs": 120,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "b3655442fe0ad69e",
+          "shader": "d3d_enc0_attr_f.spv",
+          "a": {
+            "code_hash": "4816ae15222c6012",
+            "exec_bytes": 30520,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "e3d5dc7aca854dce",
+            "exec_bytes": 30116,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "b799ea871f0212a5",
+          "shader": "dec_head_32_64_f.spv",
+          "a": {
+            "code_hash": "6d36ec31cf3696d7",
+            "exec_bytes": 31420,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "4a0afd956abd04a0",
+            "exec_bytes": 31460,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "b7ec90ad9bb77d31",
+          "shader": "enc0_attr_f.spv",
+          "a": {
+            "code_hash": "f4095337895569dd",
+            "exec_bytes": 25396,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "21edd62583b675b4",
+            "exec_bytes": 24936,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "f59fecb0c6c722dd",
+          "shader": "post_dlt_f.spv",
+          "a": {
+            "code_hash": "c6ce80ee473311e3",
+            "exec_bytes": 24976,
+            "vgprs": 144,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "bf1f4fd205b852c5",
+            "exec_bytes": 24552,
+            "vgprs": 144,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "fc15342056305889",
+          "shader": "d3d_enc0_attr_f_w.spv",
+          "a": {
+            "code_hash": "a1a0804b84fa25b3",
+            "exec_bytes": 30588,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "1a3f0051b14d5cbd",
+            "exec_bytes": 30184,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "fdc5ed41ade87e02",
+          "shader": "pack.spv",
+          "a": {
+            "code_hash": "4094c2f3e7b854b6",
+            "exec_bytes": 3500,
+            "vgprs": 24,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "539bd26505c8f910",
+            "exec_bytes": 3444,
+            "vgprs": 24,
+            "scratch_bytes": 0
+          }
+        }
+      ]
+    },
+    "local-scalar__native-scalar": {
+      "identical_records": 12,
+      "differences": [
+        {
+          "key": "037978cdd8781555",
+          "shader": "enc0_attr_f_w_lt.spv",
+          "a": {
+            "code_hash": "e6f5f514a567db33",
+            "exec_bytes": 22936,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "7099188fc45c49db",
+            "exec_bytes": 22940,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "06a7db5bd94c81e0",
+          "shader": "post_dlt_f_lt.spv",
+          "a": {
+            "code_hash": "2d59d00802a307a5",
+            "exec_bytes": 25412,
+            "vgprs": 120,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "e68f0d9d59847be1",
+            "exec_bytes": 24584,
+            "vgprs": 120,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "0705fad577a0f8a7",
+          "shader": "enc0_stage_32_64_f_lt.spv",
+          "a": {
+            "code_hash": "a6602883cd08bf82",
+            "exec_bytes": 31632,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "9c7552ccce7a5446",
+            "exec_bytes": 32604,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "095787dd4133557e",
+          "shader": "dec_dfn_128_128_fl.spv",
+          "a": {
+            "code_hash": "2505dd863fa481c3",
+            "exec_bytes": 33760,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "cca93bfa2a0bc92c",
+            "exec_bytes": 33924,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "09ae4164fbb15cf1",
+          "shader": "dec_up_160_256_160_fl.spv",
+          "a": {
+            "code_hash": "fe0495415856f6e5",
+            "exec_bytes": 31308,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "01a03798ea11a479",
+            "exec_bytes": 31532,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "0d775a6335a1b380",
+          "shader": "enc_stage_160_256_0_f.spv",
+          "a": {
+            "code_hash": "e6c06f0d2de46ef9",
+            "exec_bytes": 30356,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "84197a48f6669bec",
+            "exec_bytes": 30392,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "1499d383d594a247",
+          "shader": "enc_stage_160_256_0_f_lt.spv",
+          "a": {
+            "code_hash": "50c8e8c5fa4bd825",
+            "exec_bytes": 30356,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "2a06ad0d20df6cc1",
+            "exec_bytes": 30440,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "176dd5c87be9b223",
+          "shader": "d3d_ae.spv",
+          "a": {
+            "code_hash": "8c6bfbfe5b17f8c7",
+            "exec_bytes": 1644,
+            "vgprs": 24,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "5dffd3dc68dbd1af",
+            "exec_bytes": 1604,
+            "vgprs": 24,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "1868a527fddfb730",
+          "shader": "downsample.spv",
+          "a": {
+            "code_hash": "be3b3929628e1190",
+            "exec_bytes": 3132,
+            "vgprs": 48,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "e0d5c56d8fd38b80",
+            "exec_bytes": 3020,
+            "vgprs": 48,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "1d6fd9f4cc1c893c",
+          "shader": "d3d_enc0_attr_f_lt.spv",
+          "a": {
+            "code_hash": "3ba29dc6f93b136c",
+            "exec_bytes": 28048,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "21c447a8d4e00710",
+            "exec_bytes": 28072,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "231bf803323201db",
+          "shader": "enc_stage_128_128_160_fl.spv",
+          "a": {
+            "code_hash": "c6e941ea8edbbad1",
+            "exec_bytes": 44392,
+            "vgprs": 240,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "f4ee3a1534f208e8",
+            "exec_bytes": 44492,
+            "vgprs": 240,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "238fcc9bcf09fa55",
+          "shader": "dec_up_64_64_96_f.spv",
+          "a": {
+            "code_hash": "e22c9934ec00ec79",
+            "exec_bytes": 54164,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "0fba92ca5ce78591",
+            "exec_bytes": 55688,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "28bc7057f2b8ac76",
+          "shader": "dec_dfn_128_128_f_lt.spv",
+          "a": {
+            "code_hash": "8009e0c99eb0e450",
+            "exec_bytes": 31956,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "f59d5317c1bae327",
+            "exec_bytes": 32128,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "28e6b3fa305be4bc",
+          "shader": "dec_up_128_128_160_f_lt.spv",
+          "a": {
+            "code_hash": "ca40effaee909a34",
+            "exec_bytes": 30364,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "5b0b90d918f323ff",
+            "exec_bytes": 30480,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "2a1805e8888ee841",
+          "shader": "enc0_attr_f_w.spv",
+          "a": {
+            "code_hash": "54744c444ac32231",
+            "exec_bytes": 25016,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "361180888a7cb414",
+            "exec_bytes": 25020,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "2bfe14fa9a6e5624",
+          "shader": "d3d_enc0_attr_f_w_lt.spv",
+          "a": {
+            "code_hash": "12bb44c6e2a6402c",
+            "exec_bytes": 28108,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "2283cfb29a37aa54",
+            "exec_bytes": 28132,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "2d30684c45e56b62",
+          "shader": "enc_stage_96_128_128_f_lt.spv",
+          "a": {
+            "code_hash": "d0ec48af50907994",
+            "exec_bytes": 55988,
+            "vgprs": 256,
+            "scratch_bytes": 32
+          },
+          "b": {
+            "code_hash": "8178e50d8c32aee0",
+            "exec_bytes": 56356,
+            "vgprs": 256,
+            "scratch_bytes": 16
+          }
+        },
+        {
+          "key": "350eb51855cd5995",
+          "shader": "post_tile.spv",
+          "a": {
+            "code_hash": "51ace62610bdec36",
+            "exec_bytes": 1264,
+            "vgprs": 48,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "04d89dcea5ff19bc",
+            "exec_bytes": 1264,
+            "vgprs": 48,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "360f7a5dd195af7c",
+          "shader": "dec_up_160_256_160_fl_lt.spv",
+          "a": {
+            "code_hash": "e13bc7fc91653433",
+            "exec_bytes": 31216,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "a6e98e000b2d1717",
+            "exec_bytes": 31404,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "38501fcf01b1e652",
+          "shader": "enc_stage_160_256_160_f.spv",
+          "a": {
+            "code_hash": "5858ec40023b818b",
+            "exec_bytes": 41832,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "00d1d65e758e96c8",
+            "exec_bytes": 41932,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "3eccd9693a0d87ef",
+          "shader": "dec_head_32_64_f_lt.spv",
+          "a": {
+            "code_hash": "4d27002b7151c6ed",
+            "exec_bytes": 27556,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "ca812721ad7bb698",
+            "exec_bytes": 28268,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "40dc71ff1cd2b848",
+          "shader": "dec_up_64_64_96_f_lt.spv",
+          "a": {
+            "code_hash": "121dc6d1f6b25595",
+            "exec_bytes": 53628,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "056d9989fc7299b8",
+            "exec_bytes": 55248,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "4c4d3749900919fe",
+          "shader": "downsample_tl_lt.spv",
+          "a": {
+            "code_hash": "1c318a261a4c27df",
+            "exec_bytes": 10280,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "eb2bd3382e3d16d3",
+            "exec_bytes": 10172,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "4d98a31a6a7789ad",
+          "shader": "enc_stage_160_256_160_fl.spv",
+          "a": {
+            "code_hash": "f9adcf281516b6ba",
+            "exec_bytes": 43592,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "bf806624b7019f50",
+            "exec_bytes": 43540,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "4ecf3b5cd58f6a11",
+          "shader": "dec_dfn_128_128_fl_lt.spv",
+          "a": {
+            "code_hash": "353f4382d9ea248a",
+            "exec_bytes": 33576,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "11f7dd3ee799733e",
+            "exec_bytes": 33776,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "4f4d742046c9b6f1",
+          "shader": "enc0_stage_32_64_f.spv",
+          "a": {
+            "code_hash": "af2aefbdb1c0a0ea",
+            "exec_bytes": 34912,
+            "vgprs": 216,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "a0e2601d6931d2c9",
+            "exec_bytes": 36056,
+            "vgprs": 216,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "50c4593efddb5754",
+          "shader": "dec_dfn_96_128_f.spv",
+          "a": {
+            "code_hash": "cf2de8b6a81712e1",
+            "exec_bytes": 35700,
+            "vgprs": 256,
+            "scratch_bytes": 16
+          },
+          "b": {
+            "code_hash": "62cef9ff5ea603fd",
+            "exec_bytes": 35800,
+            "vgprs": 256,
+            "scratch_bytes": 8
+          }
+        },
+        {
+          "key": "518e6587dc9e69b8",
+          "shader": "d3d_downsample_tl_lt.spv",
+          "a": {
+            "code_hash": "735582550208fd32",
+            "exec_bytes": 10084,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "c502d50d0134be18",
+            "exec_bytes": 9964,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "52232b58140a0a17",
+          "shader": "enc0_attr_raw.spv",
+          "a": {
+            "code_hash": "901ac812f43c74f0",
+            "exec_bytes": 25508,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "6a207234aee6fc0f",
+            "exec_bytes": 25516,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "52722875f5de9eb1",
+          "shader": "dec_dfn_64_64_f_lt.spv",
+          "a": {
+            "code_hash": "d21b1dd695cd01cc",
+            "exec_bytes": 50756,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "423528e60b503232",
+            "exec_bytes": 51628,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "543b3fdebddc2f1d",
+          "shader": "enc_stage_160_256_160_f_lt.spv",
+          "a": {
+            "code_hash": "71cc30ad3ec7a594",
+            "exec_bytes": 41804,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "bc97280f447480d5",
+            "exec_bytes": 41964,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "581ef3189b0a0052",
+          "shader": "enc_stage_96_128_128_fl_lt.spv",
+          "a": {
+            "code_hash": "5997af6f0d930376",
+            "exec_bytes": 56596,
+            "vgprs": 256,
+            "scratch_bytes": 32
+          },
+          "b": {
+            "code_hash": "293176839f958d55",
+            "exec_bytes": 57008,
+            "vgprs": 256,
+            "scratch_bytes": 16
+          }
+        },
+        {
+          "key": "59a8847a905b419b",
+          "shader": "enc_stage_64_64_96_f.spv",
+          "a": {
+            "code_hash": "ae0b1bc763ecc8ab",
+            "exec_bytes": 62940,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "4f97c4e9d9116378",
+            "exec_bytes": 63760,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "5d05fcc3de384276",
+          "shader": "dec_up_128_128_160_fl_lt.spv",
+          "a": {
+            "code_hash": "b1204238103445cf",
+            "exec_bytes": 31996,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "78381c39b0a00a8a",
+            "exec_bytes": 32140,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "5f78c6a07f1a5ec7",
+          "shader": "enc_stage_128_128_160_fl_lt.spv",
+          "a": {
+            "code_hash": "4634b2dcdc3c030e",
+            "exec_bytes": 44208,
+            "vgprs": 240,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "042e9e929f7ce4bd",
+            "exec_bytes": 44392,
+            "vgprs": 240,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "608c28c0029891f3",
+          "shader": "dec_dfn_96_128_fl.spv",
+          "a": {
+            "code_hash": "0ee42a7b1d4e95b0",
+            "exec_bytes": 37292,
+            "vgprs": 256,
+            "scratch_bytes": 16
+          },
+          "b": {
+            "code_hash": "340664fcb77ad2cc",
+            "exec_bytes": 37392,
+            "vgprs": 256,
+            "scratch_bytes": 8
+          }
+        },
+        {
+          "key": "66226a06cd06c7f3",
+          "shader": "d3d_downsample_tl.spv",
+          "a": {
+            "code_hash": "d4c8581337b0079d",
+            "exec_bytes": 10464,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "672bb1045ee3c91f",
+            "exec_bytes": 10344,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "67c230d72edf262e",
+          "shader": "post_f_lt.spv",
+          "a": {
+            "code_hash": "9da35d8f5ea27053",
+            "exec_bytes": 20668,
+            "vgprs": 120,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "65a51aebab02e191",
+            "exec_bytes": 19892,
+            "vgprs": 120,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "6bc90aef575d98cf",
+          "shader": "dec_dfn_160_256_fl_lt.spv",
+          "a": {
+            "code_hash": "0d34b1db22202470",
+            "exec_bytes": 32760,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "80dab1d6dffaf31f",
+            "exec_bytes": 32828,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "6be5b3c53083b759",
+          "shader": "dec_up_128_128_160_fl.spv",
+          "a": {
+            "code_hash": "c3e3fdbf881ad8b6",
+            "exec_bytes": 32092,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "8a07533ee4a12985",
+            "exec_bytes": 32248,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "6d872e31c95afce5",
+          "shader": "dec_up_160_256_160_f.spv",
+          "a": {
+            "code_hash": "ce9b3f1a671243e8",
+            "exec_bytes": 29704,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "eb66ebf97157f2e2",
+            "exec_bytes": 29852,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "71f444e6a4c8f74a",
+          "shader": "downsample_tl.spv",
+          "a": {
+            "code_hash": "3eae8a0f738f7f22",
+            "exec_bytes": 10640,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "c0a595f843a81fcc",
+            "exec_bytes": 10532,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "7397e05f8c2da77a",
+          "shader": "dec_up_96_128_128_f.spv",
+          "a": {
+            "code_hash": "d8d4da134a225ca7",
+            "exec_bytes": 24664,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "f0be4696383afdba",
+            "exec_bytes": 24848,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "7425bd19500d6479",
+          "shader": "enc_stage_96_128_128_fl.spv",
+          "a": {
+            "code_hash": "7faf85c05f35edfd",
+            "exec_bytes": 56828,
+            "vgprs": 256,
+            "scratch_bytes": 24
+          },
+          "b": {
+            "code_hash": "cefd0a314853a07c",
+            "exec_bytes": 57284,
+            "vgprs": 256,
+            "scratch_bytes": 16
+          }
+        },
+        {
+          "key": "777985d1831329ca",
+          "shader": "dec_dfn_64_64_f.spv",
+          "a": {
+            "code_hash": "4c3ddf7e4812e2b8",
+            "exec_bytes": 51312,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "05029efaa54b2d0b",
+            "exec_bytes": 52060,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "79ea9a0f90a74b24",
+          "shader": "dec_up_96_128_128_f_lt.spv",
+          "a": {
+            "code_hash": "09632fdf387c7276",
+            "exec_bytes": 24592,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "f21aa3d8c8b44af6",
+            "exec_bytes": 24724,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "7fcd28c3e1986a33",
+          "shader": "pooled_history2.spv",
+          "a": {
+            "code_hash": "663272ac7eec9702",
+            "exec_bytes": 2200,
+            "vgprs": 24,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "0fd945d421f2ed80",
+            "exec_bytes": 2204,
+            "vgprs": 24,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "8053435623e90df5",
+          "shader": "ae.spv",
+          "a": {
+            "code_hash": "1b97ef89ffcd1d1d",
+            "exec_bytes": 1552,
+            "vgprs": 24,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "aa8aa7f234c080a1",
+            "exec_bytes": 1508,
+            "vgprs": 24,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "81d017418fe547af",
+          "shader": "dec_dfn_160_256_f.spv",
+          "a": {
+            "code_hash": "f7cc0a9879d2f74d",
+            "exec_bytes": 31280,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "ed68074566182ed6",
+            "exec_bytes": 31320,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "8207a2a6f176a4d8",
+          "shader": "dec_up_128_128_160_f.spv",
+          "a": {
+            "code_hash": "a1842245edea6249",
+            "exec_bytes": 30416,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "03f7c90bf9e8deee",
+            "exec_bytes": 30580,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "8cca057e36e2b4cc",
+          "shader": "enc_stage_64_64_96_f_lt.spv",
+          "a": {
+            "code_hash": "3224ef3a3f1ea5cd",
+            "exec_bytes": 62452,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "07a780e262288983",
+            "exec_bytes": 63156,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "8d07ac141832d300",
+          "shader": "enc_stage_96_128_128_f.spv",
+          "a": {
+            "code_hash": "3371d18fbfcd4d93",
+            "exec_bytes": 56200,
+            "vgprs": 256,
+            "scratch_bytes": 24
+          },
+          "b": {
+            "code_hash": "4f83d545e2eb2a51",
+            "exec_bytes": 56632,
+            "vgprs": 256,
+            "scratch_bytes": 16
+          }
+        },
+        {
+          "key": "904cfe3480396ab7",
+          "shader": "enc0_attr_f_lt.spv",
+          "a": {
+            "code_hash": "6bc8ca7ee0301520",
+            "exec_bytes": 22864,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "5bd9cc7edcc25218",
+            "exec_bytes": 22868,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "92deee5eb00fde72",
+          "shader": "dfn_import.spv",
+          "a": {
+            "code_hash": "aa1aa048699af248",
+            "exec_bytes": 3240,
+            "vgprs": 24,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "2d3263e57452b15f",
+            "exec_bytes": 3240,
+            "vgprs": 24,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "941882166ce09254",
+          "shader": "dec_dfn_96_128_f_lt.spv",
+          "a": {
+            "code_hash": "004b055aa1cc448b",
+            "exec_bytes": 35256,
+            "vgprs": 256,
+            "scratch_bytes": 16
+          },
+          "b": {
+            "code_hash": "4d413a6bc2c300a0",
+            "exec_bytes": 35812,
+            "vgprs": 256,
+            "scratch_bytes": 8
+          }
+        },
+        {
+          "key": "9494ed55ba8520ba",
+          "shader": "dfn_import_lt.spv",
+          "a": {
+            "code_hash": "69d015f0a2662359",
+            "exec_bytes": 3112,
+            "vgprs": 24,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "c2ac55b67dc8ef52",
+            "exec_bytes": 3112,
+            "vgprs": 24,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "94faa2ccbba8501e",
+          "shader": "dec_up_96_128_128_fl.spv",
+          "a": {
+            "code_hash": "814d6f757e237966",
+            "exec_bytes": 26296,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "4c333ea18c7e71c3",
+            "exec_bytes": 26508,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "9b09c8e4e1c7b892",
+          "shader": "dec_dfn_96_128_fl_lt.spv",
+          "a": {
+            "code_hash": "83db31fdcf141084",
+            "exec_bytes": 36764,
+            "vgprs": 256,
+            "scratch_bytes": 16
+          },
+          "b": {
+            "code_hash": "1071c5f28131e842",
+            "exec_bytes": 37392,
+            "vgprs": 256,
+            "scratch_bytes": 8
+          }
+        },
+        {
+          "key": "9cfa240f087e7153",
+          "shader": "enc_stage_128_128_160_f_lt.spv",
+          "a": {
+            "code_hash": "69cbfc5369042452",
+            "exec_bytes": 42800,
+            "vgprs": 240,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "43a8ba29e7147aa2",
+            "exec_bytes": 42932,
+            "vgprs": 240,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "a1da9aadc8fc409c",
+          "shader": "enc0_stage_32_64_f_w_lt.spv",
+          "a": {
+            "code_hash": "f9bb7acb59498028",
+            "exec_bytes": 31356,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "94a571a1c3790f0a",
+            "exec_bytes": 32348,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "a536c1aee1b5b373",
+          "shader": "dec_dfn_128_128_f.spv",
+          "a": {
+            "code_hash": "44a681fcc530db9d",
+            "exec_bytes": 32128,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "4611e8965f54f584",
+            "exec_bytes": 32316,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "a89b668e3da09f5b",
+          "shader": "dec_dfn_160_256_fl.spv",
+          "a": {
+            "code_hash": "68584aa1940fff22",
+            "exec_bytes": 32764,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "f83e3bb9dc3cb88c",
+            "exec_bytes": 32792,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "addffdc4c6b922e8",
+          "shader": "dec_up_32_64_64_f.spv",
+          "a": {
+            "code_hash": "29bd5fe577a03b6a",
+            "exec_bytes": 40080,
+            "vgprs": 240,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "115e7a493dcd9cf4",
+            "exec_bytes": 41784,
+            "vgprs": 240,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "af1b93f587f9f210",
+          "shader": "downsample_lt.spv",
+          "a": {
+            "code_hash": "2b26bf790b1efb38",
+            "exec_bytes": 2776,
+            "vgprs": 48,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "b07e944c923733c8",
+            "exec_bytes": 2664,
+            "vgprs": 48,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "afe8e28b8283b96b",
+          "shader": "post_f.spv",
+          "a": {
+            "code_hash": "437f69faf91d1ab6",
+            "exec_bytes": 20660,
+            "vgprs": 120,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "78d672b40db99d22",
+            "exec_bytes": 19928,
+            "vgprs": 120,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "b3655442fe0ad69e",
+          "shader": "d3d_enc0_attr_f.spv",
+          "a": {
+            "code_hash": "e3d5dc7aca854dce",
+            "exec_bytes": 30116,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "725b21eaf445dcf2",
+            "exec_bytes": 30140,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "b799ea871f0212a5",
+          "shader": "dec_head_32_64_f.spv",
+          "a": {
+            "code_hash": "4a0afd956abd04a0",
+            "exec_bytes": 31460,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "80e9a08e9143036a",
+            "exec_bytes": 31660,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "b7dd12c10dab8afb",
+          "shader": "dec_up_32_64_64_f_lt.spv",
+          "a": {
+            "code_hash": "8787a244468bca05",
+            "exec_bytes": 36900,
+            "vgprs": 216,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "81aac2ae90d87d55",
+            "exec_bytes": 38512,
+            "vgprs": 216,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "b7ec90ad9bb77d31",
+          "shader": "enc0_attr_f.spv",
+          "a": {
+            "code_hash": "21edd62583b675b4",
+            "exec_bytes": 24936,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "b2eebfea4d0ab4e9",
+            "exec_bytes": 24940,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "b8457d1fbeb4e9e3",
+          "shader": "d3d_downsample_lt.spv",
+          "a": {
+            "code_hash": "72741d6e137dcf1d",
+            "exec_bytes": 2584,
+            "vgprs": 48,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "68dea30853fc700f",
+            "exec_bytes": 2464,
+            "vgprs": 48,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "c29f41aeb581fce8",
+          "shader": "dec_dfn_160_256_f_lt.spv",
+          "a": {
+            "code_hash": "c3894124d7f492b1",
+            "exec_bytes": 31232,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "92241c6926b4b14b",
+            "exec_bytes": 31316,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "c5ef1c72a8fa61ac",
+          "shader": "enc_stage_160_256_0_fl.spv",
+          "a": {
+            "code_hash": "08a6012dc46fabda",
+            "exec_bytes": 31776,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "443ce5111bf2d337",
+            "exec_bytes": 31792,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "caa3f6091e490cda",
+          "shader": "dec_up_96_128_128_fl_lt.spv",
+          "a": {
+            "code_hash": "655103e3954071da",
+            "exec_bytes": 26216,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "156626b40547a4a1",
+            "exec_bytes": 26356,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "d4cad4131a9d2071",
+          "shader": "dec_up_160_256_160_f_lt.spv",
+          "a": {
+            "code_hash": "4f39824add4166c8",
+            "exec_bytes": 29616,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "6666df46f5210a83",
+            "exec_bytes": 29764,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "d80cf61e2f2f74ec",
+          "shader": "enc_stage_160_256_160_fl_lt.spv",
+          "a": {
+            "code_hash": "eaaf82d0cceca292",
+            "exec_bytes": 43400,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "b86d0cd100bcc3dc",
+            "exec_bytes": 43560,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "da0466da433262b2",
+          "shader": "enc0_stage_32_64_f_w.spv",
+          "a": {
+            "code_hash": "5ba51cddc21d752f",
+            "exec_bytes": 34860,
+            "vgprs": 216,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "3d5ed1d80f605ced",
+            "exec_bytes": 35884,
+            "vgprs": 216,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "f2418b8d764403b6",
+          "shader": "enc_stage_160_256_0_fl_lt.spv",
+          "a": {
+            "code_hash": "a8824a0709ca15cb",
+            "exec_bytes": 31808,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "f50b1fea34988a26",
+            "exec_bytes": 31876,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "f59fecb0c6c722dd",
+          "shader": "post_dlt_f.spv",
+          "a": {
+            "code_hash": "bf1f4fd205b852c5",
+            "exec_bytes": 24552,
+            "vgprs": 144,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "d29131140461f89e",
+            "exec_bytes": 23872,
+            "vgprs": 144,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "f6ccd66e59440a06",
+          "shader": "enc_stage_128_128_160_f.spv",
+          "a": {
+            "code_hash": "40fc6d6f27417459",
+            "exec_bytes": 43004,
+            "vgprs": 240,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "b2f1fb2e84189dcb",
+            "exec_bytes": 42892,
+            "vgprs": 240,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "fa1ab80252e2a7e5",
+          "shader": "d3d_downsample.spv",
+          "a": {
+            "code_hash": "7312297a92f3e083",
+            "exec_bytes": 2960,
+            "vgprs": 48,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "9ff2c11ecd9958d5",
+            "exec_bytes": 2840,
+            "vgprs": 48,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "fc15342056305889",
+          "shader": "d3d_enc0_attr_f_w.spv",
+          "a": {
+            "code_hash": "1a3f0051b14d5cbd",
+            "exec_bytes": 30184,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "5dfef34f43dfc105",
+            "exec_bytes": 30208,
+            "vgprs": 96,
+            "scratch_bytes": 0
+          }
+        }
+      ]
+    },
+    "global-vector8__global-scalar": {
+      "identical_records": 39,
+      "differences": [
+        {
+          "key": "0705fad577a0f8a7",
+          "shader": "enc0_stage_32_64_f_lt.spv",
+          "a": {
+            "code_hash": "46df3032a04ca09b",
+            "exec_bytes": 25392,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "a6602883cd08bf82",
+            "exec_bytes": 31632,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "095787dd4133557e",
+          "shader": "dec_dfn_128_128_fl.spv",
+          "a": {
+            "code_hash": "5869f3c31f00d0bd",
+            "exec_bytes": 29572,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "2505dd863fa481c3",
+            "exec_bytes": 33760,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "09ae4164fbb15cf1",
+          "shader": "dec_up_160_256_160_fl.spv",
+          "a": {
+            "code_hash": "41f45380f9be5675",
+            "exec_bytes": 24888,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "fe0495415856f6e5",
+            "exec_bytes": 31308,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "0d775a6335a1b380",
+          "shader": "enc_stage_160_256_0_f.spv",
+          "a": {
+            "code_hash": "89117114647e4ccc",
+            "exec_bytes": 22196,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "e6c06f0d2de46ef9",
+            "exec_bytes": 30356,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "1499d383d594a247",
+          "shader": "enc_stage_160_256_0_f_lt.spv",
+          "a": {
+            "code_hash": "a0e46789efa4c4c5",
+            "exec_bytes": 22088,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "50c8e8c5fa4bd825",
+            "exec_bytes": 30356,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "231bf803323201db",
+          "shader": "enc_stage_128_128_160_fl.spv",
+          "a": {
+            "code_hash": "0a32c6ae4ab0c710",
+            "exec_bytes": 37488,
+            "vgprs": 240,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "c6e941ea8edbbad1",
+            "exec_bytes": 44392,
+            "vgprs": 240,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "238fcc9bcf09fa55",
+          "shader": "dec_up_64_64_96_f.spv",
+          "a": {
+            "code_hash": "569a731b86cb0315",
+            "exec_bytes": 31636,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "e22c9934ec00ec79",
+            "exec_bytes": 54164,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "28bc7057f2b8ac76",
+          "shader": "dec_dfn_128_128_f_lt.spv",
+          "a": {
+            "code_hash": "6749a96505f99932",
+            "exec_bytes": 27712,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "8009e0c99eb0e450",
+            "exec_bytes": 31956,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "28e6b3fa305be4bc",
+          "shader": "dec_up_128_128_160_f_lt.spv",
+          "a": {
+            "code_hash": "92dd7455fc6723f2",
+            "exec_bytes": 26956,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "ca40effaee909a34",
+            "exec_bytes": 30364,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "2d30684c45e56b62",
+          "shader": "enc_stage_96_128_128_f_lt.spv",
+          "a": {
+            "code_hash": "931692a436e75490",
+            "exec_bytes": 38880,
+            "vgprs": 256,
+            "scratch_bytes": 8
+          },
+          "b": {
+            "code_hash": "d0ec48af50907994",
+            "exec_bytes": 55988,
+            "vgprs": 256,
+            "scratch_bytes": 32
+          }
+        },
+        {
+          "key": "360f7a5dd195af7c",
+          "shader": "dec_up_160_256_160_fl_lt.spv",
+          "a": {
+            "code_hash": "a7b1b74789a10351",
+            "exec_bytes": 24776,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "e13bc7fc91653433",
+            "exec_bytes": 31216,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "38501fcf01b1e652",
+          "shader": "enc_stage_160_256_160_f.spv",
+          "a": {
+            "code_hash": "a267f095f2c68b3a",
+            "exec_bytes": 30032,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "5858ec40023b818b",
+            "exec_bytes": 41832,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "3eccd9693a0d87ef",
+          "shader": "dec_head_32_64_f_lt.spv",
+          "a": {
+            "code_hash": "58d151026e26b673",
+            "exec_bytes": 23564,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "a4ea92119c064d97",
+            "exec_bytes": 27640,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "40dc71ff1cd2b848",
+          "shader": "dec_up_64_64_96_f_lt.spv",
+          "a": {
+            "code_hash": "6fb426bc05b24c11",
+            "exec_bytes": 31108,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "121dc6d1f6b25595",
+            "exec_bytes": 53628,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "4d98a31a6a7789ad",
+          "shader": "enc_stage_160_256_160_fl.spv",
+          "a": {
+            "code_hash": "ee3c516bab287788",
+            "exec_bytes": 31728,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "f9adcf281516b6ba",
+            "exec_bytes": 43592,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "4ecf3b5cd58f6a11",
+          "shader": "dec_dfn_128_128_fl_lt.spv",
+          "a": {
+            "code_hash": "e7d460bb2a09f6be",
+            "exec_bytes": 29236,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "353f4382d9ea248a",
+            "exec_bytes": 33576,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "4f4d742046c9b6f1",
+          "shader": "enc0_stage_32_64_f.spv",
+          "a": {
+            "code_hash": "a599d9b3300c02b2",
+            "exec_bytes": 28100,
+            "vgprs": 216,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "af2aefbdb1c0a0ea",
+            "exec_bytes": 34912,
+            "vgprs": 216,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "50c4593efddb5754",
+          "shader": "dec_dfn_96_128_f.spv",
+          "a": {
+            "code_hash": "7f92da59898322f4",
+            "exec_bytes": 26184,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "cf2de8b6a81712e1",
+            "exec_bytes": 35700,
+            "vgprs": 256,
+            "scratch_bytes": 16
+          }
+        },
+        {
+          "key": "52722875f5de9eb1",
+          "shader": "dec_dfn_64_64_f_lt.spv",
+          "a": {
+            "code_hash": "5304c000e549db59",
+            "exec_bytes": 29096,
+            "vgprs": 240,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "d21b1dd695cd01cc",
+            "exec_bytes": 50756,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "543b3fdebddc2f1d",
+          "shader": "enc_stage_160_256_160_f_lt.spv",
+          "a": {
+            "code_hash": "f33a7bfb97ce71e2",
+            "exec_bytes": 29916,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "71cc30ad3ec7a594",
+            "exec_bytes": 41804,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "581ef3189b0a0052",
+          "shader": "enc_stage_96_128_128_fl_lt.spv",
+          "a": {
+            "code_hash": "265363938b7396d2",
+            "exec_bytes": 39544,
+            "vgprs": 256,
+            "scratch_bytes": 8
+          },
+          "b": {
+            "code_hash": "5997af6f0d930376",
+            "exec_bytes": 56596,
+            "vgprs": 256,
+            "scratch_bytes": 32
+          }
+        },
+        {
+          "key": "59a8847a905b419b",
+          "shader": "enc_stage_64_64_96_f.spv",
+          "a": {
+            "code_hash": "5cce4e4cfb7532bb",
+            "exec_bytes": 36964,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "ae0b1bc763ecc8ab",
+            "exec_bytes": 62940,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "5d05fcc3de384276",
+          "shader": "dec_up_128_128_160_fl_lt.spv",
+          "a": {
+            "code_hash": "15c9b5324c717c47",
+            "exec_bytes": 28324,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "b1204238103445cf",
+            "exec_bytes": 31996,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "5f78c6a07f1a5ec7",
+          "shader": "enc_stage_128_128_160_fl_lt.spv",
+          "a": {
+            "code_hash": "f424355e4d55ffaf",
+            "exec_bytes": 37228,
+            "vgprs": 240,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "4634b2dcdc3c030e",
+            "exec_bytes": 44208,
+            "vgprs": 240,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "608c28c0029891f3",
+          "shader": "dec_dfn_96_128_fl.spv",
+          "a": {
+            "code_hash": "7876888c6770325f",
+            "exec_bytes": 27764,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "0ee42a7b1d4e95b0",
+            "exec_bytes": 37292,
+            "vgprs": 256,
+            "scratch_bytes": 16
+          }
+        },
+        {
+          "key": "6bc90aef575d98cf",
+          "shader": "dec_dfn_160_256_fl_lt.spv",
+          "a": {
+            "code_hash": "4010c67442c38c42",
+            "exec_bytes": 24468,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "0d34b1db22202470",
+            "exec_bytes": 32760,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "6be5b3c53083b759",
+          "shader": "dec_up_128_128_160_fl.spv",
+          "a": {
+            "code_hash": "c33a0693a3a3bcd3",
+            "exec_bytes": 28688,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "c3e3fdbf881ad8b6",
+            "exec_bytes": 32092,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "6d872e31c95afce5",
+          "shader": "dec_up_160_256_160_f.spv",
+          "a": {
+            "code_hash": "b31c73e7199458f1",
+            "exec_bytes": 23300,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "ce9b3f1a671243e8",
+            "exec_bytes": 29704,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "7397e05f8c2da77a",
+          "shader": "dec_up_96_128_128_f.spv",
+          "a": {
+            "code_hash": "fb1a8498315dd476",
+            "exec_bytes": 30376,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "d8d4da134a225ca7",
+            "exec_bytes": 24664,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "7425bd19500d6479",
+          "shader": "enc_stage_96_128_128_fl.spv",
+          "a": {
+            "code_hash": "77889bedc52be852",
+            "exec_bytes": 39696,
+            "vgprs": 256,
+            "scratch_bytes": 8
+          },
+          "b": {
+            "code_hash": "7faf85c05f35edfd",
+            "exec_bytes": 56828,
+            "vgprs": 256,
+            "scratch_bytes": 24
+          }
+        },
+        {
+          "key": "777985d1831329ca",
+          "shader": "dec_dfn_64_64_f.spv",
+          "a": {
+            "code_hash": "580c0978a783c337",
+            "exec_bytes": 29656,
+            "vgprs": 240,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "4c3ddf7e4812e2b8",
+            "exec_bytes": 51312,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "79ea9a0f90a74b24",
+          "shader": "dec_up_96_128_128_f_lt.spv",
+          "a": {
+            "code_hash": "4973be64f7f3f88d",
+            "exec_bytes": 30012,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "09632fdf387c7276",
+            "exec_bytes": 24592,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "81d017418fe547af",
+          "shader": "dec_dfn_160_256_f.spv",
+          "a": {
+            "code_hash": "4ead6d758a32112c",
+            "exec_bytes": 23120,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "f7cc0a9879d2f74d",
+            "exec_bytes": 31280,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "8207a2a6f176a4d8",
+          "shader": "dec_up_128_128_160_f.spv",
+          "a": {
+            "code_hash": "db8ac04104df53e0",
+            "exec_bytes": 27344,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "a1842245edea6249",
+            "exec_bytes": 30416,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "8cca057e36e2b4cc",
+          "shader": "enc_stage_64_64_96_f_lt.spv",
+          "a": {
+            "code_hash": "e757e30fc1d260ca",
+            "exec_bytes": 36620,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "3224ef3a3f1ea5cd",
+            "exec_bytes": 62452,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "8d07ac141832d300",
+          "shader": "enc_stage_96_128_128_f.spv",
+          "a": {
+            "code_hash": "3a611c4f7927cbe7",
+            "exec_bytes": 39048,
+            "vgprs": 256,
+            "scratch_bytes": 8
+          },
+          "b": {
+            "code_hash": "3371d18fbfcd4d93",
+            "exec_bytes": 56200,
+            "vgprs": 256,
+            "scratch_bytes": 24
+          }
+        },
+        {
+          "key": "941882166ce09254",
+          "shader": "dec_dfn_96_128_f_lt.spv",
+          "a": {
+            "code_hash": "6cf4e1b1f3e0bc03",
+            "exec_bytes": 25972,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "004b055aa1cc448b",
+            "exec_bytes": 35256,
+            "vgprs": 256,
+            "scratch_bytes": 16
+          }
+        },
+        {
+          "key": "94faa2ccbba8501e",
+          "shader": "dec_up_96_128_128_fl.spv",
+          "a": {
+            "code_hash": "1647c94f8c80607c",
+            "exec_bytes": 31836,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "814d6f757e237966",
+            "exec_bytes": 26296,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "9b09c8e4e1c7b892",
+          "shader": "dec_dfn_96_128_fl_lt.spv",
+          "a": {
+            "code_hash": "b9e6894e6d159a22",
+            "exec_bytes": 27560,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "83db31fdcf141084",
+            "exec_bytes": 36764,
+            "vgprs": 256,
+            "scratch_bytes": 16
+          }
+        },
+        {
+          "key": "9cfa240f087e7153",
+          "shader": "enc_stage_128_128_160_f_lt.spv",
+          "a": {
+            "code_hash": "89e613da345f7188",
+            "exec_bytes": 35592,
+            "vgprs": 240,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "69cbfc5369042452",
+            "exec_bytes": 42800,
+            "vgprs": 240,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "a1da9aadc8fc409c",
+          "shader": "enc0_stage_32_64_f_w_lt.spv",
+          "a": {
+            "code_hash": "da40447591d05a64",
+            "exec_bytes": 25128,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "f9bb7acb59498028",
+            "exec_bytes": 31356,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "a536c1aee1b5b373",
+          "shader": "dec_dfn_128_128_f.spv",
+          "a": {
+            "code_hash": "c51f4a7bfbe82048",
+            "exec_bytes": 28172,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "44a681fcc530db9d",
+            "exec_bytes": 32128,
+            "vgprs": 256,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "a89b668e3da09f5b",
+          "shader": "dec_dfn_160_256_fl.spv",
+          "a": {
+            "code_hash": "ca3eac984ab25730",
+            "exec_bytes": 24624,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "68584aa1940fff22",
+            "exec_bytes": 32764,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "addffdc4c6b922e8",
+          "shader": "dec_up_32_64_64_f.spv",
+          "a": {
+            "code_hash": "b5d3e1afde630213",
+            "exec_bytes": 28032,
+            "vgprs": 216,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "29bd5fe577a03b6a",
+            "exec_bytes": 40080,
+            "vgprs": 240,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "b799ea871f0212a5",
+          "shader": "dec_head_32_64_f.spv",
+          "a": {
+            "code_hash": "4b3029b1f62f1b1d",
+            "exec_bytes": 27176,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "6d36ec31cf3696d7",
+            "exec_bytes": 31420,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "b7dd12c10dab8afb",
+          "shader": "dec_up_32_64_64_f_lt.spv",
+          "a": {
+            "code_hash": "316a9352d562c334",
+            "exec_bytes": 25532,
+            "vgprs": 216,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "8787a244468bca05",
+            "exec_bytes": 36900,
+            "vgprs": 216,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "c29f41aeb581fce8",
+          "shader": "dec_dfn_160_256_f_lt.spv",
+          "a": {
+            "code_hash": "71878601c9cdc311",
+            "exec_bytes": 22964,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "c3894124d7f492b1",
+            "exec_bytes": 31232,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "c5ef1c72a8fa61ac",
+          "shader": "enc_stage_160_256_0_fl.spv",
+          "a": {
+            "code_hash": "1768214d2b760720",
+            "exec_bytes": 23636,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "08a6012dc46fabda",
+            "exec_bytes": 31776,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "caa3f6091e490cda",
+          "shader": "dec_up_96_128_128_fl_lt.spv",
+          "a": {
+            "code_hash": "f59fabdfd44c6570",
+            "exec_bytes": 31416,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "655103e3954071da",
+            "exec_bytes": 26216,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "d4cad4131a9d2071",
+          "shader": "dec_up_160_256_160_f_lt.spv",
+          "a": {
+            "code_hash": "430936089c693f50",
+            "exec_bytes": 23212,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "4f39824add4166c8",
+            "exec_bytes": 29616,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "d80cf61e2f2f74ec",
+          "shader": "enc_stage_160_256_160_fl_lt.spv",
+          "a": {
+            "code_hash": "4718ebf0b2808df7",
+            "exec_bytes": 31728,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "eaaf82d0cceca292",
+            "exec_bytes": 43400,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "da0466da433262b2",
+          "shader": "enc0_stage_32_64_f_w.spv",
+          "a": {
+            "code_hash": "5e2796a28d4e2c66",
+            "exec_bytes": 27864,
+            "vgprs": 216,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "5ba51cddc21d752f",
+            "exec_bytes": 34860,
+            "vgprs": 216,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "f2418b8d764403b6",
+          "shader": "enc_stage_160_256_0_fl_lt.spv",
+          "a": {
+            "code_hash": "094d5dec4c32fee5",
+            "exec_bytes": 23516,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "a8824a0709ca15cb",
+            "exec_bytes": 31808,
+            "vgprs": 192,
+            "scratch_bytes": 0
+          }
+        },
+        {
+          "key": "f6ccd66e59440a06",
+          "shader": "enc_stage_128_128_160_f.spv",
+          "a": {
+            "code_hash": "6dd0744fc7e535cb",
+            "exec_bytes": 35792,
+            "vgprs": 240,
+            "scratch_bytes": 0
+          },
+          "b": {
+            "code_hash": "40fc6d6f27417459",
+            "exec_bytes": 43004,
+            "vgprs": 240,
+            "scratch_bytes": 0
+          }
+        }
+      ]
+    }
+  }
+}

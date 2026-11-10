@@ -142,5 +142,12 @@ mkdir -p -- "$out/b2_base" "$out/b2_post_exp" "$out/b2_post_log" "$out/b2_attr_r
 "$cxx" -std=c++20 -O2 -DNDEBUG -Iruntime/include runtime/bench/openrr_bench.cpp \
     -ld3d12 -ldxgi -lole32 -lshell32 -static -static-libgcc -static-libstdc++ -o "$out/openrr_bench.exe"
 
+# Offline ACO packaging. Native Mesa stays outside the Windows package.
+if [[ "${OPENRR_BUILD_ACO:-1}" == "1" ]]; then
+    bash asi/build/mesa/build_capture.sh
+    python3 asi/build/build_aco_records.py --out "$stage/openrr-amd/aco" \
+        --precision "${OPENRR_ACO_PRECISION:-global}" --matrix-loads "${OPENRR_ACO_MATRIX_LOADS:-vector8}" \
+        "$stage/openrr-amd/shaders" "$out/occ_nopad" "$out/occ_pad16k" "$out"/b2_*
+fi
 echo "Built $stage/plugins/openrr-amd.asi ($(stat -c %s "$stage/plugins/openrr-amd.asi") bytes, $count Vulkan entry points resolved lazily)"
 echo "Exports: $("$objdump" -p "$stage/plugins/openrr-amd.asi" | grep -c 'InitializeASI')  Imports: $("$objdump" -p "$stage/plugins/openrr-amd.asi" | grep 'DLL Name' | awk '{print $3}' | tr '\n' ' ')"

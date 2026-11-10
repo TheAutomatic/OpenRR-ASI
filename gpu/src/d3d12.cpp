@@ -7,6 +7,7 @@
 #include <dxgi1_6.h>
 
 #include "opennr_rr/d3d12.hpp"
+#include "rr_pal_binary.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -272,6 +273,8 @@ D3dDevice::~D3dDevice() {
 
 bool D3dDevice::init(ID3D12Device* dev, Device* compiler, const std::wstring& cache_dir, std::string& err) {
     try {
+        aco_enabled_ = true;
+        aco_strict_ = true;
         dev_ = dev;
         dev_->AddRef();
         ++g_live_d3d_devices;
@@ -570,10 +573,18 @@ uint64_t D3dDevice::bind(ID3D12GraphicsCommandList* cl, uint32_t slot) {
         const uint64_t base_desc = uint64_t(desc_slot_) * kSlotStride * 32;
         desc_lo_ = uint32_t(heap_gpu_ + base_desc);
         table_lo_ = desc_lo_ + kSlotViews * 32;
-        // only a heap init_sampler found CPU-writable: under ReShade's add-on hooks its CPU handle is not memory
-        if (srd_ok_) memcpy(reinterpret_cast<uint8_t*>(heap_cpu_ + base_desc + kSlotViews * 32), tex_table_, sizeof(tex_table_));
+        if (srd_ok_) {
+memcpy(reinterpret_cast<uint8_t*>(heap_cpu_ + base_desc + kSlotViews * 32), tex_table_, sizeof(tex_table_));
+        aco_table_lo_ = table_lo_ + kTableViews * 32;
+        auto* aco_table = reinterpret_cast<uint8_t*>(heap_cpu_ + base_desc + (kSlotViews + kTableViews) * 32);
+        memset(aco_table, 0, kAcoTableViews * 32);
+        for (unsigned i = 0; i < 8; ++i) {
+            memcpy(aco_table + i * 64, tex_table_[i], 32);
+            memcpy(aco_table + i * 64 + 48, tex_table_[i] + 32, 16);
+        }
+        }
     } else {
-        desc_lo_ = table_lo_ = 0;
+        desc_lo_ = table_lo_ = aco_table_lo_ = 0;
     }
     bound_ = nullptr;
     dirty_ = false;
@@ -621,6 +632,7 @@ Buffer D3dDevice::create(VkDeviceSize size) {
     b.addr = r->GetGPUVirtualAddress();
     b.size = size;
     bytes_ += size;
+    if (dispatch_probe_) probe_buffers_[b.addr] = b;
     return b;
 }
 
@@ -631,10 +643,12 @@ Buffer D3dDevice::create_unzeroed(VkDeviceSize size) {
     b.addr = r->GetGPUVirtualAddress();
     b.size = size;
     bytes_ += size;
+    if (dispatch_probe_) probe_buffers_[b.addr] = b;
     return b;
 }
 
 void D3dDevice::destroy(Buffer& b) {
+    probe_buffers_.erase(b.addr);
     if (b.res && bytes_ >= b.size) bytes_ -= b.size;
     bury(static_cast<ID3D12Resource*>(b.res));
     b = Buffer{};
@@ -861,8 +875,89 @@ std::vector<uint8_t> D3dDevice::elf_of(const std::string& spv_path, uint32_t sub
     return elf;
 }
 
+void D3dDevice::set_compiler(bool aco, bool strict) {
+    const bool enabled = aco || strict;
+    if (enabled != aco_enabled_ && clear_range_.pso) {
+        if (bound_ == &clear_range_) bound_ = nullptr;
+        bury(static_cast<ID3D12PipelineState*>(clear_range_.pso));
+        clear_range_ = Kernel{};
+    }
+    aco_enabled_ = enabled;
+    aco_strict_ = enabled;
+}
+
 Kernel D3dDevice::load(const std::string& spv_path, uint32_t subgroup) {
     const std::string stem = path_to_u8(u8_to_path(spv_path).stem());
+    Kernel k;
+    k.name = spv_path;
+    k.views = stem.rfind("d3d_", 0) == 0;
+    auto spv = pal::load(spv_path);
+    const auto key = hex(pal::hash(spv.data(), spv.size()));
+    auto log_compiler = [&](const std::string& message) {
+        const auto line = "[openrr compiler] " + stem + " spv=" + key + " " + message + "\n";
+        OutputDebugStringA(line.c_str());
+        std::fputs(line.c_str(), stderr);
+        if (compiler_log_) compiler_log_(line.substr(0, line.size() - 1));
+    };
+    if (aco_enabled_) {
+        try {
+            auto root = u8_to_path(spv_path).parent_path().parent_path() / "aco" / "gfx1201" / "openrr-d3d12-v1";
+            if (const char* dir = getenv("ONR_ACO_DIR")) root = u8_to_path(dir);
+            const auto index = pal::unpack(pal::load(path_to_u8(root / "manifest.msgpack")));
+            auto number = [&](const char* field, uint64_t expected) {
+                pal::require(index.at(field).number() == expected, "ACO manifest configuration mismatch");
+            };
+            number("schema", 1); number("wave_size", 32); number("layout_push_bytes", 256);
+            const auto patch_version = index.at("patch_version").number();
+            pal::require(patch_version == 3 || patch_version == 4, "unsupported ACO capture patch version");
+            pal::require(index.at("target").s == "gfx1201" && index.at("layout_version").s == "openrr-d3d12-v1" &&
+                         index.at("mesa_commit").s == "96cb43121031992b85767f9c1be8f3f48e22b1d2", "ACO manifest provenance mismatch");
+            const auto json = pal::load(path_to_u8(root / "manifest.json"));
+            pal::require(pal::hash(json.data(), json.size()) == index.at("manifest_hash").number(), "ACO manifest checksum mismatch");
+            const auto& entry = index.at("records").at(key);
+            pal::require(entry.at("spv_hash").s == key && entry.at("record").s == key + ".nrp" &&
+                         entry.at("layout").s == (k.views ? "views" : "sampled"), "ACO record identity mismatch");
+            const auto record = pal::Record::parse(pal::load(path_to_u8(root / (key + ".nrp"))));
+            pal::require(record.spv_hash == pal::hash(spv.data(), spv.size()) && hex(record.code_hash) == entry.at("code_hash").s &&
+                         record.mach == 0x4e && record.push_bytes <= kMaxPushBytes, "ACO record does not match SPIR-V/target/ABI");
+            // gfx1201 uses hardware scratch_* addressing; RADV adds no scratch
+            // SGPR on gfx11+. PAL allocates the per-thread size from metadata.
+            pal::require(record.scratch_en == (record.scratch_bytes != 0) && record.scratch_bytes % 4 == 0,
+                         "ACO scratch configuration mismatch");
+            const auto& dims = entry.at("workgroup");
+            pal::require(dims.kind == pal::Value::Array && dims.items.size() == 3, "ACO workgroup dimensions");
+            std::array<uint32_t,3> wg{};
+            for (unsigned i = 0; i < 3; ++i) { auto n = dims.items[i].number(); pal::require(n > 0 && n <= 1024, "ACO dimension range"); wg[i] = uint32_t(n); }
+            // ACO replaces the entire entry and resources. Use the small, relocation-free
+            // compute container; LLPC may emit auxiliary constant symbols for network kernels.
+            auto template_path = u8_to_path(spv_path).parent_path() / "clear_range.spv";
+            if (!std::filesystem::exists(template_path))
+                template_path = root.parent_path().parent_path().parent_path() / "shaders" / "clear_range.spv";
+            auto binary = elf_of(path_to_u8(template_path), 32);
+            if (const char* dump = getenv("ONR_ACO_DUMP")) {
+                std::filesystem::create_directories(u8_to_path(dump));
+                std::ofstream f(u8_to_path(dump) / (key + ".template.elf"), std::ios::binary);
+                f.write(reinterpret_cast<const char*>(binary.data()), std::streamsize(binary.size()));
+            }
+            pal::require(pal::Elf(binary).mach == 0x4e, "ACO is validated only for gfx1201");
+            binary = pal::splice(binary, record, 256, wg, 4);
+            AmdElfInfo info;
+            info.elf = binary.data(); info.size = binary.size();
+            std::copy(wg.begin(), wg.end(), info.threads);
+            ID3D12PipelineState* pso = nullptr;
+            const auto hr = static_cast<AmdDevice5*>(ext_)->CreateComputePipelineFromElf(&info, IID_PPV_ARGS(&pso));
+            if (FAILED(hr)) { release(pso); check(hr, "ACO CreateComputePipelineFromElf"); }
+            pal::require(pso != nullptr, "ACO import returned no pipeline");
+            k.pso = pso; k.aco = true;
+            log_compiler("compiler=ACO record=" + path_to_u8(root / (key + ".nrp")) + " code=" + hex(record.code_hash) +
+                         " rsrc1=" + hex(record.rsrc1) + " scratch=" + std::to_string(record.scratch_bytes) +
+                         " manifest=" + path_to_u8(root / "manifest.json"));
+            if (stem == "clear_range" && !clear_range_.pso) { pso->AddRef(); clear_range_ = k; }
+            return k;
+        } catch (const std::exception& e) {
+            throw std::runtime_error(stem + ": required ACO: " + e.what());
+        }
+    } else log_compiler("compiler=LLPC");
     std::vector<uint8_t> elf = elf_of(spv_path, subgroup);
     std::vector<uint8_t> patched;
     try {
@@ -874,9 +969,6 @@ Kernel D3dDevice::load(const std::string& spv_path, uint32_t subgroup) {
     info.elf = patched.data();
     info.size = patched.size();
     elf_threads(elf, info.threads);
-    Kernel k;
-    k.name = spv_path;
-    k.views = stem.rfind("d3d_", 0) == 0;
     ID3D12PipelineState* pso = nullptr;
     check(static_cast<AmdDevice5*>(ext_)->CreateComputePipelineFromElf(&info, IID_PPV_ARGS(&pso)), "CreateComputePipelineFromElf");
     k.pso = pso;
@@ -896,17 +988,23 @@ void D3dDevice::bind_kernel(const Kernel& k, const void* push, uint32_t push_siz
     if (!cl_) throw std::runtime_error("D3dDevice: recording outside bind()");
     if (bound_ != &k) cl_->SetPipelineState(static_cast<ID3D12PipelineState*>(k.pso)), bound_ = &k;
     uint32_t rc[kRootDwords];
-    root_constants(push, push_size, rc);
-    rc[61] = k.views ? desc_lo_ : table_lo_;
+    if (k.aco) {
+        if (push_size > kMaxPushBytes) throw std::runtime_error("ACO push constants past 244 bytes");
+        memset(rc, 0, sizeof rc);
+        if (push_size) memcpy(rc, push, push_size);
+    } else root_constants(push, push_size, rc);
+    rc[61] = k.views ? desc_lo_ : k.aco ? aco_table_lo_ : table_lo_;
     cl_->SetComputeRoot32BitConstants(0, kRootDwords, rc, 0);
 }
 
 void D3dDevice::dispatch(const Kernel& k, const void* push, uint32_t push_size, uint32_t gx, uint32_t gy, uint32_t gz) {
+    if (dispatch_probe_) { auto probe = dispatch_probe_; probe(k, push, push_size, gx, gy, gz); return; }
     bind_kernel(k, push, push_size);
     if (per_dispatch_) stamp_names.push_back(k.name.substr(k.name.find_last_of("\\/") + 1) + "@" + std::to_string(nquery_)), stamp();
     cl_->Dispatch(gx, gy, gz);
     if (per_dispatch_) stamp();
     dirty_ = true;
+    if (dispatch_trace_) dispatch_trace_(k, push, push_size, gx, gy, gz, false);
 }
 
 void D3dDevice::dispatch_indirect(const Kernel& k, const void* push, uint32_t push_size, const Buffer& args, VkDeviceSize off) {
@@ -921,6 +1019,7 @@ void D3dDevice::dispatch_indirect(const Kernel& k, const void* push, uint32_t pu
     std::swap(t.Transition.StateBefore, t.Transition.StateAfter);
     cl_->ResourceBarrier(1, &t);
     dirty_ = true;
+    if (dispatch_trace_) dispatch_trace_(k, push, push_size, 0, 0, 0, true);
 }
 
 void D3dDevice::srv(ID3D12Resource* r, uint32_t index, uint32_t fmt) {
@@ -1029,6 +1128,11 @@ void D3dDevice::set_texture(uint32_t slot, const Image& i, VkSampler s) {
     if (cl_ && heap_)
         memcpy(reinterpret_cast<uint8_t*>(heap_cpu_ + (uint64_t(desc_slot_) * kSlotStride + kSlotViews) * 32 + slot * 48),
                it->second.data(), 48);
+    if (cl_ && heap_) {
+        auto* aco = reinterpret_cast<uint8_t*>(heap_cpu_ + (uint64_t(desc_slot_) * kSlotStride + kSlotViews + kTableViews) * 32 + slot * 64);
+        memcpy(aco, it->second.data(), 32);
+        memcpy(aco + 48, it->second.data() + 32, 16);
+    }
 }
 
 void D3dDevice::barrier() {

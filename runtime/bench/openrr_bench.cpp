@@ -21,6 +21,7 @@
 #include <fstream>
 #include <numeric>
 #include <regex>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -344,12 +345,14 @@ struct BenchResult
     double processVramDeltaMbDrs = 0.0;
     std::vector<uint16_t> steadyPixels;
     std::vector<uint16_t> drsPixels;
+    std::vector<fs::path> frameOutputs;
 };
 
 BenchResult RunRuntimeBench(const std::string& label, const fs::path& dllPath, const fs::path& dataDir, const fs::path& dlssdPath,
                             const fs::path& outDir, uint32_t maxRenderW, uint32_t maxRenderH, uint32_t outW, uint32_t outH,
                             uint32_t warmupFrames, uint32_t steadyFrames, uint32_t drsFrames, const std::wstring& backendStr = L"d3d12",
-                            int32_t fastMode = 0, bool optionalGuides = false)
+                            int32_t fastMode = 0, bool optionalGuides = false, uint32_t compiler = 0, bool parityAllFrames = false,
+                            int32_t traceFrame = -1, bool alignPhase = false)
 {
     const fs::path absDllPath = fs::absolute(dllPath);
     HMODULE mod = LoadLibraryExW(absDllPath.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
@@ -364,6 +367,8 @@ BenchResult RunRuntimeBench(const std::string& label, const fs::path& dllPath, c
     Require(getApi(ONR_RR_ABI_VERSION_4, &api4.v3.v2.v1) == ONR_RR_OK, "OnrRrGetApi(v4) failed");
     auto setFastMode = reinterpret_cast<decltype(&OnrRrSetFastMode)>(GetProcAddress(mod, "OnrRrSetFastMode"));
     auto getFastMode = reinterpret_cast<decltype(&OnrRrGetFastMode)>(GetProcAddress(mod, "OnrRrGetFastMode"));
+    auto diagnostic = reinterpret_cast<int32_t(*)(void*,uint32_t,uint64_t*)>(GetProcAddress(mod, "OnrRrDiagnostic"));
+    Require((traceFrame<0 && !alignPhase) || diagnostic, "Runtime lacks OnrRrDiagnostic");
     auto notifyListReset = reinterpret_cast<void(*)(void*, void*)>(GetProcAddress(mod, "OnrRrNotifyD3d12ListReset"));
     auto notifyAllocReset = reinterpret_cast<void(*)(void*)>(GetProcAddress(mod, "OnrRrNotifyD3d12AllocatorReset"));
     auto notifyListReleased = reinterpret_cast<void(*)(void*)>(GetProcAddress(mod, "OnrRrNotifyD3d12ListReleased"));
@@ -435,6 +440,7 @@ BenchResult RunRuntimeBench(const std::string& label, const fs::path& dllPath, c
     OnrRrCreateInfo ci {};
     ci.size = sizeof(ci);
     ci.mode = ONR_RR_MODE_FAST;
+    ci.compiler = compiler;
     ci.d3d12_device = dev.Get();
     ci.max_render_width = maxRenderW;
     ci.max_render_height = maxRenderH;
@@ -460,7 +466,15 @@ BenchResult RunRuntimeBench(const std::string& label, const fs::path& dllPath, c
     if (notifyListReset) notifyListReset(cl2.Get(), ca2.Get());
     Check(cl2->Close(), "Close initial 2");
 
+    std::ofstream states(outDir / (label+"-frame-state.csv"));
+    states<<"call,phase,phase_index,engine_before,engine_after,render_w,render_h,reset,trace\n";
+    std::string phaseName="building";uint32_t phaseIndex=0,call=0;int32_t traceIndex=-1;
     auto runOneFrame = [&](uint32_t rw, uint32_t rh, bool reset) -> double {
+        uint64_t before=0,after=0;
+        if(diagnostic)Require(diagnostic(ctx,0,&before)==ONR_RR_OK,"Diagnostic phase query failed");
+        const bool trace=traceFrame>=0 && traceIndex==traceFrame;
+        const auto tracePath=fs::absolute(outDir/(label+"-trace-"+std::to_string(traceIndex)));
+        SetEnvironmentVariableW(L"ONR_RR_TRACE_PATH",trace?tracePath.c_str():nullptr);
         OnrRrFrame f {};
         f.size = sizeof(f);
         f.flags = ONR_RR_FRAME_HW_DEPTH | ONR_RR_FRAME_DEPTH_INVERTED | ONR_RR_FRAME_ROUGHNESS_PACKED | (reset ? ONR_RR_FRAME_RESET : 0u);
@@ -533,6 +547,9 @@ BenchResult RunRuntimeBench(const std::string& label, const fs::path& dllPath, c
             Check(q->Signal(fence.Get(), ++fv), "Signal");
             WaitForFence(dev.Get(), fence.Get(), fv, "runOneFrame(Vulkan)");
         }
+        SetEnvironmentVariableW(L"ONR_RR_TRACE_PATH",nullptr);
+        if(diagnostic)Require(diagnostic(ctx,trace?1:0,&after)==ONR_RR_OK,"Diagnostic readback/phase query failed");
+        states<<call++<<','<<phaseName<<','<<phaseIndex++<<','<<before<<','<<after<<','<<rw<<','<<rh<<','<<reset<<','<<trace<<'\n';
         uint64_t ts[2] {};
         void* m = nullptr;
         Check(qrb->Map(0, nullptr, &m), "Map timestamps");
@@ -563,20 +580,39 @@ BenchResult RunRuntimeBench(const std::string& label, const fs::path& dllPath, c
     Require(readyInfo.backend == (wantVulkan ? ONR_RR_BACKEND_VULKAN : ONR_RR_BACKEND_D3D12), "Unexpected OpenRR backend");
 
     // Warmup
+    if(alignPhase)Require(diagnostic(ctx,2,nullptr)==ONR_RR_OK,"Diagnostic phase alignment failed");
+    phaseName="warmup";phaseIndex=0;traceIndex=0;
     for (uint32_t i = 0; i < warmupFrames; ++i)
-        runOneFrame(maxRenderW, maxRenderH, i == 0);
+    {runOneFrame(maxRenderW, maxRenderH, i == 0);++traceIndex;}
 
+    BenchResult res;
+    res.label = label;
+    auto captureFrame = [&](const char* phase, uint32_t index) {
+        if (!parityAllFrames) return;
+        auto pixels = ReadbackTextureHalf(dev.Get(), q.Get(), ca.Get(), cl.Get(), fence.Get(), fv, output, notifyAllocReset, notifyListReset);
+        ValidateOutputPixels(pixels, label + " " + phase + " frame " + std::to_string(index));
+        auto path = outDir / (label + "-" + phase + "-" + std::to_string(index) + ".bin");
+        std::ofstream file(path, std::ios::binary);
+        file.write(reinterpret_cast<const char*>(pixels.data()), pixels.size()*sizeof(uint16_t));
+        Require(bool(file), "Cannot write per-frame parity output");
+        res.frameOutputs.push_back(path);
+    };
+    // Per-frame readbacks are outside GPU timestamp intervals but perturb
+    // scheduling. Use a separate run without this option for throughput.
     // Steady-state measurement at maxRenderW x maxRenderH
     std::vector<double> steadySamples;
+    phaseName="steady";phaseIndex=0;
     steadySamples.reserve(steadyFrames);
     for (uint32_t i = 0; i < steadyFrames; ++i)
+    {
         steadySamples.push_back(runOneFrame(maxRenderW, maxRenderH, false));
+        captureFrame("steady", i);
+        ++traceIndex;
+    }
 
     const uint64_t vramSteady = QueryProcessVramBytes(ad3.Get());
     const double selfMbSteady = ParseFeatureSelfMbFromLog(logPath);
 
-    BenchResult res;
-    res.label = label;
     res.steadyPixels = ReadbackTextureHalf(dev.Get(), q.Get(), ca.Get(), cl.Get(), fence.Get(), fv, output, notifyAllocReset, notifyListReset);
     ValidateOutputPixels(res.steadyPixels, label + " steady");
 
@@ -584,12 +620,15 @@ BenchResult RunRuntimeBench(const std::string& label, const fs::path& dllPath, c
     const uint32_t drsW = (maxRenderW * 85 / 100) & ~1u;
     const uint32_t drsH = (maxRenderH * 85 / 100) & ~1u;
     std::vector<double> drsSamples;
+    phaseName="drs";phaseIndex=0;
     drsSamples.reserve(drsFrames);
     for (uint32_t i = 0; i < drsFrames; ++i)
     {
         const bool lower = ((i / 4) & 1) != 0;
         const bool switched = (i % 4) == 0;
         drsSamples.push_back(runOneFrame(lower ? drsW : maxRenderW, lower ? drsH : maxRenderH, switched));
+        captureFrame("drs", i);
+        ++traceIndex;
     }
 
     const uint64_t vramDrs = QueryProcessVramBytes(ad3.Get());
@@ -648,6 +687,16 @@ try
     std::wstring backendStr = L"d3d12";
     int32_t fastMode = 1;
     bool optionalGuides = false;
+    bool parityAllFrames = false;
+    int32_t traceFrame=-1;bool alignPhase=false;
+    uint32_t baselineCompiler = 1, candidateCompiler = 0;
+    auto parseCompiler = [](const std::wstring& value) -> uint32_t {
+        if (value == L"env") return 0;
+        if (value == L"llpc") return 1;
+        if (value == L"aco") return 2;
+        if (value == L"aco-strict") return 3;
+        throw std::runtime_error("Compiler must be env, llpc, aco, or aco-strict");
+    };
 
     for (int i = 1; i < argc; ++i)
     {
@@ -655,6 +704,8 @@ try
         Require(i + 1 < argc, "Missing argument value");
         if (arg == L"--runtime") runtimePath = argv[++i];
         else if (arg == L"--baseline-runtime") baselinePath = argv[++i];
+        else if (arg == L"--baseline-compiler") baselineCompiler = parseCompiler(argv[++i]);
+        else if (arg == L"--candidate-compiler") candidateCompiler = parseCompiler(argv[++i]);
         else if (arg == L"--data-dir") dataDir = argv[++i];
         else if (arg == L"--baseline-data-dir") baselineDataDir = argv[++i];
         else if (arg == L"--dlssd") dlssdPath = argv[++i];
@@ -669,6 +720,9 @@ try
         else if (arg == L"--backend") backendStr = argv[++i];
         else if (arg == L"--fast-mode") fastMode = std::stol(argv[++i]);
         else if (arg == L"--optional-guides") optionalGuides = std::stol(argv[++i]) != 0;
+        else if (arg == L"--parity-all-frames") parityAllFrames = std::stol(argv[++i]) != 0;
+        else if (arg == L"--trace-frame") traceFrame = std::stol(argv[++i]);
+        else if (arg == L"--align-engine-phase") alignPhase = std::stol(argv[++i]) != 0;
         else throw std::runtime_error("Unknown option");
     }
     if (baselineDataDir.empty()) baselineDataDir = dataDir;
@@ -685,19 +739,22 @@ try
     if (hasBase)
     {
         Require(fs::exists(baselinePath), "Baseline runtime module not found: " + baselinePath.string());
-        baseRes = RunRuntimeBench("baseline", baselinePath, baselineDataDir, dlssdPath, outDir, rw, rh, ow, oh, warmup, steady, drs, backendStr, fastMode, optionalGuides);
+        baseRes = RunRuntimeBench("baseline", baselinePath, baselineDataDir, dlssdPath, outDir, rw, rh, ow, oh, warmup, steady, drs, backendStr, fastMode, optionalGuides, baselineCompiler, parityAllFrames, traceFrame, alignPhase);
         std::printf("[baseline] steady: mean=%.3f ms, median=%.3f ms, p95=%.3f ms, max=%.3f ms | DRS: mean=%.3f ms, median=%.3f ms, p95=%.3f ms, max=%.3f ms | VRAM: feature=%.1f MB (DRS %.1f MB), proc_delta=%.1f MB\n",
                     baseRes.steadyGpuMs.mean, baseRes.steadyGpuMs.median, baseRes.steadyGpuMs.p95, baseRes.steadyGpuMs.max,
                     baseRes.drsGpuMs.mean, baseRes.drsGpuMs.median, baseRes.drsGpuMs.p95, baseRes.drsGpuMs.max,
                     baseRes.featureSelfMbSteady, baseRes.featureSelfMbDrs, baseRes.processVramDeltaMbSteady);
     }
 
-    BenchResult candRes = RunRuntimeBench("candidate", runtimePath, dataDir, dlssdPath, outDir, rw, rh, ow, oh, warmup, steady, drs, backendStr, fastMode, optionalGuides);
+    BenchResult candRes = RunRuntimeBench("candidate", runtimePath, dataDir, dlssdPath, outDir, rw, rh, ow, oh, warmup, steady, drs, backendStr, fastMode, optionalGuides, candidateCompiler, parityAllFrames, traceFrame, alignPhase);
     std::printf("[candidate] steady: mean=%.3f ms, median=%.3f ms, p95=%.3f ms, max=%.3f ms | DRS: mean=%.3f ms, median=%.3f ms, p95=%.3f ms, max=%.3f ms | VRAM: feature=%.1f MB (DRS %.1f MB), proc_delta=%.1f MB\n",
                 candRes.steadyGpuMs.mean, candRes.steadyGpuMs.median, candRes.steadyGpuMs.p95, candRes.steadyGpuMs.max,
                 candRes.drsGpuMs.mean, candRes.drsGpuMs.median, candRes.drsGpuMs.p95, candRes.drsGpuMs.max,
                 candRes.featureSelfMbSteady, candRes.featureSelfMbDrs, candRes.processVramDeltaMbSteady);
 
+    bool parityPassed = true;
+    std::string parityFailure;
+    std::ostringstream parityJson;
     if (hasBase)
     {
         auto isFiniteHalf = [](uint16_t h) -> bool {
@@ -739,9 +796,6 @@ try
                     ++rgbCount;
                 }
             }
-            Require(baseNonFinite == 0 && candNonFinite == 0,
-                    std::string(phase) + " output contains non-finite half-floats (base=" +
-                    std::to_string(baseNonFinite) + ", cand=" + std::to_string(candNonFinite) + ")");
             std::sort(absErrs.begin(), absErrs.end());
             const double p99AbsErr = absErrs.empty() ? 0.0 : double(absErrs[size_t(absErrs.size() * 99 / 100)]);
             const double maxAbsErr = absErrs.empty() ? 0.0 : double(absErrs.back());
@@ -750,19 +804,47 @@ try
             const double psnrTm = (seTm > 0.0 && rgbCount > 0) ? 10.0 * std::log10(1.0 / (seTm / double(rgbCount))) : 999.0;
             std::printf("[parity] %s output pixels (%zu half-floats, non_finite=%zu): exact=%.6f%% (differing=%zu), max_ulp_diff=%u, PSNR_01=%.2f dB, PSNR_tonemap=%.2f dB, p99_abs_err=%.6f, max_abs_err=%.6f\n",
                         phase, bVec.size(), candNonFinite, exactPct, diffCount, maxUlpDiff, psnr01, psnrTm, p99AbsErr, maxAbsErr);
-            if (fastMode == 0)
-                Require(maxUlpDiff == 0, std::string(phase) + " Legacy output parity failed (max_ulp_diff > 0)");
-            else
-                Require(psnr01 >= 54.0 && psnrTm >= 58.0 && p99AbsErr <= 0.006,
-                        std::string(phase) + " Fast mode quality gate failed (require PSNR_01 >= 54 dB, PSNR_tonemap >= 58 dB, p99_abs_err <= 0.006)");
+            const bool passed = baseNonFinite == 0 && candNonFinite == 0 &&
+                (fastMode == 0 ? maxUlpDiff == 0 : psnr01 >= 54.0 && psnrTm >= 58.0 && p99AbsErr <= 0.006);
+            if (!passed) {
+                parityPassed = false;
+                parityFailure += std::string(phase) + (fastMode == 0 ? " Legacy exact parity failed; " : " Fast quality gate failed; ");
+            }
+            if (parityJson.tellp() > 0) parityJson << ",\n";
+            parityJson << "    \"" << phase << "\": {\"passed\": " << (passed ? "true" : "false")
+                << ", \"baseline_non_finite\": " << baseNonFinite << ", \"candidate_non_finite\": " << candNonFinite
+                << ", \"exact_percent\": " << exactPct << ", \"max_ulp_diff\": " << maxUlpDiff
+                << ", \"psnr_01\": " << psnr01 << ", \"psnr_tonemap\": " << psnrTm
+                << ", \"p99_abs_err\": " << p99AbsErr << ", \"max_abs_err\": " << maxAbsErr << "}";
         };
         checkParity(baseRes.steadyPixels, candRes.steadyPixels, "steady");
         checkParity(baseRes.drsPixels, candRes.drsPixels, "drs");
+        Require(baseRes.frameOutputs.size() == candRes.frameOutputs.size(), "Per-frame parity count mismatch");
+        for (size_t i=0;i<baseRes.frameOutputs.size();++i) {
+            auto readPixels=[](const fs::path& path){
+                std::ifstream file(path,std::ios::binary|std::ios::ate);
+                Require(bool(file),"Cannot read parity output");auto n=file.tellg();
+                Require(n>0 && n%2==0,"Invalid parity output size");
+                std::vector<uint16_t> pixels(size_t(n)/2);file.seekg(0);
+                file.read(reinterpret_cast<char*>(pixels.data()),n);Require(bool(file),"Truncated parity output");return pixels;
+            };
+            const auto phase=(i<steady?"steady_frame_":"drs_frame_")+std::to_string(i<steady?i:i-steady);
+            checkParity(readPixels(baseRes.frameOutputs[i]),readPixels(candRes.frameOutputs[i]),phase.c_str());
+        }
     }
 
     std::ofstream summary(outDir / "summary.json");
     summary << "{\n"
             << "  \"resolution\": \"" << rw << "x" << rh << "->" << ow << "x" << oh << "\",\n"
+            << "  \"baseline_compiler\": " << baselineCompiler << ",\n"
+            << "  \"candidate_compiler\": " << candidateCompiler << ",\n"
+            << "  \"fast_mode\": " << fastMode << ",\n"
+            << "  \"parity_coverage\": \"" << (parityAllFrames?"all_measured_frames":"phase_last_frame") << "\",\n"
+            << "  \"warmup\": " << warmup << ", \"frames\": " << steady << ", \"drs_frames\": " << drs << ",\n"
+            << "  \"parity_passed\": " << (parityPassed ? "true" : "false") << ",\n"
+            << "  \"parity\": {\n" << parityJson.str() << "\n  },\n"
+            << "  \"baseline\": {\"steady_median_ms\": " << baseRes.steadyGpuMs.median
+            << ", \"steady_p95_ms\": " << baseRes.steadyGpuMs.p95 << ", \"drs_median_ms\": " << baseRes.drsGpuMs.median << "},\n"
             << "  \"candidate\": {\n"
             << "    \"steady_mean_ms\": " << candRes.steadyGpuMs.mean << ",\n"
             << "    \"steady_median_ms\": " << candRes.steadyGpuMs.median << ",\n"
@@ -775,6 +857,7 @@ try
             << "    \"process_vram_delta_mb\": " << candRes.processVramDeltaMbSteady << "\n"
             << "  }\n"
             << "}\n";
+    Require(parityPassed, parityFailure);
     return 0;
 }
 catch (const std::exception& e)

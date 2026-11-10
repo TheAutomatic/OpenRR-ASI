@@ -1,0 +1,8 @@
+{
+  "drs": 24,
+  "warmup": 24,
+  "baseline_role": "aco",
+  "round": 5,
+  "steady": 48,
+  "candidate_role": "llpc"
+}

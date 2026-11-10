@@ -1,0 +1,395 @@
+[PASS] Item #13: parse_key ('1'->0x31, '45'->0x2D, '0x2D'->0x2D, 'ctrl+5'->0x35+MOD_CONTROL, 'f5'->VK_F5)
+[PASS] Item R7/R8 (UTF-8 BOM & missing trailing newline in load_config_file + Ini): Enabled='false', appended Mode='legacy'
+[PASS] Item #12 (control) & R6 (untracked reset reason matched): ordinary command list accepted by split::prepare
+[PASS] Item #11: copied command-list and device vtables succeeded without recursion or E_FAIL
+[PASS] Item #12 (split barrier): BEGIN_ONLY rejected ('a split barrier is open in the command list'), END_ONLY accepted
+[PASS] Item #12 (enhanced barrier): rejected ('the command list recorded enhanced barrier')
+[PASS] Item #12 (RTAS): rejected ('the command list recorded RTAS build/copy/emit')
+[PASS] Item #12 (meta command): rejected ('the command list recorded meta command')
+[PASS] Item #12 (bundle propagation): rejected ('a split barrier is open in the command list')
+[INFO] D3D12 Direct GPU initialized on AMD Radeon RX 9070 XT (driver: 26.10.1 (LLPC))
+[openrr compiler] pooled_history2 spv=7fcd28c3e1986a33 compiler=LLPC
+[openrr compiler] ae spv=8053435623e90df5 compiler=LLPC
+[openrr compiler] enc0_attr_f spv=b7ec90ad9bb77d31 compiler=LLPC
+[openrr compiler] post_f spv=afe8e28b8283b96b compiler=LLPC
+[openrr compiler] downsample spv=1868a527fddfb730 compiler=LLPC
+[openrr compiler] downsample_tl spv=71f444e6a4c8f74a compiler=LLPC
+[openrr compiler] post_tile spv=350eb51855cd5995 compiler=LLPC
+[openrr compiler] dfn_export spv=5eff19ab0da39495 compiler=LLPC
+[openrr compiler] dfn_import spv=92deee5eb00fde72 compiler=LLPC
+[openrr compiler] post_dlt_f spv=f59fecb0c6c722dd compiler=LLPC
+[openrr compiler] enc0_stage_32_64_f spv=4f4d742046c9b6f1 compiler=LLPC
+[openrr compiler] enc_stage_64_64_96_f spv=59a8847a905b419b compiler=LLPC
+[openrr compiler] enc_stage_96_128_128_f spv=8d07ac141832d300 compiler=LLPC
+[openrr compiler] enc_stage_128_128_160_f spv=f6ccd66e59440a06 compiler=LLPC
+[openrr compiler] enc_stage_160_256_160_f spv=38501fcf01b1e652 compiler=LLPC
+[openrr compiler] enc_stage_160_256_0_f spv=0d775a6335a1b380 compiler=LLPC
+[openrr compiler] dec_up_160_256_160_f spv=6d872e31c95afce5 compiler=LLPC
+[openrr compiler] dec_dfn_160_256_f spv=81d017418fe547af compiler=LLPC
+[openrr compiler] dec_up_128_128_160_f spv=8207a2a6f176a4d8 compiler=LLPC
+[openrr compiler] dec_dfn_128_128_f spv=a536c1aee1b5b373 compiler=LLPC
+[openrr compiler] dec_up_96_128_128_f spv=7397e05f8c2da77a compiler=LLPC
+[openrr compiler] dec_dfn_96_128_f spv=50c4593efddb5754 compiler=LLPC
+[openrr compiler] dec_up_64_64_96_f spv=238fcc9bcf09fa55 compiler=LLPC
+[openrr compiler] dec_dfn_64_64_f spv=777985d1831329ca compiler=LLPC
+[openrr compiler] dec_up_32_64_64_f spv=addffdc4c6b922e8 compiler=LLPC
+[openrr compiler] dec_head_32_64_f spv=b799ea871f0212a5 compiler=LLPC
+[openrr compiler] clear_range spv=cffca948d4b28dac compiler=LLPC
+[openrr compiler] enc_stage_96_128_128_fl spv=7425bd19500d6479 compiler=LLPC
+[openrr compiler] enc_stage_128_128_160_fl spv=231bf803323201db compiler=LLPC
+[openrr compiler] enc_stage_160_256_160_fl spv=4d98a31a6a7789ad compiler=LLPC
+[openrr compiler] enc_stage_160_256_0_fl spv=c5ef1c72a8fa61ac compiler=LLPC
+[openrr compiler] dec_up_160_256_160_fl spv=09ae4164fbb15cf1 compiler=LLPC
+[openrr compiler] dec_dfn_160_256_fl spv=a89b668e3da09f5b compiler=LLPC
+[openrr compiler] dec_up_128_128_160_fl spv=6be5b3c53083b759 compiler=LLPC
+[openrr compiler] dec_dfn_128_128_fl spv=095787dd4133557e compiler=LLPC
+[openrr compiler] dec_up_96_128_128_fl spv=94faa2ccbba8501e compiler=LLPC
+[openrr compiler] dec_dfn_96_128_fl spv=608c28c0029891f3 compiler=LLPC
+[openrr compiler] pooled_history2 spv=7fcd28c3e1986a33 compiler=ACO record=7fcd28c3e1986a33.nrp
+[openrr compiler] ae spv=8053435623e90df5 compiler=ACO record=8053435623e90df5.nrp
+[openrr compiler] enc0_attr_f spv=b7ec90ad9bb77d31 compiler=ACO record=b7ec90ad9bb77d31.nrp
+[openrr compiler] post_f spv=afe8e28b8283b96b compiler=ACO record=afe8e28b8283b96b.nrp
+[openrr compiler] downsample spv=1868a527fddfb730 compiler=ACO record=1868a527fddfb730.nrp
+[openrr compiler] downsample_tl spv=71f444e6a4c8f74a compiler=ACO record=71f444e6a4c8f74a.nrp
+[openrr compiler] post_tile spv=350eb51855cd5995 compiler=ACO record=350eb51855cd5995.nrp
+[openrr compiler] dfn_export spv=5eff19ab0da39495 compiler=ACO record=5eff19ab0da39495.nrp
+[openrr compiler] dfn_import spv=92deee5eb00fde72 compiler=ACO record=92deee5eb00fde72.nrp
+[openrr compiler] post_dlt_f spv=f59fecb0c6c722dd compiler=ACO record=f59fecb0c6c722dd.nrp
+[openrr compiler] enc0_stage_32_64_f spv=4f4d742046c9b6f1 compiler=ACO record=4f4d742046c9b6f1.nrp
+[openrr compiler] enc_stage_64_64_96_f spv=59a8847a905b419b compiler=ACO record=59a8847a905b419b.nrp
+[openrr compiler] enc_stage_96_128_128_f spv=8d07ac141832d300 compiler=ACO record=8d07ac141832d300.nrp
+[openrr compiler] enc_stage_128_128_160_f spv=f6ccd66e59440a06 compiler=ACO record=f6ccd66e59440a06.nrp
+[openrr compiler] enc_stage_160_256_160_f spv=38501fcf01b1e652 compiler=ACO record=38501fcf01b1e652.nrp
+[openrr compiler] enc_stage_160_256_0_f spv=0d775a6335a1b380 compiler=ACO record=0d775a6335a1b380.nrp
+[openrr compiler] dec_up_160_256_160_f spv=6d872e31c95afce5 compiler=ACO record=6d872e31c95afce5.nrp
+[openrr compiler] dec_dfn_160_256_f spv=81d017418fe547af compiler=ACO record=81d017418fe547af.nrp
+[openrr compiler] dec_up_128_128_160_f spv=8207a2a6f176a4d8 compiler=ACO record=8207a2a6f176a4d8.nrp
+[openrr compiler] dec_dfn_128_128_f spv=a536c1aee1b5b373 compiler=ACO record=a536c1aee1b5b373.nrp
+[openrr compiler] dec_up_96_128_128_f spv=7397e05f8c2da77a compiler=ACO record=7397e05f8c2da77a.nrp
+[openrr compiler] dec_dfn_96_128_f spv=50c4593efddb5754 compiler=ACO record=50c4593efddb5754.nrp
+[openrr compiler] dec_up_64_64_96_f spv=238fcc9bcf09fa55 compiler=ACO record=238fcc9bcf09fa55.nrp
+[openrr compiler] dec_dfn_64_64_f spv=777985d1831329ca compiler=ACO record=777985d1831329ca.nrp
+[openrr compiler] dec_up_32_64_64_f spv=addffdc4c6b922e8 compiler=ACO record=addffdc4c6b922e8.nrp
+[openrr compiler] dec_head_32_64_f spv=b799ea871f0212a5 compiler=ACO record=b799ea871f0212a5.nrp
+[openrr compiler] clear_range spv=cffca948d4b28dac compiler=ACO record=cffca948d4b28dac.nrp
+[openrr compiler] enc_stage_96_128_128_fl spv=7425bd19500d6479 compiler=ACO record=7425bd19500d6479.nrp
+[openrr compiler] enc_stage_128_128_160_fl spv=231bf803323201db compiler=ACO record=231bf803323201db.nrp
+[openrr compiler] enc_stage_160_256_160_fl spv=4d98a31a6a7789ad compiler=ACO record=4d98a31a6a7789ad.nrp
+[openrr compiler] enc_stage_160_256_0_fl spv=c5ef1c72a8fa61ac compiler=ACO record=c5ef1c72a8fa61ac.nrp
+[openrr compiler] dec_up_160_256_160_fl spv=09ae4164fbb15cf1 compiler=ACO record=09ae4164fbb15cf1.nrp
+[openrr compiler] dec_dfn_160_256_fl spv=a89b668e3da09f5b compiler=ACO record=a89b668e3da09f5b.nrp
+[openrr compiler] dec_up_128_128_160_fl spv=6be5b3c53083b759 compiler=ACO record=6be5b3c53083b759.nrp
+[openrr compiler] dec_dfn_128_128_fl spv=095787dd4133557e compiler=ACO record=095787dd4133557e.nrp
+[openrr compiler] dec_up_96_128_128_fl spv=94faa2ccbba8501e compiler=ACO record=94faa2ccbba8501e.nrp
+[openrr compiler] dec_dfn_96_128_fl spv=608c28c0029891f3 compiler=ACO record=608c28c0029891f3.nrp
+[CONFIG] path=runtime-network mode=Legacy flow=1 sampler=1 lite=0/0
+[openrr compiler] clear_range spv=cffca948d4b28dac compiler=LLPC
+[DISPATCH] #0 clear_range total_diff=0 buffers=1
+[DISPATCH] #1 clear_range total_diff=0 buffers=1
+[DISPATCH] #2 clear_range total_diff=0 buffers=1
+[DISPATCH] #3 clear_range total_diff=0 buffers=1
+[DISPATCH] #4 clear_range total_diff=0 buffers=1
+[DISPATCH] #5 clear_range total_diff=0 buffers=1
+[DISPATCH] #6 clear_range total_diff=0 buffers=1
+[DISPATCH] #7 clear_range total_diff=0 buffers=1
+[DISPATCH] #8 clear_range total_diff=0 buffers=1
+[DISPATCH] #9 clear_range total_diff=0 buffers=1
+[DISPATCH] #10 clear_range total_diff=0 buffers=1
+[DISPATCH] #11 clear_range total_diff=0 buffers=1
+[DISPATCH] #12 clear_range total_diff=0 buffers=1
+[DISPATCH] #13 clear_range total_diff=0 buffers=1
+[DISPATCH] #14 clear_range total_diff=0 buffers=1
+[DISPATCH] #15 clear_range total_diff=0 buffers=1
+[DISPATCH] #16 clear_range total_diff=0 buffers=1
+[DISPATCH] #17 clear_range total_diff=0 buffers=1
+[DISPATCH] #18 clear_range total_diff=0 buffers=1
+[DISPATCH] #19 clear_range total_diff=0 buffers=1
+[DISPATCH] #20 clear_range total_diff=0 buffers=1
+[DISPATCH] #21 clear_range total_diff=0 buffers=1
+[DISPATCH] #22 clear_range total_diff=0 buffers=1
+[DISPATCH] #23 clear_range total_diff=0 buffers=1
+[DISPATCH] #24 clear_range total_diff=0 buffers=1
+[DISPATCH] #25 clear_range total_diff=0 buffers=1
+[DISPATCH] #26 clear_range total_diff=0 buffers=1
+[DISPATCH] #27 clear_range total_diff=0 buffers=1
+[DISPATCH] #28 clear_range total_diff=0 buffers=1
+[FRAME] 0 render=1280x720 reset=1
+[DISPATCH] #29 clear_range total_diff=0 buffers=1
+[DISPATCH] #30 ae total_diff=0 buffers=5
+[DISPATCH] #31 enc0_attr_f total_diff=0 buffers=20
+[DISPATCH] #32 enc0_stage_32_64_f total_diff=0 buffers=6
+[DISPATCH] #33 enc_stage_64_64_96_f total_diff=0 buffers=4
+[DISPATCH] #34 enc_stage_96_128_128_fl total_diff=0 buffers=4
+[DISPATCH] #35 enc_stage_128_128_160_fl total_diff=0 buffers=3
+[DISPATCH] #36 enc_stage_160_256_160_fl total_diff=0 buffers=3
+[DISPATCH] #37 enc_stage_160_256_0_fl total_diff=0 buffers=3
+[DISPATCH] #38 dec_up_160_256_160_fl total_diff=0 buffers=4
+[DISPATCH] #39 dec_dfn_160_256_fl total_diff=0 buffers=4
+[DISPATCH] #40 dec_up_128_128_160_fl total_diff=0 buffers=4
+[DISPATCH] #41 dec_dfn_128_128_fl total_diff=0 buffers=4
+[DISPATCH] #42 dec_up_96_128_128_fl total_diff=0 buffers=4
+[DISPATCH] #43 dec_dfn_96_128_fl total_diff=0 buffers=4
+[DISPATCH] #44 dec_up_64_64_96_f total_diff=0 buffers=3
+[DISPATCH] #45 dec_dfn_64_64_f total_diff=0 buffers=3
+[DISPATCH] #46 dec_up_32_64_64_f total_diff=0 buffers=4
+[HEAD-PC] seq=47 b0=204fc0000 size=31206464 mvf=208d64000 hidden=20b7c0000 aniso=2082d8000 tile=206dc0000 dfn=0
+[HEAD-PC] seq=47 b1=2020c0000 size=11109200 mvf=208d64000 hidden=20b7c0000 aniso=2082d8000 tile=206dc0000 dfn=0
+[HEAD-PC] seq=47 b2=206dc0000 size=54341184 mvf=208d64000 hidden=20b7c0000 aniso=2082d8000 tile=206dc0000 dfn=0
+[HEAD-PC] seq=47 b3=204880000 size=7536704 mvf=208d64000 hidden=20b7c0000 aniso=2082d8000 tile=206dc0000 dfn=0
+[HEAD-PC] seq=47 b4=20b7c0000 size=3686464 mvf=208d64000 hidden=20b7c0000 aniso=2082d8000 tile=206dc0000 dfn=0
+[DISPATCH] #47 dec_head_32_64_f buffer=2 size=54341184 differing=5 first=1962067
+[DISPATCH] #47 dec_head_32_64_f total_diff=5 buffers=5
+[DISPATCH] #48 post_f total_diff=0 buffers=10
+[DISPATCH] #49 downsample total_diff=0 buffers=3
+[FRAME] 1 render=1280x720 reset=0
+[DISPATCH] #50 clear_range total_diff=0 buffers=1
+[DISPATCH] #51 ae total_diff=0 buffers=5
+[DISPATCH] #52 enc0_attr_f total_diff=0 buffers=20
+[DISPATCH] #53 enc0_stage_32_64_f total_diff=0 buffers=6
+[DISPATCH] #54 enc_stage_64_64_96_f total_diff=0 buffers=4
+[DISPATCH] #55 enc_stage_96_128_128_fl total_diff=0 buffers=4
+[DISPATCH] #56 enc_stage_128_128_160_fl total_diff=0 buffers=3
+[DISPATCH] #57 enc_stage_160_256_160_fl total_diff=0 buffers=3
+[DISPATCH] #58 enc_stage_160_256_0_fl total_diff=0 buffers=3
+[DISPATCH] #59 dec_up_160_256_160_fl total_diff=0 buffers=4
+[DISPATCH] #60 dec_dfn_160_256_fl total_diff=0 buffers=4
+[DISPATCH] #61 dec_up_128_128_160_fl total_diff=0 buffers=4
+[DISPATCH] #62 dec_dfn_128_128_fl total_diff=0 buffers=4
+[DISPATCH] #63 dec_up_96_128_128_fl total_diff=0 buffers=4
+[DISPATCH] #64 dec_dfn_96_128_fl total_diff=0 buffers=4
+[DISPATCH] #65 dec_up_64_64_96_f total_diff=0 buffers=3
+[DISPATCH] #66 dec_dfn_64_64_f total_diff=0 buffers=3
+[DISPATCH] #67 dec_up_32_64_64_f total_diff=0 buffers=4
+[HEAD-PC] seq=68 b0=204fc0000 size=31206464 mvf=208d64000 hidden=20c740000 aniso=2082d8000 tile=206dc0000 dfn=0
+[HEAD-PC] seq=68 b1=2020c0000 size=11109200 mvf=208d64000 hidden=20c740000 aniso=2082d8000 tile=206dc0000 dfn=0
+[HEAD-PC] seq=68 b2=206dc0000 size=54341184 mvf=208d64000 hidden=20c740000 aniso=2082d8000 tile=206dc0000 dfn=0
+[HEAD-PC] seq=68 b3=204880000 size=7536704 mvf=208d64000 hidden=20c740000 aniso=2082d8000 tile=206dc0000 dfn=0
+[HEAD-PC] seq=68 b4=20c740000 size=3686464 mvf=208d64000 hidden=20c740000 aniso=2082d8000 tile=206dc0000 dfn=0
+[DISPATCH] #68 dec_head_32_64_f buffer=2 size=54341184 differing=1 first=9524299
+[DISPATCH] #68 dec_head_32_64_f total_diff=1 buffers=5
+[DISPATCH] #69 post_f total_diff=0 buffers=10
+[DISPATCH] #70 downsample total_diff=0 buffers=3
+[FRAME] 2 render=1280x720 reset=0
+[DISPATCH] #71 clear_range total_diff=0 buffers=1
+[DISPATCH] #72 ae total_diff=0 buffers=5
+[DISPATCH] #73 enc0_attr_f total_diff=0 buffers=20
+[DISPATCH] #74 enc0_stage_32_64_f total_diff=0 buffers=6
+[DISPATCH] #75 enc_stage_64_64_96_f total_diff=0 buffers=4
+[DISPATCH] #76 enc_stage_96_128_128_fl total_diff=0 buffers=4
+[DISPATCH] #77 enc_stage_128_128_160_fl total_diff=0 buffers=3
+[DISPATCH] #78 enc_stage_160_256_160_fl total_diff=0 buffers=3
+[DISPATCH] #79 enc_stage_160_256_0_fl total_diff=0 buffers=3
+[DISPATCH] #80 dec_up_160_256_160_fl total_diff=0 buffers=4
+[DISPATCH] #81 dec_dfn_160_256_fl total_diff=0 buffers=4
+[DISPATCH] #82 dec_up_128_128_160_fl total_diff=0 buffers=4
+[DISPATCH] #83 dec_dfn_128_128_fl total_diff=0 buffers=4
+[DISPATCH] #84 dec_up_96_128_128_fl total_diff=0 buffers=4
+[DISPATCH] #85 dec_dfn_96_128_fl total_diff=0 buffers=4
+[DISPATCH] #86 dec_up_64_64_96_f total_diff=0 buffers=3
+[DISPATCH] #87 dec_dfn_64_64_f total_diff=0 buffers=3
+[DISPATCH] #88 dec_up_32_64_64_f total_diff=0 buffers=4
+[HEAD-PC] seq=89 b0=204fc0000 size=31206464 mvf=208d64000 hidden=20b7c0000 aniso=2082d8000 tile=206dc0000 dfn=0
+[HEAD-PC] seq=89 b1=2020c0000 size=11109200 mvf=208d64000 hidden=20b7c0000 aniso=2082d8000 tile=206dc0000 dfn=0
+[HEAD-PC] seq=89 b2=206dc0000 size=54341184 mvf=208d64000 hidden=20b7c0000 aniso=2082d8000 tile=206dc0000 dfn=0
+[HEAD-PC] seq=89 b3=204880000 size=7536704 mvf=208d64000 hidden=20b7c0000 aniso=2082d8000 tile=206dc0000 dfn=0
+[HEAD-PC] seq=89 b4=20b7c0000 size=3686464 mvf=208d64000 hidden=20b7c0000 aniso=2082d8000 tile=206dc0000 dfn=0
+[DISPATCH] #89 dec_head_32_64_f buffer=2 size=54341184 differing=3 first=10467643
+[DISPATCH] #89 dec_head_32_64_f total_diff=3 buffers=5
+[DISPATCH] #90 post_f total_diff=0 buffers=10
+[DISPATCH] #91 downsample total_diff=0 buffers=3
+[FRAME] 3 render=1280x720 reset=0
+[DISPATCH] #92 clear_range total_diff=0 buffers=1
+[DISPATCH] #93 ae total_diff=0 buffers=5
+[DISPATCH] #94 enc0_attr_f total_diff=0 buffers=20
+[DISPATCH] #95 enc0_stage_32_64_f total_diff=0 buffers=6
+[DISPATCH] #96 enc_stage_64_64_96_f total_diff=0 buffers=4
+[DISPATCH] #97 enc_stage_96_128_128_fl total_diff=0 buffers=4
+[DISPATCH] #98 enc_stage_128_128_160_fl total_diff=0 buffers=3
+[DISPATCH] #99 enc_stage_160_256_160_fl total_diff=0 buffers=3
+[DISPATCH] #100 enc_stage_160_256_0_fl total_diff=0 buffers=3
+[DISPATCH] #101 dec_up_160_256_160_fl total_diff=0 buffers=4
+[DISPATCH] #102 dec_dfn_160_256_fl total_diff=0 buffers=4
+[DISPATCH] #103 dec_up_128_128_160_fl total_diff=0 buffers=4
+[DISPATCH] #104 dec_dfn_128_128_fl total_diff=0 buffers=4
+[DISPATCH] #105 dec_up_96_128_128_fl total_diff=0 buffers=4
+[DISPATCH] #106 dec_dfn_96_128_fl total_diff=0 buffers=4
+[DISPATCH] #107 dec_up_64_64_96_f total_diff=0 buffers=3
+[DISPATCH] #108 dec_dfn_64_64_f total_diff=0 buffers=3
+[DISPATCH] #109 dec_up_32_64_64_f total_diff=0 buffers=4
+[HEAD-PC] seq=110 b0=204fc0000 size=31206464 mvf=208d64000 hidden=20c740000 aniso=2082d8000 tile=206dc0000 dfn=0
+[HEAD-PC] seq=110 b1=2020c0000 size=11109200 mvf=208d64000 hidden=20c740000 aniso=2082d8000 tile=206dc0000 dfn=0
+[HEAD-PC] seq=110 b2=206dc0000 size=54341184 mvf=208d64000 hidden=20c740000 aniso=2082d8000 tile=206dc0000 dfn=0
+[HEAD-PC] seq=110 b3=204880000 size=7536704 mvf=208d64000 hidden=20c740000 aniso=2082d8000 tile=206dc0000 dfn=0
+[HEAD-PC] seq=110 b4=20c740000 size=3686464 mvf=208d64000 hidden=20c740000 aniso=2082d8000 tile=206dc0000 dfn=0
+[DISPATCH] #110 dec_head_32_64_f buffer=2 size=54341184 differing=2 first=1791595
+[DISPATCH] #110 dec_head_32_64_f total_diff=2 buffers=5
+[DISPATCH] #111 post_f total_diff=0 buffers=10
+[DISPATCH] #112 downsample total_diff=0 buffers=3
+[FRAME] 4 render=1088x612 reset=1
+[DISPATCH] #113 clear_range total_diff=0 buffers=1
+[DISPATCH] #114 ae total_diff=0 buffers=5
+[DISPATCH] #115 enc0_attr_f total_diff=0 buffers=20
+[DISPATCH] #116 enc0_stage_32_64_f total_diff=0 buffers=6
+[DISPATCH] #117 enc_stage_64_64_96_f total_diff=0 buffers=4
+[DISPATCH] #118 enc_stage_96_128_128_fl total_diff=0 buffers=4
+[DISPATCH] #119 enc_stage_128_128_160_fl total_diff=0 buffers=3
+[DISPATCH] #120 enc_stage_160_256_160_fl total_diff=0 buffers=3
+[DISPATCH] #121 enc_stage_160_256_0_fl total_diff=0 buffers=3
+[DISPATCH] #122 dec_up_160_256_160_fl total_diff=0 buffers=4
+[DISPATCH] #123 dec_dfn_160_256_fl total_diff=0 buffers=4
+[DISPATCH] #124 dec_up_128_128_160_fl total_diff=0 buffers=4
+[DISPATCH] #125 dec_dfn_128_128_fl total_diff=0 buffers=4
+[DISPATCH] #126 dec_up_96_128_128_fl total_diff=0 buffers=4
+[DISPATCH] #127 dec_dfn_96_128_fl total_diff=0 buffers=4
+[DISPATCH] #128 dec_up_64_64_96_f total_diff=0 buffers=3
+[DISPATCH] #129 dec_dfn_64_64_f total_diff=0 buffers=3
+[DISPATCH] #130 dec_up_32_64_64_f total_diff=0 buffers=4
+[HEAD-PC] seq=131 b0=204fc0000 size=31206464 mvf=20849c400 hidden=20b7c0000 aniso=207cfd800 tile=206dc0000 dfn=0
+[HEAD-PC] seq=131 b1=2020c0000 size=11109200 mvf=20849c400 hidden=20b7c0000 aniso=207cfd800 tile=206dc0000 dfn=0
+[HEAD-PC] seq=131 b2=206dc0000 size=54341184 mvf=20849c400 hidden=20b7c0000 aniso=207cfd800 tile=206dc0000 dfn=0
+[HEAD-PC] seq=131 b3=204880000 size=7536704 mvf=20849c400 hidden=20b7c0000 aniso=207cfd800 tile=206dc0000 dfn=0
+[HEAD-PC] seq=131 b4=20b7c0000 size=3686464 mvf=20849c400 hidden=20b7c0000 aniso=207cfd800 tile=206dc0000 dfn=0
+[DISPATCH] #131 dec_head_32_64_f buffer=2 size=54341184 differing=4 first=5894659
+[DISPATCH] #131 dec_head_32_64_f total_diff=4 buffers=5
+[DISPATCH] #132 post_f total_diff=0 buffers=10
+[DISPATCH] #133 downsample total_diff=0 buffers=3
+[FRAME] 5 render=1088x612 reset=0
+[DISPATCH] #134 clear_range total_diff=0 buffers=1
+[DISPATCH] #135 ae total_diff=0 buffers=5
+[DISPATCH] #136 enc0_attr_f total_diff=0 buffers=20
+[DISPATCH] #137 enc0_stage_32_64_f total_diff=0 buffers=6
+[DISPATCH] #138 enc_stage_64_64_96_f total_diff=0 buffers=4
+[DISPATCH] #139 enc_stage_96_128_128_fl total_diff=0 buffers=4
+[DISPATCH] #140 enc_stage_128_128_160_fl total_diff=0 buffers=3
+[DISPATCH] #141 enc_stage_160_256_160_fl total_diff=0 buffers=3
+[DISPATCH] #142 enc_stage_160_256_0_fl total_diff=0 buffers=3
+[DISPATCH] #143 dec_up_160_256_160_fl total_diff=0 buffers=4
+[DISPATCH] #144 dec_dfn_160_256_fl total_diff=0 buffers=4
+[DISPATCH] #145 dec_up_128_128_160_fl total_diff=0 buffers=4
+[DISPATCH] #146 dec_dfn_128_128_fl total_diff=0 buffers=4
+[DISPATCH] #147 dec_up_96_128_128_fl total_diff=0 buffers=4
+[DISPATCH] #148 dec_dfn_96_128_fl total_diff=0 buffers=4
+[DISPATCH] #149 dec_up_64_64_96_f total_diff=0 buffers=3
+[DISPATCH] #150 dec_dfn_64_64_f total_diff=0 buffers=3
+[DISPATCH] #151 dec_up_32_64_64_f total_diff=0 buffers=4
+[HEAD-PC] seq=152 b0=204fc0000 size=31206464 mvf=20849c400 hidden=20c740000 aniso=207cfd800 tile=206dc0000 dfn=0
+[HEAD-PC] seq=152 b1=2020c0000 size=11109200 mvf=20849c400 hidden=20c740000 aniso=207cfd800 tile=206dc0000 dfn=0
+[HEAD-PC] seq=152 b2=206dc0000 size=54341184 mvf=20849c400 hidden=20c740000 aniso=207cfd800 tile=206dc0000 dfn=0
+[HEAD-PC] seq=152 b3=204880000 size=7536704 mvf=20849c400 hidden=20c740000 aniso=207cfd800 tile=206dc0000 dfn=0
+[HEAD-PC] seq=152 b4=20c740000 size=3686464 mvf=20849c400 hidden=20c740000 aniso=207cfd800 tile=206dc0000 dfn=0
+[DISPATCH] #152 dec_head_32_64_f buffer=2 size=54341184 differing=4 first=3140203
+[DISPATCH] #152 dec_head_32_64_f total_diff=4 buffers=5
+[DISPATCH] #153 post_f total_diff=0 buffers=10
+[DISPATCH] #154 downsample total_diff=0 buffers=3
+[FRAME] 6 render=1088x612 reset=0
+[DISPATCH] #155 clear_range total_diff=0 buffers=1
+[DISPATCH] #156 ae total_diff=0 buffers=5
+[DISPATCH] #157 enc0_attr_f total_diff=0 buffers=20
+[DISPATCH] #158 enc0_stage_32_64_f total_diff=0 buffers=6
+[DISPATCH] #159 enc_stage_64_64_96_f total_diff=0 buffers=4
+[DISPATCH] #160 enc_stage_96_128_128_fl total_diff=0 buffers=4
+[DISPATCH] #161 enc_stage_128_128_160_fl total_diff=0 buffers=3
+[DISPATCH] #162 enc_stage_160_256_160_fl total_diff=0 buffers=3
+[DISPATCH] #163 enc_stage_160_256_0_fl total_diff=0 buffers=3
+[DISPATCH] #164 dec_up_160_256_160_fl total_diff=0 buffers=4
+[DISPATCH] #165 dec_dfn_160_256_fl total_diff=0 buffers=4
+[DISPATCH] #166 dec_up_128_128_160_fl total_diff=0 buffers=4
+[DISPATCH] #167 dec_dfn_128_128_fl total_diff=0 buffers=4
+[DISPATCH] #168 dec_up_96_128_128_fl total_diff=0 buffers=4
+[DISPATCH] #169 dec_dfn_96_128_fl total_diff=0 buffers=4
+[DISPATCH] #170 dec_up_64_64_96_f total_diff=0 buffers=3
+[DISPATCH] #171 dec_dfn_64_64_f total_diff=0 buffers=3
+[DISPATCH] #172 dec_up_32_64_64_f total_diff=0 buffers=4
+[HEAD-PC] seq=173 b0=204fc0000 size=31206464 mvf=20849c400 hidden=20b7c0000 aniso=207cfd800 tile=206dc0000 dfn=0
+[HEAD-PC] seq=173 b1=2020c0000 size=11109200 mvf=20849c400 hidden=20b7c0000 aniso=207cfd800 tile=206dc0000 dfn=0
+[HEAD-PC] seq=173 b2=206dc0000 size=54341184 mvf=20849c400 hidden=20b7c0000 aniso=207cfd800 tile=206dc0000 dfn=0
+[HEAD-PC] seq=173 b3=204880000 size=7536704 mvf=20849c400 hidden=20b7c0000 aniso=207cfd800 tile=206dc0000 dfn=0
+[HEAD-PC] seq=173 b4=20b7c0000 size=3686464 mvf=20849c400 hidden=20b7c0000 aniso=207cfd800 tile=206dc0000 dfn=0
+[DISPATCH] #173 dec_head_32_64_f total_diff=0 buffers=5
+[DISPATCH] #174 post_f total_diff=0 buffers=10
+[DISPATCH] #175 downsample total_diff=0 buffers=3
+[FRAME] 7 render=1088x612 reset=0
+[DISPATCH] #176 clear_range total_diff=0 buffers=1
+[DISPATCH] #177 ae total_diff=0 buffers=5
+[DISPATCH] #178 enc0_attr_f total_diff=0 buffers=20
+[DISPATCH] #179 enc0_stage_32_64_f total_diff=0 buffers=6
+[DISPATCH] #180 enc_stage_64_64_96_f total_diff=0 buffers=4
+[DISPATCH] #181 enc_stage_96_128_128_fl total_diff=0 buffers=4
+[DISPATCH] #182 enc_stage_128_128_160_fl total_diff=0 buffers=3
+[DISPATCH] #183 enc_stage_160_256_160_fl total_diff=0 buffers=3
+[DISPATCH] #184 enc_stage_160_256_0_fl total_diff=0 buffers=3
+[DISPATCH] #185 dec_up_160_256_160_fl total_diff=0 buffers=4
+[DISPATCH] #186 dec_dfn_160_256_fl total_diff=0 buffers=4
+[DISPATCH] #187 dec_up_128_128_160_fl total_diff=0 buffers=4
+[DISPATCH] #188 dec_dfn_128_128_fl total_diff=0 buffers=4
+[DISPATCH] #189 dec_up_96_128_128_fl total_diff=0 buffers=4
+[DISPATCH] #190 dec_dfn_96_128_fl total_diff=0 buffers=4
+[DISPATCH] #191 dec_up_64_64_96_f total_diff=0 buffers=3
+[DISPATCH] #192 dec_dfn_64_64_f total_diff=0 buffers=3
+[DISPATCH] #193 dec_up_32_64_64_f total_diff=0 buffers=4
+[HEAD-PC] seq=194 b0=204fc0000 size=31206464 mvf=20849c400 hidden=20c740000 aniso=207cfd800 tile=206dc0000 dfn=0
+[HEAD-PC] seq=194 b1=2020c0000 size=11109200 mvf=20849c400 hidden=20c740000 aniso=207cfd800 tile=206dc0000 dfn=0
+[HEAD-PC] seq=194 b2=206dc0000 size=54341184 mvf=20849c400 hidden=20c740000 aniso=207cfd800 tile=206dc0000 dfn=0
+[HEAD-PC] seq=194 b3=204880000 size=7536704 mvf=20849c400 hidden=20c740000 aniso=207cfd800 tile=206dc0000 dfn=0
+[HEAD-PC] seq=194 b4=20c740000 size=3686464 mvf=20849c400 hidden=20c740000 aniso=207cfd800 tile=206dc0000 dfn=0
+[DISPATCH] #194 dec_head_32_64_f buffer=2 size=54341184 differing=4 first=2916403
+[DISPATCH] #194 dec_head_32_64_f total_diff=4 buffers=5
+[DISPATCH] #195 post_f total_diff=0 buffers=10
+[DISPATCH] #196 downsample total_diff=0 buffers=3
+[FRAME] 8 render=1280x720 reset=1
+[DISPATCH] #197 clear_range total_diff=0 buffers=1
+[DISPATCH] #198 ae total_diff=0 buffers=5
+[DISPATCH] #199 enc0_attr_f total_diff=0 buffers=20
+[DISPATCH] #200 enc0_stage_32_64_f total_diff=0 buffers=6
+[DISPATCH] #201 enc_stage_64_64_96_f total_diff=0 buffers=4
+[DISPATCH] #202 enc_stage_96_128_128_fl total_diff=0 buffers=4
+[DISPATCH] #203 enc_stage_128_128_160_fl total_diff=0 buffers=3
+[DISPATCH] #204 enc_stage_160_256_160_fl total_diff=0 buffers=3
+[DISPATCH] #205 enc_stage_160_256_0_fl total_diff=0 buffers=3
+[DISPATCH] #206 dec_up_160_256_160_fl total_diff=0 buffers=4
+[DISPATCH] #207 dec_dfn_160_256_fl total_diff=0 buffers=4
+[DISPATCH] #208 dec_up_128_128_160_fl total_diff=0 buffers=4
+[DISPATCH] #209 dec_dfn_128_128_fl total_diff=0 buffers=4
+[DISPATCH] #210 dec_up_96_128_128_fl total_diff=0 buffers=4
+[DISPATCH] #211 dec_dfn_96_128_fl total_diff=0 buffers=4
+[DISPATCH] #212 dec_up_64_64_96_f total_diff=0 buffers=3
+[DISPATCH] #213 dec_dfn_64_64_f total_diff=0 buffers=3
+[DISPATCH] #214 dec_up_32_64_64_f total_diff=0 buffers=4
+[HEAD-PC] seq=215 b0=204fc0000 size=31206464 mvf=208d64000 hidden=20b7c0000 aniso=2082d8000 tile=206dc0000 dfn=0
+[HEAD-PC] seq=215 b1=2020c0000 size=11109200 mvf=208d64000 hidden=20b7c0000 aniso=2082d8000 tile=206dc0000 dfn=0
+[HEAD-PC] seq=215 b2=206dc0000 size=54341184 mvf=208d64000 hidden=20b7c0000 aniso=2082d8000 tile=206dc0000 dfn=0
+[HEAD-PC] seq=215 b3=204880000 size=7536704 mvf=208d64000 hidden=20b7c0000 aniso=2082d8000 tile=206dc0000 dfn=0
+[HEAD-PC] seq=215 b4=20b7c0000 size=3686464 mvf=208d64000 hidden=20b7c0000 aniso=2082d8000 tile=206dc0000 dfn=0
+[DISPATCH] #215 dec_head_32_64_f buffer=2 size=54341184 differing=5 first=1962067
+[DISPATCH] #215 dec_head_32_64_f total_diff=5 buffers=5
+[DISPATCH] #216 post_f total_diff=0 buffers=10
+[DISPATCH] #217 downsample total_diff=0 buffers=3
+[FRAME] 9 render=1280x720 reset=0
+[DISPATCH] #218 clear_range total_diff=0 buffers=1
+[DISPATCH] #219 ae total_diff=0 buffers=5
+[DISPATCH] #220 enc0_attr_f total_diff=0 buffers=20
+[DISPATCH] #221 enc0_stage_32_64_f total_diff=0 buffers=6
+[DISPATCH] #222 enc_stage_64_64_96_f total_diff=0 buffers=4
+[DISPATCH] #223 enc_stage_96_128_128_fl total_diff=0 buffers=4
+[DISPATCH] #224 enc_stage_128_128_160_fl total_diff=0 buffers=3
+[DISPATCH] #225 enc_stage_160_256_160_fl total_diff=0 buffers=3
+[DISPATCH] #226 enc_stage_160_256_0_fl total_diff=0 buffers=3
+[DISPATCH] #227 dec_up_160_256_160_fl total_diff=0 buffers=4
+[DISPATCH] #228 dec_dfn_160_256_fl total_diff=0 buffers=4
+[DISPATCH] #229 dec_up_128_128_160_fl total_diff=0 buffers=4
+[DISPATCH] #230 dec_dfn_128_128_fl total_diff=0 buffers=4
+[DISPATCH] #231 dec_up_96_128_128_fl total_diff=0 buffers=4
+[DISPATCH] #232 dec_dfn_96_128_fl total_diff=0 buffers=4
+[DISPATCH] #233 dec_up_64_64_96_f total_diff=0 buffers=3
+[DISPATCH] #234 dec_dfn_64_64_f total_diff=0 buffers=3
+[DISPATCH] #235 dec_up_32_64_64_f total_diff=0 buffers=4
+[HEAD-PC] seq=236 b0=204fc0000 size=31206464 mvf=208d64000 hidden=20c740000 aniso=2082d8000 tile=206dc0000 dfn=0
+[HEAD-PC] seq=236 b1=2020c0000 size=11109200 mvf=208d64000 hidden=20c740000 aniso=2082d8000 tile=206dc0000 dfn=0
+[HEAD-PC] seq=236 b2=206dc0000 size=54341184 mvf=208d64000 hidden=20c740000 aniso=2082d8000 tile=206dc0000 dfn=0
+[HEAD-PC] seq=236 b3=204880000 size=7536704 mvf=208d64000 hidden=20c740000 aniso=2082d8000 tile=206dc0000 dfn=0
+[HEAD-PC] seq=236 b4=20c740000 size=3686464 mvf=208d64000 hidden=20c740000 aniso=2082d8000 tile=206dc0000 dfn=0
+[DISPATCH] #236 dec_head_32_64_f buffer=2 size=54341184 differing=1 first=9524299
+[DISPATCH] #236 dec_head_32_64_f total_diff=1 buffers=5
+[DISPATCH] #237 post_f total_diff=0 buffers=10
+[DISPATCH] #238 downsample total_diff=0 buffers=3
+[DISPATCH] compared=239 differing_bytes=29

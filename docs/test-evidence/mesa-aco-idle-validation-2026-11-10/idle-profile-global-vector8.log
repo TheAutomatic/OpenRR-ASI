@@ -1,0 +1,200 @@
+[PASS] Item #13: parse_key ('1'->0x31, '45'->0x2D, '0x2D'->0x2D, 'ctrl+5'->0x35+MOD_CONTROL, 'f5'->VK_F5)
+[PASS] Item R7/R8 (UTF-8 BOM & missing trailing newline in load_config_file + Ini): Enabled='false', appended Mode='legacy'
+[PASS] Item #12 (control) & R6 (untracked reset reason matched): ordinary command list accepted by split::prepare
+[PASS] Item #11: copied command-list and device vtables succeeded without recursion or E_FAIL
+[PASS] Item #12 (split barrier): BEGIN_ONLY rejected ('a split barrier is open in the command list'), END_ONLY accepted
+[PASS] Item #12 (enhanced barrier): rejected ('the command list recorded enhanced barrier')
+[PASS] Item #12 (RTAS): rejected ('the command list recorded RTAS build/copy/emit')
+[PASS] Item #12 (meta command): rejected ('the command list recorded meta command')
+[PASS] Item #12 (bundle propagation): rejected ('a split barrier is open in the command list')
+[INFO] D3D12 Direct GPU initialized on AMD Radeon RX 9070 XT (driver: 26.10.1 (LLPC))
+[openrr compiler] pooled_history2 spv=7fcd28c3e1986a33 compiler=LLPC
+[openrr compiler] ae spv=8053435623e90df5 compiler=LLPC
+[openrr compiler] enc0_attr_f spv=b7ec90ad9bb77d31 compiler=LLPC
+[openrr compiler] post_f spv=afe8e28b8283b96b compiler=LLPC
+[openrr compiler] downsample spv=1868a527fddfb730 compiler=LLPC
+[openrr compiler] downsample_tl spv=71f444e6a4c8f74a compiler=LLPC
+[openrr compiler] post_tile spv=350eb51855cd5995 compiler=LLPC
+[openrr compiler] dfn_export spv=5eff19ab0da39495 compiler=LLPC
+[openrr compiler] dfn_import spv=92deee5eb00fde72 compiler=LLPC
+[openrr compiler] post_dlt_f spv=f59fecb0c6c722dd compiler=LLPC
+[openrr compiler] enc0_stage_32_64_f spv=4f4d742046c9b6f1 compiler=LLPC
+[openrr compiler] enc_stage_64_64_96_f spv=59a8847a905b419b compiler=LLPC
+[openrr compiler] enc_stage_96_128_128_f spv=8d07ac141832d300 compiler=LLPC
+[openrr compiler] enc_stage_128_128_160_f spv=f6ccd66e59440a06 compiler=LLPC
+[openrr compiler] enc_stage_160_256_160_f spv=38501fcf01b1e652 compiler=LLPC
+[openrr compiler] enc_stage_160_256_0_f spv=0d775a6335a1b380 compiler=LLPC
+[openrr compiler] dec_up_160_256_160_f spv=6d872e31c95afce5 compiler=LLPC
+[openrr compiler] dec_dfn_160_256_f spv=81d017418fe547af compiler=LLPC
+[openrr compiler] dec_up_128_128_160_f spv=8207a2a6f176a4d8 compiler=LLPC
+[openrr compiler] dec_dfn_128_128_f spv=a536c1aee1b5b373 compiler=LLPC
+[openrr compiler] dec_up_96_128_128_f spv=7397e05f8c2da77a compiler=LLPC
+[openrr compiler] dec_dfn_96_128_f spv=50c4593efddb5754 compiler=LLPC
+[openrr compiler] dec_up_64_64_96_f spv=238fcc9bcf09fa55 compiler=LLPC
+[openrr compiler] dec_dfn_64_64_f spv=777985d1831329ca compiler=LLPC
+[openrr compiler] dec_up_32_64_64_f spv=addffdc4c6b922e8 compiler=LLPC
+[openrr compiler] dec_head_32_64_f spv=b799ea871f0212a5 compiler=LLPC
+[openrr compiler] clear_range spv=cffca948d4b28dac compiler=LLPC
+[openrr compiler] enc_stage_96_128_128_fl spv=7425bd19500d6479 compiler=LLPC
+[openrr compiler] enc_stage_128_128_160_fl spv=231bf803323201db compiler=LLPC
+[openrr compiler] enc_stage_160_256_160_fl spv=4d98a31a6a7789ad compiler=LLPC
+[openrr compiler] enc_stage_160_256_0_fl spv=c5ef1c72a8fa61ac compiler=LLPC
+[openrr compiler] dec_up_160_256_160_fl spv=09ae4164fbb15cf1 compiler=LLPC
+[openrr compiler] dec_dfn_160_256_fl spv=a89b668e3da09f5b compiler=LLPC
+[openrr compiler] dec_up_128_128_160_fl spv=6be5b3c53083b759 compiler=LLPC
+[openrr compiler] dec_dfn_128_128_fl spv=095787dd4133557e compiler=LLPC
+[openrr compiler] dec_up_96_128_128_fl spv=94faa2ccbba8501e compiler=LLPC
+[openrr compiler] dec_dfn_96_128_fl spv=608c28c0029891f3 compiler=LLPC
+[openrr compiler] pooled_history2_lt spv=f9a40136548780ff compiler=LLPC
+[openrr compiler] enc0_attr_f_lt spv=904cfe3480396ab7 compiler=LLPC
+[openrr compiler] post_f_lt spv=67c230d72edf262e compiler=LLPC
+[openrr compiler] downsample_lt spv=af1b93f587f9f210 compiler=LLPC
+[openrr compiler] downsample_tl_lt spv=4c4d3749900919fe compiler=LLPC
+[openrr compiler] dfn_export_lt spv=8cadc24c9e03891b compiler=LLPC
+[openrr compiler] dfn_import_lt spv=9494ed55ba8520ba compiler=LLPC
+[openrr compiler] post_dlt_f_lt spv=06a7db5bd94c81e0 compiler=LLPC
+[openrr compiler] enc0_stage_32_64_f_lt spv=0705fad577a0f8a7 compiler=LLPC
+[openrr compiler] enc_stage_64_64_96_f_lt spv=8cca057e36e2b4cc compiler=LLPC
+[openrr compiler] enc_stage_96_128_128_f_lt spv=2d30684c45e56b62 compiler=LLPC
+[openrr compiler] enc_stage_128_128_160_f_lt spv=9cfa240f087e7153 compiler=LLPC
+[openrr compiler] enc_stage_160_256_160_f_lt spv=543b3fdebddc2f1d compiler=LLPC
+[openrr compiler] enc_stage_160_256_0_f_lt spv=1499d383d594a247 compiler=LLPC
+[openrr compiler] dec_up_160_256_160_f_lt spv=d4cad4131a9d2071 compiler=LLPC
+[openrr compiler] dec_dfn_160_256_f_lt spv=c29f41aeb581fce8 compiler=LLPC
+[openrr compiler] dec_up_128_128_160_f_lt spv=28e6b3fa305be4bc compiler=LLPC
+[openrr compiler] dec_dfn_128_128_f_lt spv=28bc7057f2b8ac76 compiler=LLPC
+[openrr compiler] dec_up_96_128_128_f_lt spv=79ea9a0f90a74b24 compiler=LLPC
+[openrr compiler] dec_dfn_96_128_f_lt spv=941882166ce09254 compiler=LLPC
+[openrr compiler] dec_up_64_64_96_f_lt spv=40dc71ff1cd2b848 compiler=LLPC
+[openrr compiler] dec_dfn_64_64_f_lt spv=52722875f5de9eb1 compiler=LLPC
+[openrr compiler] dec_up_32_64_64_f_lt spv=b7dd12c10dab8afb compiler=LLPC
+[openrr compiler] dec_head_32_64_f_lt spv=3eccd9693a0d87ef compiler=LLPC
+[openrr compiler] enc_stage_96_128_128_fl_lt spv=581ef3189b0a0052 compiler=LLPC
+[openrr compiler] enc_stage_128_128_160_fl_lt spv=5f78c6a07f1a5ec7 compiler=LLPC
+[openrr compiler] enc_stage_160_256_160_fl_lt spv=d80cf61e2f2f74ec compiler=LLPC
+[openrr compiler] enc_stage_160_256_0_fl_lt spv=f2418b8d764403b6 compiler=LLPC
+[openrr compiler] dec_up_160_256_160_fl_lt spv=360f7a5dd195af7c compiler=LLPC
+[openrr compiler] dec_dfn_160_256_fl_lt spv=6bc90aef575d98cf compiler=LLPC
+[openrr compiler] dec_up_128_128_160_fl_lt spv=5d05fcc3de384276 compiler=LLPC
+[openrr compiler] dec_dfn_128_128_fl_lt spv=4ecf3b5cd58f6a11 compiler=LLPC
+[openrr compiler] dec_up_96_128_128_fl_lt spv=caa3f6091e490cda compiler=LLPC
+[openrr compiler] dec_dfn_96_128_fl_lt spv=9b09c8e4e1c7b892 compiler=LLPC
+[openrr compiler] pooled_history2 spv=7fcd28c3e1986a33 compiler=ACO record=7fcd28c3e1986a33.nrp
+[openrr compiler] ae spv=8053435623e90df5 compiler=ACO record=8053435623e90df5.nrp
+[openrr compiler] enc0_attr_f spv=b7ec90ad9bb77d31 compiler=ACO record=b7ec90ad9bb77d31.nrp
+[openrr compiler] post_f spv=afe8e28b8283b96b compiler=ACO record=afe8e28b8283b96b.nrp
+[openrr compiler] downsample spv=1868a527fddfb730 compiler=ACO record=1868a527fddfb730.nrp
+[openrr compiler] downsample_tl spv=71f444e6a4c8f74a compiler=ACO record=71f444e6a4c8f74a.nrp
+[openrr compiler] post_tile spv=350eb51855cd5995 compiler=ACO record=350eb51855cd5995.nrp
+[openrr compiler] dfn_export spv=5eff19ab0da39495 compiler=ACO record=5eff19ab0da39495.nrp
+[openrr compiler] dfn_import spv=92deee5eb00fde72 compiler=ACO record=92deee5eb00fde72.nrp
+[openrr compiler] post_dlt_f spv=f59fecb0c6c722dd compiler=ACO record=f59fecb0c6c722dd.nrp
+[openrr compiler] enc0_stage_32_64_f spv=4f4d742046c9b6f1 compiler=ACO record=4f4d742046c9b6f1.nrp
+[openrr compiler] enc_stage_64_64_96_f spv=59a8847a905b419b compiler=ACO record=59a8847a905b419b.nrp
+[openrr compiler] enc_stage_96_128_128_f spv=8d07ac141832d300 compiler=ACO record=8d07ac141832d300.nrp
+[openrr compiler] enc_stage_128_128_160_f spv=f6ccd66e59440a06 compiler=ACO record=f6ccd66e59440a06.nrp
+[openrr compiler] enc_stage_160_256_160_f spv=38501fcf01b1e652 compiler=ACO record=38501fcf01b1e652.nrp
+[openrr compiler] enc_stage_160_256_0_f spv=0d775a6335a1b380 compiler=ACO record=0d775a6335a1b380.nrp
+[openrr compiler] dec_up_160_256_160_f spv=6d872e31c95afce5 compiler=ACO record=6d872e31c95afce5.nrp
+[openrr compiler] dec_dfn_160_256_f spv=81d017418fe547af compiler=ACO record=81d017418fe547af.nrp
+[openrr compiler] dec_up_128_128_160_f spv=8207a2a6f176a4d8 compiler=ACO record=8207a2a6f176a4d8.nrp
+[openrr compiler] dec_dfn_128_128_f spv=a536c1aee1b5b373 compiler=ACO record=a536c1aee1b5b373.nrp
+[openrr compiler] dec_up_96_128_128_f spv=7397e05f8c2da77a compiler=ACO record=7397e05f8c2da77a.nrp
+[openrr compiler] dec_dfn_96_128_f spv=50c4593efddb5754 compiler=ACO record=50c4593efddb5754.nrp
+[openrr compiler] dec_up_64_64_96_f spv=238fcc9bcf09fa55 compiler=ACO record=238fcc9bcf09fa55.nrp
+[openrr compiler] dec_dfn_64_64_f spv=777985d1831329ca compiler=ACO record=777985d1831329ca.nrp
+[openrr compiler] dec_up_32_64_64_f spv=addffdc4c6b922e8 compiler=ACO record=addffdc4c6b922e8.nrp
+[openrr compiler] dec_head_32_64_f spv=b799ea871f0212a5 compiler=ACO record=b799ea871f0212a5.nrp
+[openrr compiler] clear_range spv=cffca948d4b28dac compiler=ACO record=cffca948d4b28dac.nrp
+[openrr compiler] enc_stage_96_128_128_fl spv=7425bd19500d6479 compiler=ACO record=7425bd19500d6479.nrp
+[openrr compiler] enc_stage_128_128_160_fl spv=231bf803323201db compiler=ACO record=231bf803323201db.nrp
+[openrr compiler] enc_stage_160_256_160_fl spv=4d98a31a6a7789ad compiler=ACO record=4d98a31a6a7789ad.nrp
+[openrr compiler] enc_stage_160_256_0_fl spv=c5ef1c72a8fa61ac compiler=ACO record=c5ef1c72a8fa61ac.nrp
+[openrr compiler] dec_up_160_256_160_fl spv=09ae4164fbb15cf1 compiler=ACO record=09ae4164fbb15cf1.nrp
+[openrr compiler] dec_dfn_160_256_fl spv=a89b668e3da09f5b compiler=ACO record=a89b668e3da09f5b.nrp
+[openrr compiler] dec_up_128_128_160_fl spv=6be5b3c53083b759 compiler=ACO record=6be5b3c53083b759.nrp
+[openrr compiler] dec_dfn_128_128_fl spv=095787dd4133557e compiler=ACO record=095787dd4133557e.nrp
+[openrr compiler] dec_up_96_128_128_fl spv=94faa2ccbba8501e compiler=ACO record=94faa2ccbba8501e.nrp
+[openrr compiler] dec_dfn_96_128_fl spv=608c28c0029891f3 compiler=ACO record=608c28c0029891f3.nrp
+[openrr compiler] pooled_history2_lt spv=f9a40136548780ff compiler=ACO record=f9a40136548780ff.nrp
+[openrr compiler] enc0_attr_f_lt spv=904cfe3480396ab7 compiler=ACO record=904cfe3480396ab7.nrp
+[openrr compiler] post_f_lt spv=67c230d72edf262e compiler=ACO record=67c230d72edf262e.nrp
+[openrr compiler] downsample_lt spv=af1b93f587f9f210 compiler=ACO record=af1b93f587f9f210.nrp
+[openrr compiler] downsample_tl_lt spv=4c4d3749900919fe compiler=ACO record=4c4d3749900919fe.nrp
+[openrr compiler] dfn_export_lt spv=8cadc24c9e03891b compiler=ACO record=8cadc24c9e03891b.nrp
+[openrr compiler] dfn_import_lt spv=9494ed55ba8520ba compiler=ACO record=9494ed55ba8520ba.nrp
+[openrr compiler] post_dlt_f_lt spv=06a7db5bd94c81e0 compiler=ACO record=06a7db5bd94c81e0.nrp
+[openrr compiler] enc0_stage_32_64_f_lt spv=0705fad577a0f8a7 compiler=ACO record=0705fad577a0f8a7.nrp
+[openrr compiler] enc_stage_64_64_96_f_lt spv=8cca057e36e2b4cc compiler=ACO record=8cca057e36e2b4cc.nrp
+[openrr compiler] enc_stage_96_128_128_f_lt spv=2d30684c45e56b62 compiler=ACO record=2d30684c45e56b62.nrp
+[openrr compiler] enc_stage_128_128_160_f_lt spv=9cfa240f087e7153 compiler=ACO record=9cfa240f087e7153.nrp
+[openrr compiler] enc_stage_160_256_160_f_lt spv=543b3fdebddc2f1d compiler=ACO record=543b3fdebddc2f1d.nrp
+[openrr compiler] enc_stage_160_256_0_f_lt spv=1499d383d594a247 compiler=ACO record=1499d383d594a247.nrp
+[openrr compiler] dec_up_160_256_160_f_lt spv=d4cad4131a9d2071 compiler=ACO record=d4cad4131a9d2071.nrp
+[openrr compiler] dec_dfn_160_256_f_lt spv=c29f41aeb581fce8 compiler=ACO record=c29f41aeb581fce8.nrp
+[openrr compiler] dec_up_128_128_160_f_lt spv=28e6b3fa305be4bc compiler=ACO record=28e6b3fa305be4bc.nrp
+[openrr compiler] dec_dfn_128_128_f_lt spv=28bc7057f2b8ac76 compiler=ACO record=28bc7057f2b8ac76.nrp
+[openrr compiler] dec_up_96_128_128_f_lt spv=79ea9a0f90a74b24 compiler=ACO record=79ea9a0f90a74b24.nrp
+[openrr compiler] dec_dfn_96_128_f_lt spv=941882166ce09254 compiler=ACO record=941882166ce09254.nrp
+[openrr compiler] dec_up_64_64_96_f_lt spv=40dc71ff1cd2b848 compiler=ACO record=40dc71ff1cd2b848.nrp
+[openrr compiler] dec_dfn_64_64_f_lt spv=52722875f5de9eb1 compiler=ACO record=52722875f5de9eb1.nrp
+[openrr compiler] dec_up_32_64_64_f_lt spv=b7dd12c10dab8afb compiler=ACO record=b7dd12c10dab8afb.nrp
+[openrr compiler] dec_head_32_64_f_lt spv=3eccd9693a0d87ef compiler=ACO record=3eccd9693a0d87ef.nrp
+[openrr compiler] enc_stage_96_128_128_fl_lt spv=581ef3189b0a0052 compiler=ACO record=581ef3189b0a0052.nrp
+[openrr compiler] enc_stage_128_128_160_fl_lt spv=5f78c6a07f1a5ec7 compiler=ACO record=5f78c6a07f1a5ec7.nrp
+[openrr compiler] enc_stage_160_256_160_fl_lt spv=d80cf61e2f2f74ec compiler=ACO record=d80cf61e2f2f74ec.nrp
+[openrr compiler] enc_stage_160_256_0_fl_lt spv=f2418b8d764403b6 compiler=ACO record=f2418b8d764403b6.nrp
+[openrr compiler] dec_up_160_256_160_fl_lt spv=360f7a5dd195af7c compiler=ACO record=360f7a5dd195af7c.nrp
+[openrr compiler] dec_dfn_160_256_fl_lt spv=6bc90aef575d98cf compiler=ACO record=6bc90aef575d98cf.nrp
+[openrr compiler] dec_up_128_128_160_fl_lt spv=5d05fcc3de384276 compiler=ACO record=5d05fcc3de384276.nrp
+[openrr compiler] dec_dfn_128_128_fl_lt spv=4ecf3b5cd58f6a11 compiler=ACO record=4ecf3b5cd58f6a11.nrp
+[openrr compiler] dec_up_96_128_128_fl_lt spv=caa3f6091e490cda compiler=ACO record=caa3f6091e490cda.nrp
+[openrr compiler] dec_dfn_96_128_fl_lt spv=9b09c8e4e1c7b892 compiler=ACO record=9b09c8e4e1c7b892.nrp
+[CONFIG] path=runtime-network mode=Fast flow=1 sampler=1 lite=34/34
+[openrr compiler] clear_range spv=cffca948d4b28dac compiler=LLPC
+[PROFILE] compiler=LLPC path=runtime-network mode=Fast flow=1 sampler=1 ae.spv mean_ms=0.013458 samples=16
+[PROFILE] compiler=LLPC path=runtime-network mode=Fast flow=1 sampler=1 clear_range.spv mean_ms=0.000158 samples=16
+[PROFILE] compiler=LLPC path=runtime-network mode=Fast flow=1 sampler=1 dec_dfn_128_128_fl_lt.spv mean_ms=0.047750 samples=16
+[PROFILE] compiler=LLPC path=runtime-network mode=Fast flow=1 sampler=1 dec_dfn_160_256_fl_lt.spv mean_ms=0.046485 samples=16
+[PROFILE] compiler=LLPC path=runtime-network mode=Fast flow=1 sampler=1 dec_dfn_64_64_f_lt.spv mean_ms=0.206772 samples=16
+[PROFILE] compiler=LLPC path=runtime-network mode=Fast flow=1 sampler=1 dec_dfn_96_128_fl_lt.spv mean_ms=0.085888 samples=16
+[PROFILE] compiler=LLPC path=runtime-network mode=Fast flow=1 sampler=1 dec_head_32_64_f_lt.spv mean_ms=0.310140 samples=16
+[PROFILE] compiler=LLPC path=runtime-network mode=Fast flow=1 sampler=1 dec_up_128_128_160_fl_lt.spv mean_ms=0.085453 samples=16
+[PROFILE] compiler=LLPC path=runtime-network mode=Fast flow=1 sampler=1 dec_up_160_256_160_fl_lt.spv mean_ms=0.053485 samples=16
+[PROFILE] compiler=LLPC path=runtime-network mode=Fast flow=1 sampler=1 dec_up_32_64_64_f_lt.spv mean_ms=0.331252 samples=16
+[PROFILE] compiler=LLPC path=runtime-network mode=Fast flow=1 sampler=1 dec_up_64_64_96_f_lt.spv mean_ms=0.234162 samples=16
+[PROFILE] compiler=LLPC path=runtime-network mode=Fast flow=1 sampler=1 dec_up_96_128_128_fl_lt.spv mean_ms=0.154925 samples=16
+[PROFILE] compiler=LLPC path=runtime-network mode=Fast flow=1 sampler=1 downsample_lt.spv mean_ms=0.058752 samples=16
+[PROFILE] compiler=LLPC path=runtime-network mode=Fast flow=1 sampler=1 enc0_attr_f_lt.spv mean_ms=0.172853 samples=16
+[PROFILE] compiler=LLPC path=runtime-network mode=Fast flow=1 sampler=1 enc0_stage_32_64_f_lt.spv mean_ms=0.373188 samples=16
+[PROFILE] compiler=LLPC path=runtime-network mode=Fast flow=1 sampler=1 enc_stage_128_128_160_fl_lt.spv mean_ms=0.041810 samples=16
+[PROFILE] compiler=LLPC path=runtime-network mode=Fast flow=1 sampler=1 enc_stage_160_256_0_fl_lt.spv mean_ms=0.045340 samples=16
+[PROFILE] compiler=LLPC path=runtime-network mode=Fast flow=1 sampler=1 enc_stage_160_256_160_fl_lt.spv mean_ms=0.055517 samples=16
+[PROFILE] compiler=LLPC path=runtime-network mode=Fast flow=1 sampler=1 enc_stage_64_64_96_f_lt.spv mean_ms=0.277145 samples=16
+[PROFILE] compiler=LLPC path=runtime-network mode=Fast flow=1 sampler=1 enc_stage_96_128_128_fl_lt.spv mean_ms=0.172233 samples=16
+[PROFILE] compiler=LLPC path=runtime-network mode=Fast flow=1 sampler=1 pooled_history2_lt.spv mean_ms=0.009210 samples=16
+[PROFILE] compiler=LLPC path=runtime-network mode=Fast flow=1 sampler=1 post_f_lt.spv mean_ms=0.276707 samples=16
+[openrr compiler] clear_range spv=cffca948d4b28dac compiler=ACO record=cffca948d4b28dac.nrp
+[PROFILE] compiler=ACO path=runtime-network mode=Fast flow=1 sampler=1 ae.spv mean_ms=0.014730 samples=16
+[PROFILE] compiler=ACO path=runtime-network mode=Fast flow=1 sampler=1 clear_range.spv mean_ms=0.000228 samples=16
+[PROFILE] compiler=ACO path=runtime-network mode=Fast flow=1 sampler=1 dec_dfn_128_128_fl_lt.spv mean_ms=0.080545 samples=16
+[PROFILE] compiler=ACO path=runtime-network mode=Fast flow=1 sampler=1 dec_dfn_160_256_fl_lt.spv mean_ms=0.077442 samples=16
+[PROFILE] compiler=ACO path=runtime-network mode=Fast flow=1 sampler=1 dec_dfn_64_64_f_lt.spv mean_ms=0.218218 samples=16
+[PROFILE] compiler=ACO path=runtime-network mode=Fast flow=1 sampler=1 dec_dfn_96_128_fl_lt.spv mean_ms=0.147037 samples=16
+[PROFILE] compiler=ACO path=runtime-network mode=Fast flow=1 sampler=1 dec_head_32_64_f_lt.spv mean_ms=0.346955 samples=16
+[PROFILE] compiler=ACO path=runtime-network mode=Fast flow=1 sampler=1 dec_up_128_128_160_fl_lt.spv mean_ms=0.121243 samples=16
+[PROFILE] compiler=ACO path=runtime-network mode=Fast flow=1 sampler=1 dec_up_160_256_160_fl_lt.spv mean_ms=0.093982 samples=16
+[PROFILE] compiler=ACO path=runtime-network mode=Fast flow=1 sampler=1 dec_up_32_64_64_f_lt.spv mean_ms=0.342995 samples=16
+[PROFILE] compiler=ACO path=runtime-network mode=Fast flow=1 sampler=1 dec_up_64_64_96_f_lt.spv mean_ms=0.249798 samples=16
+[PROFILE] compiler=ACO path=runtime-network mode=Fast flow=1 sampler=1 dec_up_96_128_128_fl_lt.spv mean_ms=0.160483 samples=16
+[PROFILE] compiler=ACO path=runtime-network mode=Fast flow=1 sampler=1 downsample_lt.spv mean_ms=0.079915 samples=16
+[PROFILE] compiler=ACO path=runtime-network mode=Fast flow=1 sampler=1 enc0_attr_f_lt.spv mean_ms=0.203578 samples=16
+[PROFILE] compiler=ACO path=runtime-network mode=Fast flow=1 sampler=1 enc0_stage_32_64_f_lt.spv mean_ms=0.413355 samples=16
+[PROFILE] compiler=ACO path=runtime-network mode=Fast flow=1 sampler=1 enc_stage_128_128_160_fl_lt.spv mean_ms=0.092050 samples=16
+[PROFILE] compiler=ACO path=runtime-network mode=Fast flow=1 sampler=1 enc_stage_160_256_0_fl_lt.spv mean_ms=0.074677 samples=16
+[PROFILE] compiler=ACO path=runtime-network mode=Fast flow=1 sampler=1 enc_stage_160_256_160_fl_lt.spv mean_ms=0.086180 samples=16
+[PROFILE] compiler=ACO path=runtime-network mode=Fast flow=1 sampler=1 enc_stage_64_64_96_f_lt.spv mean_ms=0.301853 samples=16
+[PROFILE] compiler=ACO path=runtime-network mode=Fast flow=1 sampler=1 enc_stage_96_128_128_fl_lt.spv mean_ms=0.217023 samples=16
+[PROFILE] compiler=ACO path=runtime-network mode=Fast flow=1 sampler=1 pooled_history2_lt.spv mean_ms=0.007812 samples=16
+[PROFILE] compiler=ACO path=runtime-network mode=Fast flow=1 sampler=1 post_f_lt.spv mean_ms=0.292740 samples=16
+ALL ASI UNIT TESTS PASSED

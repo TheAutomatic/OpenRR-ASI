@@ -1,0 +1,14 @@
+[1/4] Compiling GPU & Runtime sources...
+[2/4] Compiling ASI shell, ImGui & MinHook...
+[3/4] Generating Vulkan lazy loader & linking openrr-amd.asi...
+[4/4] Building runtime SPIR-V shaders & staging package...
+built 90 runtime SPIR-V shaders in /mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi/stage/openrr-amd/shaders
+ninja: Entering directory `/home/kenny/work/openrr-mesa-aco/build'
+[1/9] Generating src/git_sha1.h with a custom command
+[2/6] Compiling C object src/amd/vulkan/libvulkan_radeon.so.p/radv_descriptor_set.c.o
+[3/6] Compiling C object src/amd/vulkan/libvulkan_radeon.so.p/nir_radv_nir_lower_descriptors.c.o
+[4/6] Compiling C object src/amd/vulkan/libvulkan_radeon.so.p/radv_shader.c.o
+[5/6] Compiling C object src/amd/vulkan/libvulkan_radeon.so.p/nir_radv_nir_lower_cooperative_matrix.c.o
+[6/6] Linking target src/amd/vulkan/libvulkan_radeon.so
+Built /mnt/c/Users/Kenny/.codex/worktrees/mesa-aco-0101/OpenRR/build/asi/stage/plugins/openrr-amd.asi (3286804 bytes, 104 Vulkan entry points resolved lazily)
+Exports: 1  Imports: bcrypt.dll KERNEL32.dll msvcrt.dll SHELL32.dll USER32.dll VERSION.dll 

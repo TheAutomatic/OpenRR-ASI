@@ -37,6 +37,7 @@ struct Kernel {
     std::string name;
     void* pso = nullptr;   // ID3D12PipelineState* on the D3D12 device
     bool views = false;    // D3D12: set 0 is the recording's views (d3d_ kernels), not the sampled-image table
+    bool aco = false;      // D3D12: linear push ABI (entry 4), from a validated ACO record
 };
 
 struct DeviceInfo {

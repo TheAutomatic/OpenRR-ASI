@@ -7,6 +7,7 @@
 #include "opennr_rr/vk.hpp"
 
 #include <array>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -52,7 +53,8 @@ public:
     static constexpr uint32_t kSlotQueries = 192;  // timestamps per recording
     static constexpr uint32_t kSlotViews = 18;     // set 0 of the d3d_ kernels per recording: 16 SRVs, then 2 UAVs
     static constexpr uint32_t kTableViews = 12;    // set 0 of the others: 8 combined image samplers of 48 bytes
-    static constexpr uint32_t kSlotStride = kSlotViews + kTableViews;
+    static constexpr uint32_t kAcoTableViews = 16; // RADV: 8 combined image samplers of 64 bytes
+    static constexpr uint32_t kSlotStride = kSlotViews + kTableViews + kAcoTableViews;
 
     ~D3dDevice() override;
     // dev: the game's device (kept referenced). compiler: the Vulkan device on the same adapter that builds the
@@ -65,6 +67,9 @@ public:
     // ELFs taken from the cache / built since init
     uint32_t cache_hits() const { return hits_; }
     uint32_t cache_misses() const { return misses_; }
+    // LLPC is retained only as an explicit diagnostic reference.
+    void set_compiler(bool aco, bool strict = false);
+    void set_compiler_log(std::function<void(const std::string&)> log) { compiler_log_ = std::move(log); }
 
     // Recording into cl until unbind(): ring slot `slot` (upload memory, timestamps). unbind resolves the timestamps.
     uint64_t bind(ID3D12GraphicsCommandList* cl, uint32_t slot);
@@ -128,6 +133,12 @@ public:
     void set_texture(uint32_t slot, const Image& i, VkSampler s) override;
 
 private:
+    friend struct D3dTestAccess;
+    friend struct D3dRuntimeTraceAccess;
+    std::function<void(const Kernel&, const void*, uint32_t, uint32_t, uint32_t, uint32_t, bool)> dispatch_trace_;
+    std::function<void(const Kernel&, const void*, uint32_t, uint32_t, uint32_t, uint32_t)> dispatch_probe_;
+    std::map<uint64_t, Buffer> probe_buffers_;
+    std::function<void(const std::string&)> compiler_log_;
     std::vector<uint8_t> elf_of(const std::string& spv_path, uint32_t subgroup);
     void bind_kernel(const Kernel& k, const void* push, uint32_t push_size);
     void staged(const Buffer& b, uint64_t off, uint64_t size, const void* data, uint32_t fill_value, bool is_fill);
@@ -191,6 +202,9 @@ private:
     uint64_t heap_cpu_ = 0, heap_gpu_ = 0;
     uint32_t desc_lo_ = 0;             // root constant 61 of the bound recording (d3d_ kernels)
     uint32_t table_lo_ = 0;            // root constant 61 of the others (per-slot snapshot)
+    uint32_t aco_table_lo_ = 0;
+    bool aco_enabled_ = false;
+    bool aco_strict_ = false;
     uint8_t tex_table_[8][48] = {};
     std::unique_ptr<Device> srd_;      // descriptors of linear images (alias_image)
     bool srd_ok_ = false;

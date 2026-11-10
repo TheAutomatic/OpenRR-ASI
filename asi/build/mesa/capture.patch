@@ -1,0 +1,235 @@
+--- a/src/amd/vulkan/radv_shader.c
++++ b/src/amd/vulkan/radv_shader.c
+@@ -552,6 +552,29 @@
+          nir->info.name = ralloc_strdup(nir, nir->info.name);
+       }
+ 
++      /* OpenRR relies on explicit FMA and the rounding of f32->f16->f32.
++       * Generic fast-math permits splitting weak FMA and removing conversions,
++       * which breaks reciprocal correction and half_rz's round-trip test.
++       */
++      const char *onr_precision = getenv("ONR_ACO_PRECISION");
++      const bool onr_global_exact = onr_precision && !strcmp(onr_precision, "global");
++      const bool onr_native = onr_precision && !strcmp(onr_precision, "native");
++      nir_foreach_function_impl(impl, nir) {
++         nir_foreach_block(block, impl) {
++            nir_foreach_instr(instr, block) {
++               if (instr->type != nir_instr_type_alu) continue;
++               nir_alu_instr *alu = nir_instr_as_alu(instr);
++               if (onr_global_exact)
++                  alu->fp_math_ctrl |= nir_op_valid_fp_math_ctrl(alu->op, nir_fp_exact);
++               if (!onr_native && alu->op == nir_op_ffma_weak) {
++                  alu->op = nir_op_ffma;
++                  alu->fp_math_ctrl |= nir_fp_exact;
++               } else if (!onr_native && (alu->op == nir_op_f2f16 || alu->op == nir_op_f2f32 || alu->op == nir_op_f2f64)) {
++                  alu->fp_math_ctrl |= nir_fp_exact;
++               }
++            }
++         }
++      }
+       nir_validate_shader(nir, "after spirv_to_nir");
+ 
+       vtn_free_specialization(spec);
+@@ -3441,6 +3464,46 @@
+       key->vertex_robustness1 = 1u;
+ }
+ 
++
++/* OpenRR capture v4: source-level export, no serialized structure offsets. */
++static void
++onr_capture(const struct radv_shader_binary *binary, const struct radv_shader_args *args)
++{
++   const char *prefix = getenv("ONR_ACO_CAPTURE");
++   if (!prefix || binary->info.stage != MESA_SHADER_COMPUTE || binary->type != RADV_BINARY_TYPE_LEGACY)
++      return;
++   char path[4096];
++   struct radv_shader_binary_legacy *bin = (struct radv_shader_binary_legacy *)binary;
++   struct radv_shader_binary_layout layout = radv_shader_binary_get_layout(bin);
++   snprintf(path, sizeof(path), "%s.code", prefix);
++   FILE *f = fopen(path, "wb");
++   if (!f) abort();
++   if (fwrite(layout.code, 1, bin->code_size, f) != bin->code_size || fclose(f)) abort();
++   snprintf(path, sizeof(path), "%s.json", prefix);
++   f = fopen(path, "w");
++   if (!f) abort();
++   const struct radv_shader_info *i = &binary->info;
++   const struct ac_shader_config *c = &binary->config;
++   const struct radv_userdata_locations *u = &args->user_sgprs_locs;
++   fprintf(f, "{\"rsrc1\":%u,\"rsrc2\":%u,\"rsrc3\":%u,\"scratch_bytes\":%u,"
++           "\"sgprs\":%u,\"vgprs\":%u,\"exec_bytes\":%u,\"workgroup_size\":%u,"
++           "\"shared_bytes\":%u,\"push_bytes\":%u,\"wave_size\":%u,\"user_sgprs\":%u,"
++           "\"set0\":%d,\"push\":%d,\"grid\":%d,\"inline\":[",
++           c->rsrc1, c->rsrc2, c->rsrc3, c->scratch_bytes_per_wave / i->wave_size,
++           c->num_sgprs, c->num_vgprs, bin->exec_size, i->workgroup_size,
++           i->nir_shared_size, i->push_constant_size, i->wave_size, args->num_user_sgprs,
++           u->descriptor_sets[0].sgpr_idx, u->shader_data[AC_UD_PUSH_CONSTANTS].sgpr_idx,
++           u->shader_data[AC_UD_CS_GRID_SIZE].sgpr_idx);
++   unsigned n = 0;
++   u_foreach_bit64(dw, args->ac.inline_push_const_mask) {
++      fprintf(f, "%s[%u,%u]", n ? "," : "",
++              u->shader_data[AC_UD_INLINE_PUSH_CONSTANTS].sgpr_idx + n, (unsigned)dw);
++      ++n;
++   }
++   fprintf(f, "]}\n");
++   if (fclose(f)) abort();
++}
++
+ struct radv_shader_binary *
+ radv_shader_nir_to_asm(const struct radv_compiler_info *compiler_info, struct radv_shader_stage *pl_stage,
+                        struct nir_shader *const *shaders, int shader_count,
+@@ -3485,6 +3548,7 @@
+       return NULL;
+    }
+ 
++   onr_capture(binary, args);
+    return binary;
+ }
+ 
+--- a/src/amd/vulkan/radv_descriptor_set.c
++++ b/src/amd/vulkan/radv_descriptor_set.c
+@@ -243,6 +243,21 @@
+    uint32_t hash_offset = offsetof(struct radv_descriptor_set_layout, hash) + sizeof(set_layout->hash);
+    _mesa_blake3_compute((const char *)set_layout + hash_offset, size - hash_offset, set_layout->hash);
+ 
++   const char *onr_prefix = getenv("ONR_ACO_CAPTURE");
++   if (onr_prefix) {
++      char path[4096];
++      snprintf(path, sizeof(path), "%s.layouts", onr_prefix);
++      FILE *f = fopen(path, "a");
++      if (!f) abort();
++      fprintf(f, "set bytes=%u bindings=%u\n", set_layout->size, set_layout->binding_count);
++      for (unsigned b = 0; b < set_layout->binding_count; ++b) {
++         const struct radv_descriptor_set_binding_layout *l = &set_layout->binding[b];
++         fprintf(f, "binding=%u type=%u count=%u offset=%u stride=%u image=0 sampler=%u\n",
++                 b, l->type, l->array_size, l->offset, l->size,
++                 l->type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ? radv_get_combined_image_sampler_offset(pdev) : 0);
++      }
++      if (fclose(f)) abort();
++   }
+    *pSetLayout = radv_descriptor_set_layout_to_handle(set_layout);
+ 
+    return VK_SUCCESS;
+--- a/src/amd/vulkan/nir/radv_nir_lower_descriptors.c
++++ b/src/amd/vulkan/nir/radv_nir_lower_descriptors.c
+@@ -479,7 +479,18 @@
+       if (size < (count - start) && can_increase_load_size(intrin, start * 4, size, size * 2))
+          size *= 2;
+ 
+-      data[num_loads++] = ac_nir_load_smem(b, size, addr, nir_iadd_imm_nuw(b, offset, start * 4), 4, 0);
++      /* Push contents are uniform, but a dynamic byte offset can diverge per lane.
++       * SMEM forcibly scalarizes that offset with readfirstlane. Keep dynamic loads
++       * in the global-memory path so instruction selection preserves lane indices.
++       */
++      nir_def *byte_offset = nir_iadd_imm_nuw(b, offset, start * 4);
++      if (intrin->src[0].ssa->divergent) {
++         nir_def *pointer = nir_iadd(b, addr, nir_u2u64(b, byte_offset));
++         data[num_loads++] = nir_load_global(b, size, 32, pointer,
++            .access = ACCESS_NON_WRITEABLE | ACCESS_CAN_REORDER, .align_mul = 4);
++      } else {
++         data[num_loads++] = ac_nir_load_smem(b, size, addr, byte_offset, 4, 0);
++      }
+       start += size;
+    }
+    return nir_extract_bits(b, data, num_loads, 0, intrin->def.num_components, bit_size);
+@@ -726,6 +737,7 @@
+     * an inline ubo.
+     */
+    progress |= nir_shader_intrinsics_pass(shader, lower_descriptors_early_intrin, nir_metadata_control_flow, &state);
++   nir_divergence_analysis(shader);
+    progress |= nir_shader_instructions_pass(shader, lower_descriptors_instr, nir_metadata_control_flow, &state);
+ 
+    return progress;
+--- a/src/amd/vulkan/nir/radv_nir_lower_cooperative_matrix.c
++++ b/src/amd/vulkan/nir/radv_nir_lower_cooperative_matrix.c
+@@ -409,7 +409,25 @@
+       }
+ 
+       if (is_load) {
+-         vars[i * mul] = nir_load_deref(b, iter_deref);
++         /* Consecutive elements of a column-major fragment are contiguous.
++          * Load them together before explicit-IO lowering obscures the shared
++          * address expression. Keep the existing per-element alignment bound.
++          */
++         unsigned count = getenv("ONR_ACO_VECTOR_LOADS") && params->gfx_level >= GFX11_7 &&
++                          layout == GLSL_MATRIX_LAYOUT_COLUMN_MAJOR && mul == 1 &&
++                          nir_deref_mode_is(deref, nir_var_mem_global) ?
++                          MIN2(8, length - i) : 1;
++         if (count > 1) {
++            const struct glsl_type *vec_type = glsl_vector_type(desc.element_type, count);
++            nir_deref_instr *vec = nir_build_deref_cast_with_alignment(
++               b, &iter_deref->def, iter_deref->modes, vec_type,
++               radv_nir_cmat_bits(desc) / 8, align_mul, row_iter * radv_nir_cmat_bits(desc) / 8 % align_mul);
++            nir_def *value = nir_load_deref(b, vec);
++            for (unsigned j = 0; j < count; ++j) vars[i + j] = nir_channel(b, value, j);
++            i += count - 1;
++         } else {
++            vars[i * mul] = nir_load_deref(b, iter_deref);
++         }
+       } else {
+          nir_store_deref(b, iter_deref, vars[i * mul], 1);
+       }
+--- a/src/amd/compiler/aco_assembler.cpp
++++ b/src/amd/compiler/aco_assembler.cpp
+@@ -1,3 +1,5 @@
++#include <cstdlib>
++#include <cstdio>
+ /*
+  * Copyright © 2018 Valve Corporation
+  *
+@@ -30,6 +32,10 @@
+ };
+ 
+ struct asm_context {
++   uint32_t onr_sentinel = getenv("ONR_ACO_ADDR32_HI") ?
++      strtoul(getenv("ONR_ACO_ADDR32_HI"), nullptr, 0) : 0;
++   unsigned onr_m0_subst = 0, onr_m0_writes = 0, onr_pc_relative = 0;
++
+    Program* program;
+    enum amd_gfx_level gfx_level;
+    std::vector<unsigned> block_emit_order;
+@@ -1229,6 +1235,21 @@
+ void
+ emit_instruction(asm_context& ctx, std::vector<uint32_t>& out, Instruction* instr)
+ {
++   if (ctx.onr_sentinel) {
++      for (Operand& op : instr->operands) {
++         if (op.isConstant() && op.bytes() == 4 && op.constantValue() == ctx.onr_sentinel) {
++            op = Operand(m0, s1);
++            ctx.onr_m0_subst++;
++         }
++      }
++      for (const Definition& d : instr->definitions)
++         if (d.isFixed() && d.physReg() == m0) ctx.onr_m0_writes++;
++      if (instr->opcode == aco_opcode::p_constaddr_getpc ||
++          instr->opcode == aco_opcode::s_getpc_b64 ||
++          instr->opcode == aco_opcode::s_setpc_b64 ||
++          instr->opcode == aco_opcode::s_swappc_b64) ctx.onr_pc_relative++;
++   }
++
+    /* lower remaining pseudo-instructions */
+    if (instr->opcode == aco_opcode::p_constaddr_getpc) {
+       ctx.constaddrs[instr->operands[0].constantValue()].getpc_end = out.size() + 1;
+@@ -1885,6 +1906,11 @@
+    }
+ 
+    fix_branches(ctx, code);
++   if (ctx.onr_sentinel)
++      fprintf(stderr, "ONR_M0 subst=%u writes=%u constdata=%u pc_relative=%u\n",
++              ctx.onr_m0_subst, ctx.onr_m0_writes,
++              (unsigned)program->constant_data.size(), ctx.onr_pc_relative);
++
+ 
+    unsigned exec_size = code.size() * sizeof(uint32_t);
+ 
+--- a/src/amd/vulkan/radv_device.c
++++ b/src/amd/vulkan/radv_device.c
+@@ -1198,7 +1198,8 @@
+       .ac = &pdev->info.compiler_info,
+       .hw =
+          {
+-            .address32_hi = pdev->info.address32_hi,
++            .address32_hi = getenv("ONR_ACO_ADDR32_HI") ?
++               strtoul(getenv("ONR_ACO_ADDR32_HI"), NULL, 0) : pdev->info.address32_hi,
+             .instr_prefetch_distance = pdev->info.instr_prefetch_distance,
+             .address_prt_wa_control_bit = pdev->info.address_prt_wa_control_bit,
+             .rbplus_allowed = pdev->info.rbplus_allowed,

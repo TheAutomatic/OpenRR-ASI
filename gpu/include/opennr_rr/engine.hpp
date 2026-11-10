@@ -158,6 +158,8 @@ public:
     void set_deep_on(bool on) { deep_on_ = on; }
 
 private:
+    friend struct EngineTestAccess;
+    friend struct EngineRuntimeTraceAccess;
     struct StageBufs { Buffer in_a, in_b, out, out_b, fc1, fc1_b, fc2, fc2_b, bias, dfn_w, dfn_b, mrg_w, mrg_b, up_w, up_b; };
     Buffer make(size_t bytes);
     bool out_image_ = false;
