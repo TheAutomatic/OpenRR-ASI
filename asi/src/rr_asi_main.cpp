@@ -1804,7 +1804,7 @@ bool fill_d3d12_frame(RrContext& ctx, const NVSDK_NGX_Parameter& params, OnrRrFr
     frame.specular_ray_direction_hit_distance = tex(NVSDK_NGX_Parameter_DLSSD_SpecularRayDirectionHitDistance, nullptr,
                                                     NVSDK_NGX_Parameter_DLSSD_SpecularRayDirectionHitDistance_Subrect_Base_X, nullptr,
                                                     NVSDK_NGX_Parameter_DLSSD_SpecularRayDirectionHitDistance_Subrect_Base_Y, nullptr, read_state);
-    frame.output = tex("DLSSD.Output", NVSDK_NGX_Parameter_Output,
+    frame.output = tex(NVSDK_NGX_Parameter_Output, "DLSSD.Output",
                        "DLSS.Output.Subrect.Base.X", nullptr,
                        "DLSS.Output.Subrect.Base.Y", nullptr, output_state);
 
@@ -2242,29 +2242,34 @@ NVSDK_NGX_Result RR_NGX_MSABI hk_d3d12_get_scratch(NVSDK_NGX_Feature feat, const
     return real_d3d12_get_scratch ? real_d3d12_get_scratch(feat, params, out) : NVSDK_NGX_Result_Success;
 }
 
-NVSDK_NGX_Result RR_NGX_MSABI hk_d3d12_create(ID3D12GraphicsCommandList* cmd, NVSDK_NGX_Feature feature,
-                                              NVSDK_NGX_Parameter* params, NVSDK_NGX_Handle** out) {
+NVSDK_NGX_Result create_d3d12_rr(ID3D12GraphicsCommandList* cmd, NVSDK_NGX_Feature feature,
+                               NVSDK_NGX_Parameter* params, NVSDK_NGX_Handle** out, bool host_owned) {
+    // An inner host call must never recurse into the outer OptiScaler entry.
+    const auto fallback = [&]() {
+        return host_owned ? NVSDK_NGX_Result_FAIL_UnableToInitializeFeature
+                          : real_d3d12_create(cmd, feature, params, out);
+    };
     if (feature != NVSDK_NGX_Feature_RayReconstruction) {
-        return real_d3d12_create(cmd, feature, params, out);
+        return host_owned ? NVSDK_NGX_Result_FAIL_FeatureNotSupported : fallback();
     }
     ensure_deferred_init();
     if (!cmd || !params || !out) return NVSDK_NGX_Result_FAIL_InvalidParameter;
 
     const openrr::pe::Config cfg = openrr::pe::current_config();
     if (!cfg.enabled) {
-        return real_d3d12_create(cmd, feature, params, out);
+        return fallback();
     }
 
     ID3D12Device* dev = nullptr;
     if (FAILED(cmd->GetDevice(IID_PPV_ARGS(&dev))) || !dev) {
-        return real_d3d12_create(cmd, feature, params, out);
+        return fallback();
     }
     struct DevHold { ID3D12Device* d; ~DevHold() { if (d) d->Release(); } } hold{dev};
     on_d3d12_device_seen(dev);
 
     const LUID luid = dev->GetAdapterLuid();
     if (!check_usable(&luid)) {
-        return real_d3d12_create(cmd, feature, params, out);
+        return fallback();
     }
 
     // Re-probe mochi coexistence at Create time in case dlssnr-amd-loadlate.asi finished loading (Item #7).
@@ -2387,15 +2392,28 @@ NVSDK_NGX_Result RR_NGX_MSABI hk_d3d12_create(ID3D12GraphicsCommandList* cmd, NV
 
 std::atomic<uint64_t> g_d3d_skipped_frames{0};
 
-NVSDK_NGX_Result RR_NGX_MSABI hk_d3d12_evaluate(ID3D12GraphicsCommandList* cmd, const NVSDK_NGX_Handle* handle,
-                                                NVSDK_NGX_Parameter* params, void* callback) {
-    if (!handle) return real_d3d12_evaluate(cmd, handle, params, callback);
+#ifdef OPENRR_EXPERIMENTAL_OPTIFG_HOST
+bool prepare_optifg_host();
+bool g_optifg_host_active = false;
+#endif
+NVSDK_NGX_Result RR_NGX_MSABI hk_d3d12_create(ID3D12GraphicsCommandList* cmd, NVSDK_NGX_Feature feature,
+                                              NVSDK_NGX_Parameter* params, NVSDK_NGX_Handle** out) {
+#ifdef OPENRR_EXPERIMENTAL_OPTIFG_HOST
+    if (feature == NVSDK_NGX_Feature_RayReconstruction && prepare_optifg_host())
+        return real_d3d12_create(cmd, feature, params, out);
+#endif
+    return create_d3d12_rr(cmd, feature, params, out, false);
+}
+
+NVSDK_NGX_Result evaluate_d3d12_rr(ID3D12GraphicsCommandList* cmd, const NVSDK_NGX_Handle* handle,
+                                 NVSDK_NGX_Parameter* params, void* callback, bool host_owned) {
+    if (!handle) return host_owned ? NVSDK_NGX_Result_FAIL_InvalidParameter : real_d3d12_evaluate(cmd, handle, params, callback);
 
     std::unique_lock<std::mutex> lock(g_ctx_mutex);
     auto it = g_d3d12_rr.find(handle->Id);
     if (it == g_d3d12_rr.end()) {
         lock.unlock();
-        return real_d3d12_evaluate(cmd, handle, params, callback);
+        return host_owned ? NVSDK_NGX_Result_FAIL_FeatureNotFound : real_d3d12_evaluate(cmd, handle, params, callback);
     }
     if (!cmd || !params) return NVSDK_NGX_Result_FAIL_InvalidParameter;
 
@@ -2432,7 +2450,7 @@ NVSDK_NGX_Result RR_NGX_MSABI hk_d3d12_evaluate(ID3D12GraphicsCommandList* cmd, 
             const uint64_t skip_n = ++g_d3d_skipped_frames;
             log("[openrr] command list state before Reset not yet tracked (%s, streak=%u); skipping this frame (output not written, count=%llu)",
                 split_why.c_str(), ctx.unknown_streak, static_cast<unsigned long long>(skip_n));
-            return NVSDK_NGX_Result_Success;
+            return host_owned ? NVSDK_NGX_Result_Fail : NVSDK_NGX_Result_Success;
         }
         static bool logged_fallback = false;
         if (!logged_fallback) {
@@ -2460,7 +2478,7 @@ NVSDK_NGX_Result RR_NGX_MSABI hk_d3d12_evaluate(ID3D12GraphicsCommandList* cmd, 
                             (!st || !st->valid) ? "recorded before Reset hook" : "bundle state unknown",
                             streak, static_cast<unsigned long long>(skip_n));
                     }
-                    return NVSDK_NGX_Result_Success;
+                    return host_owned ? NVSDK_NGX_Result_Fail : NVSDK_NGX_Result_Success;
                 }
                 if (streak == 3) {
                     log("[openrr] D3D12 Direct: command-list state remained untracked for %u frames; failing evaluation", streak);
@@ -2488,7 +2506,7 @@ NVSDK_NGX_Result RR_NGX_MSABI hk_d3d12_evaluate(ID3D12GraphicsCommandList* cmd, 
                 log("[openrr] D3D12 Direct: all 127 recording slots in flight; skipping this frame (output not written, count=%llu)",
                     static_cast<unsigned long long>(skip_n));
             }
-            return NVSDK_NGX_Result_Success;
+            return host_owned ? NVSDK_NGX_Result_Fail : NVSDK_NGX_Result_Success;
         }
         if (rc != ONR_RR_OK) {
             log("[openrr] D3D12 Record failed (rc=%d): %s", rc, runtime_last_error().c_str());
@@ -2555,8 +2573,8 @@ void destroy_d3d12_rr_context(RrContext& ctx) {
     if (rt) g_api.Destroy(rt);
 }
 
-NVSDK_NGX_Result RR_NGX_MSABI hk_d3d12_release(NVSDK_NGX_Handle* handle) {
-    if (!handle) return real_d3d12_release(handle);
+NVSDK_NGX_Result release_d3d12_rr(NVSDK_NGX_Handle* handle, bool host_owned) {
+    if (!handle) return host_owned ? NVSDK_NGX_Result_FAIL_InvalidParameter : real_d3d12_release(handle);
     std::unique_ptr<RrContext> gone;
     {
         std::lock_guard<std::mutex> lock(g_ctx_mutex);
@@ -2567,7 +2585,7 @@ NVSDK_NGX_Result RR_NGX_MSABI hk_d3d12_release(NVSDK_NGX_Handle* handle) {
         }
     }
     if (!gone) {
-        return real_d3d12_release(handle);
+        return host_owned ? NVSDK_NGX_Result_FAIL_FeatureNotFound : real_d3d12_release(handle);
     }
     log("[openrr] D3D12 Ray Reconstruction feature released (handle=0x%X)", gone->handle_id);
     destroy_d3d12_rr_context(*gone);
@@ -2575,6 +2593,15 @@ NVSDK_NGX_Result RR_NGX_MSABI hk_d3d12_release(NVSDK_NGX_Handle* handle) {
     openrr::pe::control::Status st{};
     openrr::pe::control::report(st);
     return NVSDK_NGX_Result_Success;
+}
+
+NVSDK_NGX_Result RR_NGX_MSABI hk_d3d12_evaluate(ID3D12GraphicsCommandList* cmd, const NVSDK_NGX_Handle* handle,
+                                                NVSDK_NGX_Parameter* params, void* callback) {
+    return evaluate_d3d12_rr(cmd, handle, params, callback, false);
+}
+
+NVSDK_NGX_Result RR_NGX_MSABI hk_d3d12_release(NVSDK_NGX_Handle* handle) {
+    return release_d3d12_rr(handle, false);
 }
 
 void destroy_all_d3d12_rr() {
@@ -3626,9 +3653,63 @@ bool hook(const char* name, void* detour, void** real, bool required = false) {
     return e == MH_OK;
 }
 
+#ifdef OPENRR_EXPERIMENTAL_OPTIFG_HOST
+#include "optifg_provider_locator.hpp"
+bool prepare_optifg_host() {
+    static std::once_flag once;
+    std::call_once(once, [] {
+        char flag[16]{};
+        const auto ini = std::string(openrr::pe::module_folder()) + "\\openrr-amd.ini";
+        openrr::u8::profile("OpenRR", "OptiFGHost", "false", flag, sizeof(flag), ini.c_str());
+        if (_stricmp(flag, "true") && std::strcmp(flag, "1")) return;
+        auto at=optifg_probe::locate(g_opti);
+        if (!at) { log("[openrr-host] locator rejected; independent ASI retained"); return; }
+        auto path=std::filesystem::path(openrr::u8::module_file(g_opti)).parent_path()/L"openrr-ngx-host.dll";
+        // NvngxPath must have loaded the companion into NVNGXProxy already.
+        // Loading it here would not establish that binding.
+        auto proxy=GetModuleHandleW(path.c_str());
+        // OptiDllPath / NvngxPath may place the companion in another directory.
+        // Retain the marker and export checks below for either lookup.
+        if (!proxy) proxy=GetModuleHandleW(L"openrr-ngx-host.dll");
+        using Marker = unsigned int (*)();
+        auto marker = proxy ? reinterpret_cast<Marker>(GetProcAddress(proxy, "OpenRrNgxProxyMarker")) : nullptr;
+        if (!marker || marker() != 0x4f520001u ||
+            !GetProcAddress(proxy, "NVSDK_NGX_D3D12_CreateFeature") ||
+            !GetProcAddress(proxy, "NVSDK_NGX_D3D12_EvaluateFeature") ||
+            !GetProcAddress(proxy, "NVSDK_NGX_D3D12_ReleaseFeature")) {
+            log("[openrr-host] compatible openrr-ngx-host.dll not loaded; check Libraries.NvngxPath; independent ASI retained"); return;
+        }
+        DWORD old=0;
+        if (!VirtualProtect(at,6,PAGE_EXECUTE_READWRITE,&old)) return;
+        std::memset(at,0x90,6);
+        DWORD ignored; VirtualProtect(at,6,old,&ignored); FlushInstructionCache(GetCurrentProcess(),at,6);
+        g_optifg_host_active=true;
+        log("[openrr-host] EXPERIMENT enabled; capability branch bypassed, path branch preserved");
+    });
+    return g_optifg_host_active;
+}
+#endif
 } // namespace
 
 // Called by OptiScaler from its DllMain, under the loader lock: hooks and INI read only (Item #8).
+#ifdef OPENRR_EXPERIMENTAL_OPTIFG_HOST
+// Prototype-only inner NGX endpoints. Never call outer NGX trampolines on failure.
+extern "C" __declspec(dllexport) NVSDK_NGX_Result RR_NGX_MSABI OpenRrHostCreateD3D12(
+    ID3D12GraphicsCommandList* cmd, NVSDK_NGX_Feature feature, NVSDK_NGX_Parameter* params, NVSDK_NGX_Handle** out) {
+    try { return create_d3d12_rr(cmd, feature, params, out, true); }
+    catch (...) { return NVSDK_NGX_Result_Fail; }
+}
+extern "C" __declspec(dllexport) NVSDK_NGX_Result RR_NGX_MSABI OpenRrHostEvaluateD3D12(
+    ID3D12GraphicsCommandList* cmd, const NVSDK_NGX_Handle* handle, NVSDK_NGX_Parameter* params, void* callback) {
+    try { return evaluate_d3d12_rr(cmd, handle, params, callback, true); }
+    catch (...) { return NVSDK_NGX_Result_Fail; }
+}
+extern "C" __declspec(dllexport) NVSDK_NGX_Result RR_NGX_MSABI OpenRrHostReleaseD3D12(NVSDK_NGX_Handle* handle) {
+    try { return release_d3d12_rr(handle, true); }
+    catch (...) { return NVSDK_NGX_Result_Fail; }
+}
+#endif
+
 extern "C" __declspec(dllexport) void InitializeASI() {
     static bool done = false;
     if (done) return;

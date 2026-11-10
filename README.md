@@ -8,6 +8,12 @@
 
 ## 本仓库做了什么
 
+### 可选 OptiFG 宿主模式
+
+通用发行配置保持 `openrr-amd.ini` 中 `[OpenRR] OptiFGHost=false`，默认走独立 RR 路径。需要 **Upscaler 输入帧生成**（例如 `FGInput=upscaler`、`FGOutput=xefg`）的用户，可按 [OptiFG 安装说明](asi/OPTIFG.md) 配置额外的 `openrr-ngx-host.dll`，再将 `OptiFGHost` 设为 `true` 并重启游戏。不要使用旧测试包的 `_nvngx.dll`。
+
+启用宿主模式后，在菜单关闭 FG 不会自动退出宿主模式；恢复独立 RR 需设回 `false` 并重启。宿主包装和参数处理可能增加开销，FG 本身另有资源准备与插帧成本，尚未量化相对独立 RR 的性能差异。仅替换新版 ASI、保持开关关闭，不会启动这条宿主桥接。
+
 上游 OpenRR 默认编译为外部 `OpenNrRrRuntime.dll`，需要搭配专门修改过的定制版 OptiScaler 才能调用。本仓库将其封装为面向**官方原版 [OptiScaler](https://github.com/optiscaler/OptiScaler)** 的单文件插件 `openrr-amd.asi`，并补充了以下核心特性与修复：
 
 ### 1. 单文件 `.asi` 插件与纯 MinGW 构建链

@@ -33,7 +33,7 @@ python3 asi/build/embed_font.py "$font" "$out/rr_menu_font.hpp" kMenuFont
 
 common_cxx=(-std=c++20 -mf16c -O2 -fno-strict-aliasing -DNDEBUG
             -DOPENRR_BUILD_STAMP="\"$stamp\""
-            -DONR_RR_BUILDING -DONR_RR_STATIC
+            -DONR_RR_BUILDING -DONR_RR_STATIC -DOPENRR_EXPERIMENTAL_OPTIFG_HOST
             -I"$vk_inc" -Igpu/include -Igpu/src -Iruntime/include -Iruntime/src
             -Iasi/src -I"$minhook/include" -I"$imgui" -I"$out")
 
@@ -102,6 +102,7 @@ rm -f "$out/openrr-amd.debug"
 echo "[4/4] Building runtime SPIR-V shaders & staging package..."
 python3 asi/build/build_shaders.py "$glslang" gpu "$stage/openrr-amd/shaders"
 cp asi/openrr-amd.ini "$stage/openrr-amd.ini"
+"$cxx" -std=c++17 -O2 -shared -static -Iasi/src asi/src/optifg_ngx_proxy.cpp -o "$stage/openrr-ngx-host.dll"
 mkdir -p -- "$out/occ_nopad" "$out/occ_pad16k"
 "$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_FAR=2 -DLT_Q16=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -Igpu/shaders/include gpu/shaders/enc0_stage_32_64.comp -o "$out/occ_nopad/enc0_stage_32_64_f_lt.spv" > /dev/null
 "$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_POST_PAIR=1 -DLT_POST_EXP=1 -DLT_POST_NOCORNER=1 -DLT_POST_NETH=1 -Igpu/shaders/include gpu/shaders/post.comp -o "$out/occ_nopad/post_f_lt.spv" > /dev/null
