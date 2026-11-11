@@ -8,7 +8,7 @@
 
 ---
 
-当前整合上游 **v0.1.4**，采用其 Fast 模式显存复用与预投影权重优化，并保留本分支的 ASI 集成、菜单和 GPU 资源生命周期保护。旧版本的测试数据见下方历史记录。
+当前整合上游 **v0.1.5**，采用其 Fast 模式显存复用与预投影权重优化，并保留本分支的 ASI 集成、菜单和 GPU 资源生命周期保护。旧版本的测试数据见下方历史记录。
 
 ## 本仓库做了什么
 
@@ -24,19 +24,31 @@
 - **零外部运行时 DLL**：将 `OpenNrRrRuntime` 与 `gpu` 引擎直接静态内嵌进单个 `openrr-amd.asi`（Release strip 后约 3.0 MB），放入任何官方原版 OptiScaler 的 `plugins\` 目录即可直接接管 DLSS Ray Reconstruction（DLSS-D）。
 - **极简依赖与跨平台兼容**：提供纯 MinGW-w64 一键构建脚本（`asi/build/build_asi.sh`），静态链接运行时库并通过汇编桩按需延迟解析 Vulkan 入口函数；PE 导入表仅含 5 个系统基础 DLL（`KERNEL32` / `USER32` / `SHELL32` / `msvcrt` / `bcrypt`），同时兼容 Windows 原生与 Linux Wine / Proton（RADV）。
 
-### 2. 完整的 NGX 拦截、状态恢复与多后端路由
-- **非阻塞能力探测**：自动改写 NGX `SuperSamplingDenoising` 能力参数；首次查询仅做同步轻量检查（校验 `nvngx_dlssd.dll` 310.9.1 版本号 + 实例级 Vulkan RDNA4 特性查询，带 30 秒失败缓存），将权重解析与管线编译全部放到 `CreateFeature` 后台线程，不阻塞游戏主线程。
-- **D3D12 Direct 完整 Compute 状态恢复**：在发现 D3D12 设备时即通过 MinHook 挂钩 `D3D12Core` 底层函数（不触碰对象虚表），全程追踪并在 `Record` 后完整恢复游戏的 Descriptor Heaps、Compute Root Signature、全部 Root 实参（Descriptor Table / CBV / SRV / UAV / 32-bit Root Constants）以及 PSO / State Object。无需依赖定制版 OptiScaler 内部恢复逻辑，即可原生支持《生化危机 9 (`re9.exe`)》《怪物猎人：荒野》《龙之信条 2》《007 First Light》等游戏。
-- **D3D12 ↔ Vulkan 桥接自动回退与硬化**：在无 `amdxc64.dll` ELF 直通的环境（如 Linux vkd3d-proton，或手动指定 `Backend = vulkan`）下自动回退至命令列表切分（Split）+ Vulkan 共享资源互操作桥接；补齐防自递归回退保护以及 Split Barrier / Enhanced Barrier / RTAS / MetaCommand 拒绝规则。
-- **原生 Vulkan 游戏直通（`RecordVk`）**：通过 `LdrRegisterDllNotification` 监听晚加载的 `vulkan-1.dll`，在游戏 `vkCreateDevice` 时自动注入所需扩展、特性与独立计算队列，并在设备未就绪时自动隐藏 RR 选项避免崩溃。
-- **无全局 DXGI 伪装时的 Streamline RR**：配合 `OptiPatcher.asi`（`Dxgi=auto/false`）时，OpenRR 仅在 `sl.dlss_d.dll` 的 `slOnPluginLoad` 同步调用期间，把 OpenRR 可用的 AMD 适配器在 `sl.common` 的 SystemCaps 中临时显示为 NVIDIA，返回后逐字段恢复，并从插件返回的 JSON 中去掉两个 NVX 专用 Vulkan 扩展。已知限制：假定 slInit 加载插件期间没有其他线程读取这份 caps。
+Three modes, picked in the menu or with `Mode` in `[OpenNR-RR]` (`new`, `fast`, `legacy`), which flip live:
 
-### 3. 与 [`dlssnr-amd.asi`](https://gitlab.com/mochizuki0323/DLSSNR-AMD) 无缝共存
-- 当 `plugins\` 目录下同时存在 [`dlssnr-amd.asi`](https://gitlab.com/mochizuki0323/DLSSNR-AMD) 与 `openrr-amd.asi` 时，无需修改任何一方配置：OpenRR 会自动启用 D3D12 Direct 模式（不叠加第二层命令列表 vtable hook），自动识别并追踪切分后的 continuation 命令列表，并在菜单打开时透传 `Insert`（OptiScaler）与 `End`（`dlssnr-amd`）快捷键。
+| | Performance 1080p | Quality 1080p | Against NVIDIA's own (RTX card) |
+|---|---|---|---|
+| **New** (default): cheaper kernels | about 2.0 ms | about 2.9 ms | about 60.8 dB on the display |
+| **Fast (experimental)**: New with more cut, and the network's deepest levels read from the previous frame | about 1.8 ms | about 2.75 ms | about 55 dB on the display |
+| **Legacy**: the kernels closest to NVIDIA's | about 2.2 ms | about 3.27 ms | about 63 dB on the display |
 
-### 4. 内置 ImGui 停靠侧边栏
-- 默认跟随 `OptiScaler.ini [Menu] ShortcutKey`（默认 `Insert`）同步开关，并根据 OptiScaler 的菜单缩放比例自动停靠在 OptiScaler 主面板右侧（支持 SDR、HDR10 PQ 与 scRGB 合成）。
-- 支持游戏内实时切换 `Fast` / `Legacy` 网络模式、D3D12 后端、深度类型及各项附加引导图（Guides），修改自动保存至 `openrr-amd.ini`。
+Measured on an RX 9070 XT, outside a game. The first start builds the kernels of New and Fast in the background, with the
+image on Legacy until they're ready. Fast changes more from frame to frame in motion and on very bright points: look at
+those before keeping it.
+
+### 2. 完整的 NGX 拦截、状态恢复与多后端路由
+- **非阻塞能力探测**：自动改写 NGX `SuperSamplingDenoising` 能力参数；首次查询仅做同步轻量检查（校验 `nvngx_dlssd.dll` 310.9.1 版本号 + 实例级 Vulkan RDNA4 特性查询，带 30 秒失败缓存），将权重解析与管线编译全部放到 `CreateFeature` 后台线程，不阻塞游戏主线程。
+- **D3D12 Direct 完整 Compute 状态恢复**：在发现 D3D12 设备时即通过 MinHook 挂钩 `D3D12Core` 底层函数（不触碰对象虚表），全程追踪并在 `Record` 后完整恢复游戏的 Descriptor Heaps、Compute Root Signature、全部 Root 实参（Descriptor Table / CBV / SRV / UAV / 32-bit Root Constants）以及 PSO / State Object。无需依赖定制版 OptiScaler 内部恢复逻辑，即可原生支持《生化危机 9 (`re9.exe`)》《怪物猎人：荒野》《龙之信条 2》《007 First Light》等游戏。
+- **D3D12 ↔ Vulkan 桥接自动回退与硬化**：在无 `amdxc64.dll` ELF 直通的环境（如 Linux vkd3d-proton，或手动指定 `Backend = vulkan`）下自动回退至命令列表切分（Split）+ Vulkan 共享资源互操作桥接；补齐防自递归回退保护以及 Split Barrier / Enhanced Barrier / RTAS / MetaCommand 拒绝规则。
+- **原生 Vulkan 游戏直通（`RecordVk`）**：通过 `LdrRegisterDllNotification` 监听晚加载的 `vulkan-1.dll`，在游戏 `vkCreateDevice` 时自动注入所需扩展、特性与独立计算队列，并在设备未就绪时自动隐藏 RR 选项避免崩溃。
+- **无全局 DXGI 伪装时的 Streamline RR**：配合 `OptiPatcher.asi`（`Dxgi=auto/false`）时，OpenRR 仅在 `sl.dlss_d.dll` 的 `slOnPluginLoad` 同步调用期间，把 OpenRR 可用的 AMD 适配器在 `sl.common` 的 SystemCaps 中临时显示为 NVIDIA，返回后逐字段恢复，并从插件返回的 JSON 中去掉两个 NVX 专用 Vulkan 扩展。已知限制：假定 slInit 加载插件期间没有其他线程读取这份 caps。
+
+### 3. 与 [`dlssnr-amd.asi`](https://gitlab.com/mochizuki0323/DLSSNR-AMD) 无缝共存
+- 当 `plugins\` 目录下同时存在 [`dlssnr-amd.asi`](https://gitlab.com/mochizuki0323/DLSSNR-AMD) 与 `openrr-amd.asi` 时，无需修改任何一方配置：OpenRR 会自动启用 D3D12 Direct 模式（不叠加第二层命令列表 vtable hook），自动识别并追踪切分后的 continuation 命令列表，并在菜单打开时透传 `Insert`（OptiScaler）与 `End`（`dlssnr-amd`）快捷键。
+
+### 4. 内置 ImGui 停靠侧边栏
+- 默认跟随 `OptiScaler.ini [Menu] ShortcutKey`（默认 `Insert`）同步开关，并根据 OptiScaler 的菜单缩放比例自动停靠在 OptiScaler 主面板右侧（支持 SDR、HDR10 PQ 与 scRGB 合成）。
+- 支持游戏内实时切换 `Fast` / `Legacy` 网络模式、D3D12 后端、深度类型及各项附加引导图（Guides），修改自动保存至 `openrr-amd.ini`。
 
 ### 5. 底层 `gpu/` 与 `runtime/` 修复（已独立提交，便于上游合入）
 - **严格 GPU 退休证明与 Overflow 复用池**：移除按录制次数或超时猜测的槽位回收，改为结合 GPU 时间戳写回与游戏侧 `ID3D12CommandAllocator::Reset` / `VkCommandPool` 重置证明；64 个主槽位（自建列表独立占用 `kOwnSlot`）配合 64 个按需复用的 Overflow 槽池，满载时安全跳帧不抛异常。

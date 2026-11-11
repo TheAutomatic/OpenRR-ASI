@@ -27,10 +27,10 @@ void Kernels::load(Gpu& dev, const std::string& dir, const std::vector<std::stri
         if (!k_.count(n)) k_[n] = dev.load(path_to_u8(base / u8_to_path(n + ".spv")), subgroup_of(n));
 }
 
-void Kernels::load_lite(Gpu& dev, const std::string& dir, const std::vector<std::string>& names) {
+void Kernels::load_lite(Gpu& dev, const std::string& dir, const std::vector<std::string>& names, const char* suffix) {
     const auto base = u8_to_path(dir);
     for (auto& n : names) {
-        auto p = base / u8_to_path(n + "_lt.spv");
+        auto p = base / u8_to_path(n + suffix + ".spv");
         if (!k_.count(n) && std::filesystem::exists(p)) k_[n] = dev.load(path_to_u8(p), subgroup_of(n));
     }
 }
