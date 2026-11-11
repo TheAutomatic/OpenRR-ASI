@@ -633,12 +633,10 @@ void main() {
     }
 #endif
 #ifdef ATTR_DEBUG_RAW
-#ifdef ATTR_DEBUG_RAW
     o = U32x4View(uint64_t(pc.attr) + uint64_t(pc.pad.x * pc.pad.y) * 48ul);
     for(uint q=0u;q<6u;++q)
         o.v[gid*6u+q]=uvec4(attr_pair(q*8u,q*8u+1u),attr_pair(q*8u+2u,q*8u+3u),attr_pair(q*8u+4u,q*8u+5u),attr_pair(q*8u+6u,q*8u+7u));
     o = U32x4View(uint64_t(pc.attr));
->>>>>>> 346f176 (Checkpoint ACO integration and validated runtime baseline)
 #endif
 #ifdef ATTR64
     // the dither of enc0 (DITH in onr_block_w1.glsl), two attributes per word
