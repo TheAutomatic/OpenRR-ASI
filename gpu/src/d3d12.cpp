@@ -961,7 +961,12 @@ Kernel D3dDevice::load(const std::string& spv_path, uint32_t subgroup) {
             if (stem == "clear_range" && !clear_range_.pso) { pso->AddRef(); clear_range_ = k; }
             return k;
         } catch (const std::exception& e) {
-            throw std::runtime_error(stem + ": required ACO: " + e.what());
+            // ONR_ACO_OPTIONAL (diagnostics): kernels without an ACO record in the
+            // active records dir fall back to LLPC instead of failing, so operator-level
+            // ACO/LLPC mixing can bisect numerical divergences. Unset = hard requirement.
+            if (!getenv("ONR_ACO_OPTIONAL"))
+                throw std::runtime_error(stem + ": required ACO: " + e.what());
+            log_compiler("compiler=LLPC (ACO record unavailable: " + std::string(e.what()) + ")");
         }
     } else log_compiler("compiler=LLPC");
     std::vector<uint8_t> elf = elf_of(spv_path, subgroup);
