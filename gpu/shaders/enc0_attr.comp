@@ -69,9 +69,39 @@ uint64_t opt_addr(uint k) {
 }
 uint opt_flags() { return (pc.hist_off & 2u) != 0u ? floatBitsToUint(pc.prm.v[280u]) : 0u; }
 bool hist_disabled() { return (pc.hist_off & 1u) != 0u; }
+// The optional guide channels' log2 and the wide path's history blend/decode: deterministic under both
+// compilers. The hardware log2/exp2 lowerings and fma contraction disagree by ULPs between ACO and LLPC,
+// and the fast mode's history feedback amplifies that seed on wide (guide) frames — the stage-2 guides=1
+// divergence. Scoped to the wide _lt variant only: the non-wide kernel measured bit-identical without it,
+// and Legacy keeps the library calls and its bit-exact record set.
+#if defined(LT_ATTR_TAB) && defined(ATTR_WIDE)
+float attr_log2(float x) {
+    uint b = floatBitsToUint(x);
+    precise float e = float(int(b >> 23) - 127);
+    precise float m = uintBitsToFloat((b & 0x7fffffu) | 0x3f800000u) - 1.0;
+    precise float r = fma(m, -0.079150554, 0.31221360);
+    r = fma(m, r, -0.66951370);
+    r = fma(m, r, 1.43609740);
+    r = fma(m, r, 0.00020418);
+    return e + r;
+}
+// same for the history decode's exp2: exponent split + explicit-fma quartic (max 7.3e-6 relative)
+float attr_exp2(float x) {
+    precise float i = floor(x);
+    precise float f = x - i;
+    precise float p = fma(f, 0.01367648, 0.05166693);
+    p = fma(f, p, 0.24171027);
+    p = fma(f, p, 0.69293127);
+    p = fma(f, p, 1.00000729);
+    return uintBitsToFloat(floatBitsToUint(p) + (uint(int(i)) << 23));
+}
+#else
+#define attr_log2(x) log2(x)
+#define attr_exp2(x) exp2(x)
+#endif
 // the signed log of the optional scalar guides (attributes 30..32): NaN 0, clamped to +-8
 float signed_log(float v) {
-    precise float s = (log2(fma(abs(v), 100.0, 1.0)) * 0.30103000998497009277) * (v >= 0.0 ? 0.36000001430511474609 : -0.36000001430511474609);
+    precise float s = (attr_log2(fma(abs(v), 100.0, 1.0)) * 0.30103000998497009277) * (v >= 0.0 ? 0.36000001430511474609 : -0.36000001430511474609);
     return isnan(s) ? 0.0 : clamp(s, -8.0, 8.0);
 }
 
@@ -239,8 +269,13 @@ float blend1(vec4 t, uvec2 k, inout bool ok) {
 #define ENC_F32 0
 #endif
 #if ENC_F32
-// fast variant (_f): the same blend in fp32, not the exact value rounded once
+#if defined(LT_ATTR_TAB) && defined(ATTR_WIDE)
+// the wide _lt variant: the blend uncontracted (precise) so ACO and LLPC agree bit for bit
+#define BLEND4(T, n) {         vec4 ta = T(p), tb = T(p + ivec2(1, 0)), tc = T(p + ivec2(0, 1)), td = T(p + ivec2(1, 1));         vec2 f = vec2(k) * (1.0 / 256.0);         precise vec4 r_ = (ta * (1.0 - f.x) + tb * f.x) * (1.0 - f.y) + (tc * (1.0 - f.x) + td * f.x) * f.y; r = r_; }
+#else
+// every other ENC_F32 build (Legacy _f and the non-wide _lt): the same blend in fp32, as before
 #define BLEND4(T, n) {         vec4 ta = T(p), tb = T(p + ivec2(1, 0)), tc = T(p + ivec2(0, 1)), td = T(p + ivec2(1, 1));         vec2 f = vec2(k) * (1.0 / 256.0);         r = (ta * (1.0 - f.x) + tb * f.x) * (1.0 - f.y) + (tc * (1.0 - f.x) + td * f.x) * f.y; }
+#endif
 #else
 #define BLEND4(T, n) {         vec4 ta = T(p), tb = T(p + ivec2(1, 0)), tc = T(p + ivec2(0, 1)), td = T(p + ivec2(1, 1));         bool ok = true;         for (int i = 0; i < n; ++i) r[i] = blend1(vec4(ta[i], tb[i], tc[i], td[i]), k, ok);         if (!ok) {             dvec2 f = dvec2(k) / 256.0lf;             precise dvec4 e = (dvec4(ta) * (1.0lf - f.x) + dvec4(tb) * f.x) * (1.0lf - f.y) + (dvec4(tc) * (1.0lf - f.x) + dvec4(td) * f.x) * f.y;             r = vec4(e);         } }
 #endif
@@ -270,7 +305,7 @@ float decode_hist(float v, float rexp) {
     t = (t > 9.99999974737875163555e-05 || isnan(t)) ? t : 9.99999974737875163555e-05;
     precise float a = t * 2.7777776718139648438;
     precise float b = a * 3.3219280242919921875;
-    precise float e = exp2(b);
+    precise float e = attr_exp2(b);
     precise float r = ((e - 1.0) * 0.0099999997764825820923) * rexp;
     return r;
 }
@@ -288,7 +323,7 @@ float hist_closed(float v, float rho1) {
 
 float enc_log(float x) {
     precise float a = max(fma(x, 100.0, 1.0), 9.9999997473787516356e-05);
-    precise float r = (log2(a) * 0.30103000998497009277) * 0.36000001430511474609;
+    precise float r = (attr_log2(a) * 0.30103000998497009277) * 0.36000001430511474609;
     return r;
 }
 
@@ -477,8 +512,8 @@ void main() {
     // the disocclusion mask's red channel goes into both logs (0 without one: l + 0 is l)
     float dm = uint64_t(pc.disocc) != 0ul ? AT32(F32Buf, pc.disocc, pix(X), 4u).v[0] : 0.0;
     precise float lm1 = dm + l1, lm2 = dm + l2;
-    precise float mvlog = (log2(lm1) * 0.69314718246459960938) * C(0x3a0);
-    precise float rflog = (log2(lm2) * 0.69314718246459960938) * C(0x3a0);
+    precise float mvlog = (attr_log2(lm1) * 0.69314718246459960938) * C(0x3a0);
+    precise float rflog = (attr_log2(lm2) * 0.69314718246459960938) * C(0x3a0);
 
     vec3 col = col_at(X);
     uint base = pi * 48u;
@@ -596,7 +631,7 @@ void main() {
     // 31: the SSS guide, exposed, as a signed log clamped to +-8 (NaN 0)
     if (uint64_t(pc.sss) != 0ul) {
         precise float v = expo * AT32(F32Buf, pc.sss, pix(X), 4u).v[0];
-        precise float s = (log2(fma(abs(v), 100.0, 1.0)) * 0.30103000998497009277) * (v >= 0.0 ? 0.36000001430511474609 : -0.36000001430511474609);
+        precise float s = (attr_log2(fma(abs(v), 100.0, 1.0)) * 0.30103000998497009277) * (v >= 0.0 ? 0.36000001430511474609 : -0.36000001430511474609);
         put(base, 31u, isnan(s) ? 0.0 : clamp(s, -8.0, 8.0));
     }
     // 30: the luma of the exposed colour (as attributes 0..2 take it) less the exposed ColorBeforeTransparency
