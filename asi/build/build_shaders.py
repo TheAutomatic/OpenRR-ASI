@@ -11,8 +11,8 @@ import sys
 def parse_fastmode(cmake_path):
     lt_defs = {}
     text = open(cmake_path, "r", encoding="utf-8").read()
-    for m in re.finditer(r"set\(\s*(LT_DEFS_[A-Za-z0-9_]+)\s+([^)]+)\)", text):
-        key = m.group(1)[len("LT_DEFS_"):]
+    for m in re.finditer(r"set\(\s*((?:LT|LX)_DEFS_[A-Za-z0-9_]+)\s+([^)]+)\)", text):
+        key = m.group(1)
         defs = m.group(2).split()
         lt_defs[key] = defs
     return lt_defs
@@ -60,7 +60,9 @@ def main():
 
     shaders_dir = os.path.join(gpu_dir, "shaders")
     inc_dir = os.path.join(shaders_dir, "include")
-    lt_defs = parse_fastmode(os.path.join(gpu_dir, "fastmode.cmake"))
+    fm_defs = parse_fastmode(os.path.join(gpu_dir, "fastmode.cmake"))
+    lt_defs = {k[len("LT_DEFS_"):]: v for k, v in fm_defs.items() if k.startswith("LT_DEFS_")}
+    lx_defs = {k[len("LX_DEFS_"):]: v for k, v in fm_defs.items() if k.startswith("LX_DEFS_")}
     plain_runtime, flow_kernels = parse_shader_lists(gpu_dir)
 
     jobs = []
@@ -95,6 +97,12 @@ def main():
                     slot = flow_kernels.index(name)
                     fw = 1 if slot > 0 else 0
                     lite_spv(f"{name}_fl", src, ["-DENC_F32=1", "-DFLOW=1", f"-DFLOW_SLOT={slot}", f"-DFLOW_WAIT={fw}"] + ltd)
+
+        if name in lx_defs:  # the experimental level: the same kernels again as _lx (as gpu/CMakeLists.txt)
+            lxd = [f"-D{x}" for x in lx_defs[name]]
+            add_spv(f"{name}_f_lx", src, ["-DENC_F32=1"] + lxd)
+            if name == "enc0_stage_32_64":
+                add_spv(f"{name}_f_w_lx", src, ["-DENC_F32=1", "-DATTR_WIDE=1"] + lxd)
 
         if name in plain_runtime:
             add_spv(name, src, [])
