@@ -107,23 +107,23 @@ python3 asi/build/build_shaders.py "$glslang" gpu "$stage/openrr-amd/shaders"
 cp asi/openrr-amd.ini "$stage/openrr-amd.ini"
 "$cxx" -std=c++17 -O2 -shared -static -Iasi/src asi/src/optifg_ngx_proxy.cpp -o "$stage/openrr-ngx-host.dll"
 mkdir -p -- "$out/occ_nopad" "$out/occ_pad16k"
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_FAR=2 -DLT_Q16=1 -DLT_VO=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -Igpu/shaders/include gpu/shaders/enc0_stage_32_64.comp -o "$out/occ_nopad/enc0_stage_32_64_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_POST_PAIR=1 -DLT_POST_EXP=1 -DLT_POST_NOCORNER=1 -DLT_POST_NETH=1 -Igpu/shaders/include gpu/shaders/post.comp -o "$out/occ_nopad/post_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_FAR=3 -DLT_Q16=1 -DLT_VO=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -Igpu/shaders/include gpu/shaders/dec_up_32_64_64.comp -o "$out/occ_nopad/dec_up_32_64_64_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_FAR=3 -DLT_Q16=1 -DLT_VO=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -Igpu/shaders/include gpu/shaders/dec_head_32_64.comp -o "$out/occ_nopad/dec_head_32_64_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -Igpu/shaders/include gpu/shaders/enc_stage_64_64_96.comp -o "$out/occ_nopad/enc_stage_64_64_96_f_lt.spv" > /dev/null
+"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_FAR=2 -DLT_FAR1=2 -DLT_Q16=1 -DLT_VO=1 -DLT_SYM=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -Igpu/shaders/include gpu/shaders/enc0_stage_32_64.comp -o "$out/occ_nopad/enc0_stage_32_64_f_lt.spv" > /dev/null
+"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_POST_PAIR=1 -DLT_POST_HW=1 -DLT_POST_LDS=1 -DLT_POST_EXPO=1 -Igpu/shaders/include gpu/shaders/post.comp -o "$out/occ_nopad/post_f_lt.spv" > /dev/null
+"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_FAR=3 -DLT_FAR1=3 -DLT_Q16=1 -DLT_VO=1 -DLT_SYM=1 -DLT_UP8=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -Igpu/shaders/include gpu/shaders/dec_up_32_64_64.comp -o "$out/occ_nopad/dec_up_32_64_64_f_lt.spv" > /dev/null
+"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_FAR=3 -DLT_FAR1=3 -DLT_Q16=1 -DLT_VO=1 -DLT_SYM=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -Igpu/shaders/include gpu/shaders/dec_head_32_64.comp -o "$out/occ_nopad/dec_head_32_64_f_lt.spv" > /dev/null
+"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_MI8=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -Igpu/shaders/include gpu/shaders/enc_stage_64_64_96.comp -o "$out/occ_nopad/enc_stage_64_64_96_f_lt.spv" > /dev/null
 
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_FAR=2 -DLT_Q16=1 -DLT_VO=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -DLDS_OCC_PAD=8192 -Igpu/shaders/include gpu/shaders/enc0_stage_32_64.comp -o "$out/occ_pad16k/enc0_stage_32_64_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_POST_PAIR=1 -DLT_POST_EXP=1 -DLT_POST_NOCORNER=1 -DLT_POST_NETH=1 -DPOST_OCC_PAD=4096 -Igpu/shaders/include gpu/shaders/post.comp -o "$out/occ_pad16k/post_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_FAR=3 -DLT_Q16=1 -DLT_VO=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -DLDS_OCC_PAD=8192 -Igpu/shaders/include gpu/shaders/dec_up_32_64_64.comp -o "$out/occ_pad16k/dec_up_32_64_64_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_FAR=3 -DLT_Q16=1 -DLT_VO=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -DLDS_OCC_PAD=8192 -Igpu/shaders/include gpu/shaders/dec_head_32_64.comp -o "$out/occ_pad16k/dec_head_32_64_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -DLDS_OCC_PAD=8192 -Igpu/shaders/include gpu/shaders/enc_stage_64_64_96.comp -o "$out/occ_pad16k/enc_stage_64_64_96_f_lt.spv" > /dev/null
+"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_FAR=2 -DLT_FAR1=2 -DLT_Q16=1 -DLT_VO=1 -DLT_SYM=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -DLDS_OCC_PAD=8192 -Igpu/shaders/include gpu/shaders/enc0_stage_32_64.comp -o "$out/occ_pad16k/enc0_stage_32_64_f_lt.spv" > /dev/null
+"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_POST_PAIR=1 -DLT_POST_HW=1 -DLT_POST_LDS=1 -DLT_POST_EXPO=1 -DPOST_OCC_PAD=4096 -Igpu/shaders/include gpu/shaders/post.comp -o "$out/occ_pad16k/post_f_lt.spv" > /dev/null
+"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_FAR=3 -DLT_FAR1=3 -DLT_Q16=1 -DLT_VO=1 -DLT_SYM=1 -DLT_UP8=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -DLDS_OCC_PAD=8192 -Igpu/shaders/include gpu/shaders/dec_up_32_64_64.comp -o "$out/occ_pad16k/dec_up_32_64_64_f_lt.spv" > /dev/null
+"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_FAR=3 -DLT_FAR1=3 -DLT_Q16=1 -DLT_VO=1 -DLT_SYM=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -DLDS_OCC_PAD=8192 -Igpu/shaders/include gpu/shaders/dec_head_32_64.comp -o "$out/occ_pad16k/dec_head_32_64_f_lt.spv" > /dev/null
+"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_MI8=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -DLDS_OCC_PAD=8192 -Igpu/shaders/include gpu/shaders/enc_stage_64_64_96.comp -o "$out/occ_pad16k/enc_stage_64_64_96_f_lt.spv" > /dev/null
 
 mkdir -p -- "$out/b2_base" "$out/b2_post_exp" "$out/b2_post_log" "$out/b2_attr_rcp" "$out/b2_attr_same" "$out/b2_c64_far3"
 "$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_POST_PAIR=1 -Igpu/shaders/include gpu/shaders/post.comp -o "$out/b2_base/post_f_lt.spv" > /dev/null
 "$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_ATTR_TAB=1 -Igpu/shaders/include gpu/shaders/enc0_attr.comp -o "$out/b2_base/enc0_attr_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -Igpu/shaders/include gpu/shaders/enc_stage_64_64_96.comp -o "$out/b2_base/enc_stage_64_64_96_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -Igpu/shaders/include gpu/shaders/dec_up_64_64_96.comp -o "$out/b2_base/dec_up_64_64_96_f_lt.spv" > /dev/null
+"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_MI8=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -Igpu/shaders/include gpu/shaders/enc_stage_64_64_96.comp -o "$out/b2_base/enc_stage_64_64_96_f_lt.spv" > /dev/null
+"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_UP8=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -Igpu/shaders/include gpu/shaders/dec_up_64_64_96.comp -o "$out/b2_base/dec_up_64_64_96_f_lt.spv" > /dev/null
 "$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -Igpu/shaders/include gpu/shaders/dec_dfn_64_64.comp -o "$out/b2_base/dec_dfn_64_64_f_lt.spv" > /dev/null
 
 "$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_POST_PAIR=1 -DLT_POST_EXP=1 -DLT_POST_NOCORNER=1 -DLT_POST_NETH=1 -Igpu/shaders/include gpu/shaders/post.comp -o "$out/b2_post_exp/post_f_lt.spv" > /dev/null
