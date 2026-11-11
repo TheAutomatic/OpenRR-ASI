@@ -85,14 +85,39 @@
 #else
 #define F9(M)
 #endif
+// LT_ROLL_HD=1 (a numeric define from fastmode.cmake; never spell [[...]] there, CMake eats the
+// brackets): keep the attention head loop rolled. ACO fully unrolls the 4 heads (4x the fp8/f16
+// WMMA static count and the 256-VGPR ceiling on the deep C>=96 kernels) where LLPC keeps it rolled.
 #ifndef HD_UNROLL
+#if defined(LT_ROLL_HD) && LT_ROLL_HD
+#define HD_UNROLL [[dont_unroll]]
+#else
 #define HD_UNROLL
+#endif
 #endif
 #ifndef MLP64
 #define MLP64 (ENC_C <= 64 || SPLIT == 2)
 #endif
 #ifndef J_UNROLL
+#if defined(LT_ROLL_J) && LT_ROLL_J
+#define J_UNROLL [[dont_unroll]]
+#else
 #define J_UNROLL
+#endif
+#endif
+#ifndef J2_UNROLL
+#if defined(LT_ROLL_J2) && LT_ROLL_J2
+#define J2_UNROLL [[dont_unroll]]
+#else
+#define J2_UNROLL
+#endif
+#endif
+#ifndef UP_UNROLL
+#if defined(LT_ROLL_UP) && LT_ROLL_UP
+#define UP_UNROLL [[dont_unroll]]
+#else
+#define UP_UNROLL
+#endif
 #endif
 #ifndef MLP_SLICE_LOOP
 #define MLP_SLICE_LOOP J_UNROLL
@@ -517,7 +542,7 @@ void main() {
     }
     WG_SYNC();
 #ifndef PROF_NOUP
-    for (uint tile = s; tile < 4u * NT; tile += NSG) {
+    UP_UNROLL for (uint tile = s; tile < 4u * NT; tile += NSG) {
         uint pos = tile / NT, nt = tile % NT;
         ACC acc = bias_acc(pc.up_b, pos * ENC_C + nt * 16u);
         for (uint k = 0u; k < ENC_CP; k += 16u) {
@@ -874,7 +899,7 @@ void main() {
     FOR_NO(FC2B_T)
     // 32-neuron slices: half hf computes hidden tile j + 16 hf, the two GELU tiles meet in a double buffer over
     // the keys (all key reads are behind the exchange barrier); fc2 of the own output tiles over both
-    for (uint j = 0u; j < LT_HID; j += 32u) {
+    J2_UNROLL for (uint j = 0u; j < LT_HID; j += 32u) {
         uint jt = j + 16u * hf;
         ACC h0 = bias_acc_t(pc.fc1_b, jt);
 #define FC1_T2(cn, xn, n) { MBP blo, bhi; BPREP(blo, bhi, xn) WSTEP(h0, pc.fc1.v, WT_FC1(jt * ENC_C + (n) * 16u), WS_FC1, blo, bhi) }

@@ -219,7 +219,7 @@ void main() {
     // both subgroups have read U before head 0 overwrites it (a barrier inside the head loop costs the weight prefetch)
     WG_SYNC();
 #endif
-    for (uint hd = 0u; hd < LT_HEADS; ++hd) {
+    HD_UNROLL for (uint hd = 0u; hd < LT_HEADS; ++hd) {
         uint wq = hd * 32u * ENC_C;
 #if FP8QV
         // Q^T, V^T [dim tile][token tile] = in_a x^T, in_b x^T on e4m3 x e4m3 -> fp32, one rounding to fp16
@@ -371,7 +371,7 @@ void main() {
 #define FC2_N(m, ha, hb) { MB ba_, bb_; CPB(ba_, ha) CPB(bb_, hb) \
             FC2_1(0, m, ba_, bb_) FC2_1(1, m, ba_, bb_) FC2_1(2, m, ba_, bb_) FC2_1(3, m, ba_, bb_) FC2_45(m, ba_, bb_) }
 #if W2_SL == 64
-    for (uint j = 0u; j < LT_HID; j += 64u) {
+    MLP_SLICE_LOOP for (uint j = 0u; j < LT_HID; j += 64u) {
         ACC hb0 = bias_acc_t(pc.fc1_b, j), hb1 = bias_acc_t(pc.fc1_b, j + 16u), hb2 = bias_acc_t(pc.fc1_b, j + 32u), hb3 = bias_acc_t(pc.fc1_b, j + 48u);
         ACC h00 = hb0, h01 = hb1, h02 = hb2, h03 = hb3, h10 = hb0, h11 = hb1, h12 = hb2, h13 = hb3;
 #define FC1_K(n, xa, xb) { MA f0, f1, f2, f3; MB b_; \
@@ -386,7 +386,7 @@ void main() {
     }
 #else
     // 32-neuron slices: hidden tiles h0t (token tile a), h1t (b)
-    for (uint j = 0u; j < LT_HID; j += 32u) {
+    MLP_SLICE_LOOP for (uint j = 0u; j < LT_HID; j += 32u) {
         ACC hb0 = bias_acc_t(pc.fc1_b, j), hb1 = bias_acc_t(pc.fc1_b, j + 16u);
         ACC h00 = hb0, h01 = hb1, h10 = hb0, h11 = hb1;
 #define FC1_K2(n) { MA f0, f1; MB b_; \
