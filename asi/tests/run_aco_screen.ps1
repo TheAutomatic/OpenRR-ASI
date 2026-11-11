@@ -5,7 +5,10 @@ param([Parameter(Mandatory=$true)][string]$Candidate,
       [ValidateSet('Correctness','Short','LongCorrectness','Long','Profile')][string]$Stage='Correctness',
       [string]$Baseline='build/aco-runtime-trace/experiment-enc96-wave-rcp/data',
       [switch]$PerDataRecords,
-      [int]$TraceFrame=-1)
+      [int]$TraceFrame=-1,
+      [int]$RenderWidth=1280, [int]$RenderHeight=720,
+      [int]$OutputWidth=1920, [int]$OutputHeight=1080,
+      [ValidateSet('aco-strict','llpc')][string]$BaselineCompiler='aco-strict')
 $ErrorActionPreference='Stop'
 $workspace=(Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 Set-Location -LiteralPath $workspace
@@ -31,12 +34,14 @@ if($Stage -eq 'Profile'){$warmup=24;$frames=640;$drs=24;$rounds=2;$env:ONR_RR_ST
 for($round=0;$round -lt $rounds;$round++){
  $reverse=($round%2)-eq 1
  $first=if($reverse){$variant}else{$original};$second=if($reverse){$original}else{$variant}
+ $firstCompiler=if($reverse){'aco-strict'}else{$BaselineCompiler}
+ $secondCompiler=if($reverse){$BaselineCompiler}else{'aco-strict'}
  $dest=Join-Path $tool "runs-next-optimization-2026-11-10/$Name/$Stage/round-$round"
  if(Test-Path -LiteralPath $dest){throw "Refusing to overwrite $dest"}
  New-Item -ItemType Directory -Path $dest -Force | Out-Null
  $argsBench=@('--runtime',(Join-Path $tool 'openrr-trace.asi'),'--baseline-runtime',(Join-Path $tool 'openrr-trace.asi'),
- '--baseline-data-dir',$first,'--data-dir',$second,'--baseline-compiler','aco-strict','--candidate-compiler','aco-strict',
- '--rw','1280','--rh','720','--ow','1920','--oh','1080','--warmup',"$warmup",'--frames',"$frames",'--drs-frames',"$drs",
+ '--baseline-data-dir',$first,'--data-dir',$second,'--baseline-compiler',$firstCompiler,'--candidate-compiler',$secondCompiler,
+ '--rw',"$RenderWidth",'--rh',"$RenderHeight",'--ow',"$OutputWidth",'--oh',"$OutputHeight",'--warmup',"$warmup",'--frames',"$frames",'--drs-frames',"$drs",
  '--fast-mode','1','--optional-guides','0','--parity-all-frames',"$all",'--align-engine-phase','1','--trace-frame',"$TraceFrame",'--out',$dest)
  & (Join-Path $tool 'openrr_bench.exe') @argsBench 2>&1 | Out-File -LiteralPath (Join-Path $dest 'console.log') -Encoding utf8
  if($LASTEXITCODE -ne 0){throw "Candidate failed $Stage $round"}

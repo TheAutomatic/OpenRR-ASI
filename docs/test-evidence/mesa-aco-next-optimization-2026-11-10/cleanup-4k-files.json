@@ -1,0 +1,242 @@
+[
+  {
+    "path": "C:\\Users\\Kenny\\.codex\\worktrees\\mesa-aco-0101\\OpenRR\\build\\aco-runtime-trace\\runs-next-optimization-2026-11-10\\combination-4k\\Correctness\\round-0\\baseline-drs-0.bin",
+    "bytes": 66355200,
+    "sha256": "02fa7efa9420dfb553d58cb989fc54919c99f33ced6c517ede2f601bd99c9c9f",
+    "case": "combination-4k"
+  },
+  {
+    "path": "C:\\Users\\Kenny\\.codex\\worktrees\\mesa-aco-0101\\OpenRR\\build\\aco-runtime-trace\\runs-next-optimization-2026-11-10\\combination-4k\\Correctness\\round-0\\baseline-drs-1.bin",
+    "bytes": 66355200,
+    "sha256": "277945d40f6786d798ed79ba38dd258f21ffec10388349828c5dc03ee3bf52ea",
+    "case": "combination-4k"
+  },
+  {
+    "path": "C:\\Users\\Kenny\\.codex\\worktrees\\mesa-aco-0101\\OpenRR\\build\\aco-runtime-trace\\runs-next-optimization-2026-11-10\\combination-4k\\Correctness\\round-0\\baseline-drs-10.bin",
+    "bytes": 66355200,
+    "sha256": "a25a3b2fb28b95adbf119ffdcb0816ac1375278972d9f0c18e52f8201e6e0fdc",
+    "case": "combination-4k"
+  },
+  {
+    "path": "C:\\Users\\Kenny\\.codex\\worktrees\\mesa-aco-0101\\OpenRR\\build\\aco-runtime-trace\\runs-next-optimization-2026-11-10\\combination-4k\\Correctness\\round-0\\baseline-drs-11.bin",
+    "bytes": 66355200,
+    "sha256": "d6f252a7956e7a2e116c52d1d7b41be995d7ea08ea1f981e0ace5ec066f5314b",
+    "case": "combination-4k"
+  },
+  {
+    "path": "C:\\Users\\Kenny\\.codex\\worktrees\\mesa-aco-0101\\OpenRR\\build\\aco-runtime-trace\\runs-next-optimization-2026-11-10\\combination-4k\\Correctness\\round-0\\baseline-drs-2.bin",
+    "bytes": 66355200,
+    "sha256": "fbb77051f6431b32aaa0ea2665312032cec43a37d5d38bf6c1fd05e47d0601e4",
+    "case": "combination-4k"
+  },
+  {
+    "path": "C:\\Users\\Kenny\\.codex\\worktrees\\mesa-aco-0101\\OpenRR\\build\\aco-runtime-trace\\runs-next-optimization-2026-11-10\\combination-4k\\Correctness\\round-0\\baseline-drs-3.bin",
+    "bytes": 66355200,
+    "sha256": "ced1fb8d8443ca50f4aed8129a0180756987c6cb7a2bd7e6b878e2a15f87ca8e",
+    "case": "combination-4k"
+  },
+  {
+    "path": "C:\\Users\\Kenny\\.codex\\worktrees\\mesa-aco-0101\\OpenRR\\build\\aco-runtime-trace\\runs-next-optimization-2026-11-10\\combination-4k\\Correctness\\round-0\\baseline-drs-4.bin",
+    "bytes": 66355200,
+    "sha256": "e278f52ae3bbf3d0456c847244f18e359cfd1553b4daf0ba47fa136b0f6ddd15",
+    "case": "combination-4k"
+  },
+  {
+    "path": "C:\\Users\\Kenny\\.codex\\worktrees\\mesa-aco-0101\\OpenRR\\build\\aco-runtime-trace\\runs-next-optimization-2026-11-10\\combination-4k\\Correctness\\round-0\\baseline-drs-5.bin",
+    "bytes": 66355200,
+    "sha256": "7faac7bd137f9cc4bc986b3b2e9b0e0cebf8a76fc687c01d04448aa5803c2d87",
+    "case": "combination-4k"
+  },
+  {
+    "path": "C:\\Users\\Kenny\\.codex\\worktrees\\mesa-aco-0101\\OpenRR\\build\\aco-runtime-trace\\runs-next-optimization-2026-11-10\\combination-4k\\Correctness\\round-0\\baseline-drs-6.bin",
+    "bytes": 66355200,
+    "sha256": "a8bfbbbbf7b458aebc593837c1cf233d9bd54bf1fb9e310fccc4da4ba21bd4b7",
+    "case": "combination-4k"
+  },
+  {
+    "path": "C:\\Users\\Kenny\\.codex\\worktrees\\mesa-aco-0101\\OpenRR\\build\\aco-runtime-trace\\runs-next-optimization-2026-11-10\\combination-4k\\Correctness\\round-0\\baseline-drs-7.bin",
+    "bytes": 66355200,
+    "sha256": "240ffba28ac0d9d8f86cf5f9841bd245d9185247bd29a468ae2ae75176758846",
+    "case": "combination-4k"
+  },
+  {
+    "path": "C:\\Users\\Kenny\\.codex\\worktrees\\mesa-aco-0101\\OpenRR\\build\\aco-runtime-trace\\runs-next-optimization-2026-11-10\\combination-4k\\Correctness\\round-0\\baseline-drs-8.bin",
+    "bytes": 66355200,
+    "sha256": "a76294bce522109bbfac1602e007d401454cdb06c7d1d69d2b4ec9b7b10f0d14",
+    "case": "combination-4k"
+  },
+  {
+    "path": "C:\\Users\\Kenny\\.codex\\worktrees\\mesa-aco-0101\\OpenRR\\build\\aco-runtime-trace\\runs-next-optimization-2026-11-10\\combination-4k\\Correctness\\round-0\\baseline-drs-9.bin",
+    "bytes": 66355200,
+    "sha256": "6b78c2dcb7fda072609e57345f2424c1629042551aa4a70969d308bd7444b79e",
+    "case": "combination-4k"
+  },
+  {
+    "path": "C:\\Users\\Kenny\\.codex\\worktrees\\mesa-aco-0101\\OpenRR\\build\\aco-runtime-trace\\runs-next-optimization-2026-11-10\\combination-4k\\Correctness\\round-0\\baseline-steady-0.bin",
+    "bytes": 66355200,
+    "sha256": "df29d8e3143b72b0b9e1d0e6d268f88fb11fcf3cfaec2df16ba55c63fdbd3cf1",
+    "case": "combination-4k"
+  },
+  {
+    "path": "C:\\Users\\Kenny\\.codex\\worktrees\\mesa-aco-0101\\OpenRR\\build\\aco-runtime-trace\\runs-next-optimization-2026-11-10\\combination-4k\\Correctness\\round-0\\baseline-steady-1.bin",
+    "bytes": 66355200,
+    "sha256": "e290643ff0b3494134a1781944147e816d98fb71c9ce9c63c1eadf91ad779f6b",
+    "case": "combination-4k"
+  },
+  {
+    "path": "C:\\Users\\Kenny\\.codex\\worktrees\\mesa-aco-0101\\OpenRR\\build\\aco-runtime-trace\\runs-next-optimization-2026-11-10\\combination-4k\\Correctness\\round-0\\baseline-steady-2.bin",
+    "bytes": 66355200,
+    "sha256": "fd1fe7e87cf4feffb044e085e776d53c7bc4893b794c67d4fda50a278d13d364",
+    "case": "combination-4k"
+  },
+  {
+    "path": "C:\\Users\\Kenny\\.codex\\worktrees\\mesa-aco-0101\\OpenRR\\build\\aco-runtime-trace\\runs-next-optimization-2026-11-10\\combination-4k\\Correctness\\round-0\\baseline-steady-3.bin",
+    "bytes": 66355200,
+    "sha256": "40b1e421bc4cbe607abbea64e16d659cb95b22ea61048d151f16f9a3dea5362c",
+    "case": "combination-4k"
+  },
+  {
+    "path": "C:\\Users\\Kenny\\.codex\\worktrees\\mesa-aco-0101\\OpenRR\\build\\aco-runtime-trace\\runs-next-optimization-2026-11-10\\combination-4k\\Correctness\\round-0\\baseline-steady-4.bin",
+    "bytes": 66355200,
+    "sha256": "c01122fedb4c3eea35d07c72cf9224d9a39bd08dbe275cec20325c1527b4d5fe",
+    "case": "combination-4k"
+  },
+  {
+    "path": "C:\\Users\\Kenny\\.codex\\worktrees\\mesa-aco-0101\\OpenRR\\build\\aco-runtime-trace\\runs-next-optimization-2026-11-10\\combination-4k\\Correctness\\round-0\\baseline-steady-5.bin",
+    "bytes": 66355200,
+    "sha256": "a785e0fe798eb2bfd0ee05bb93db1d36fc9d9bc699fde367349d36bea432e05e",
+    "case": "combination-4k"
+  },
+  {
+    "path": "C:\\Users\\Kenny\\.codex\\worktrees\\mesa-aco-0101\\OpenRR\\build\\aco-runtime-trace\\runs-next-optimization-2026-11-10\\combination-4k\\Correctness\\round-0\\baseline-steady-6.bin",
+    "bytes": 66355200,
+    "sha256": "32ad1ad0ca70ec8c93f4700855655d60d11c488123137bd33cf32e5c40c007f3",
+    "case": "combination-4k"
+  },
+  {
+    "path": "C:\\Users\\Kenny\\.codex\\worktrees\\mesa-aco-0101\\OpenRR\\build\\aco-runtime-trace\\runs-next-optimization-2026-11-10\\combination-4k\\Correctness\\round-0\\baseline-steady-7.bin",
+    "bytes": 66355200,
+    "sha256": "8d8f7ba4245b1edbb1ab6ba4c004ba9d7db1c190e5d529a99963671f916b9c45",
+    "case": "combination-4k"
+  },
+  {
+    "path": "C:\\Users\\Kenny\\.codex\\worktrees\\mesa-aco-0101\\OpenRR\\build\\aco-runtime-trace\\runs-next-optimization-2026-11-10\\combination-4k\\Correctness\\round-0\\candidate-drs-0.bin",
+    "bytes": 66355200,
+    "sha256": "02fa7efa9420dfb553d58cb989fc54919c99f33ced6c517ede2f601bd99c9c9f",
+    "case": "combination-4k"
+  },
+  {
+    "path": "C:\\Users\\Kenny\\.codex\\worktrees\\mesa-aco-0101\\OpenRR\\build\\aco-runtime-trace\\runs-next-optimization-2026-11-10\\combination-4k\\Correctness\\round-0\\candidate-drs-1.bin",
+    "bytes": 66355200,
+    "sha256": "277945d40f6786d798ed79ba38dd258f21ffec10388349828c5dc03ee3bf52ea",
+    "case": "combination-4k"
+  },
+  {
+    "path": "C:\\Users\\Kenny\\.codex\\worktrees\\mesa-aco-0101\\OpenRR\\build\\aco-runtime-trace\\runs-next-optimization-2026-11-10\\combination-4k\\Correctness\\round-0\\candidate-drs-10.bin",
+    "bytes": 66355200,
+    "sha256": "a25a3b2fb28b95adbf119ffdcb0816ac1375278972d9f0c18e52f8201e6e0fdc",
+    "case": "combination-4k"
+  },
+  {
+    "path": "C:\\Users\\Kenny\\.codex\\worktrees\\mesa-aco-0101\\OpenRR\\build\\aco-runtime-trace\\runs-next-optimization-2026-11-10\\combination-4k\\Correctness\\round-0\\candidate-drs-11.bin",
+    "bytes": 66355200,
+    "sha256": "d6f252a7956e7a2e116c52d1d7b41be995d7ea08ea1f981e0ace5ec066f5314b",
+    "case": "combination-4k"
+  },
+  {
+    "path": "C:\\Users\\Kenny\\.codex\\worktrees\\mesa-aco-0101\\OpenRR\\build\\aco-runtime-trace\\runs-next-optimization-2026-11-10\\combination-4k\\Correctness\\round-0\\candidate-drs-2.bin",
+    "bytes": 66355200,
+    "sha256": "fbb77051f6431b32aaa0ea2665312032cec43a37d5d38bf6c1fd05e47d0601e4",
+    "case": "combination-4k"
+  },
+  {
+    "path": "C:\\Users\\Kenny\\.codex\\worktrees\\mesa-aco-0101\\OpenRR\\build\\aco-runtime-trace\\runs-next-optimization-2026-11-10\\combination-4k\\Correctness\\round-0\\candidate-drs-3.bin",
+    "bytes": 66355200,
+    "sha256": "ced1fb8d8443ca50f4aed8129a0180756987c6cb7a2bd7e6b878e2a15f87ca8e",
+    "case": "combination-4k"
+  },
+  {
+    "path": "C:\\Users\\Kenny\\.codex\\worktrees\\mesa-aco-0101\\OpenRR\\build\\aco-runtime-trace\\runs-next-optimization-2026-11-10\\combination-4k\\Correctness\\round-0\\candidate-drs-4.bin",
+    "bytes": 66355200,
+    "sha256": "e278f52ae3bbf3d0456c847244f18e359cfd1553b4daf0ba47fa136b0f6ddd15",
+    "case": "combination-4k"
+  },
+  {
+    "path": "C:\\Users\\Kenny\\.codex\\worktrees\\mesa-aco-0101\\OpenRR\\build\\aco-runtime-trace\\runs-next-optimization-2026-11-10\\combination-4k\\Correctness\\round-0\\candidate-drs-5.bin",
+    "bytes": 66355200,
+    "sha256": "7faac7bd137f9cc4bc986b3b2e9b0e0cebf8a76fc687c01d04448aa5803c2d87",
+    "case": "combination-4k"
+  },
+  {
+    "path": "C:\\Users\\Kenny\\.codex\\worktrees\\mesa-aco-0101\\OpenRR\\build\\aco-runtime-trace\\runs-next-optimization-2026-11-10\\combination-4k\\Correctness\\round-0\\candidate-drs-6.bin",
+    "bytes": 66355200,
+    "sha256": "a8bfbbbbf7b458aebc593837c1cf233d9bd54bf1fb9e310fccc4da4ba21bd4b7",
+    "case": "combination-4k"
+  },
+  {
+    "path": "C:\\Users\\Kenny\\.codex\\worktrees\\mesa-aco-0101\\OpenRR\\build\\aco-runtime-trace\\runs-next-optimization-2026-11-10\\combination-4k\\Correctness\\round-0\\candidate-drs-7.bin",
+    "bytes": 66355200,
+    "sha256": "240ffba28ac0d9d8f86cf5f9841bd245d9185247bd29a468ae2ae75176758846",
+    "case": "combination-4k"
+  },
+  {
+    "path": "C:\\Users\\Kenny\\.codex\\worktrees\\mesa-aco-0101\\OpenRR\\build\\aco-runtime-trace\\runs-next-optimization-2026-11-10\\combination-4k\\Correctness\\round-0\\candidate-drs-8.bin",
+    "bytes": 66355200,
+    "sha256": "a76294bce522109bbfac1602e007d401454cdb06c7d1d69d2b4ec9b7b10f0d14",
+    "case": "combination-4k"
+  },
+  {
+    "path": "C:\\Users\\Kenny\\.codex\\worktrees\\mesa-aco-0101\\OpenRR\\build\\aco-runtime-trace\\runs-next-optimization-2026-11-10\\combination-4k\\Correctness\\round-0\\candidate-drs-9.bin",
+    "bytes": 66355200,
+    "sha256": "6b78c2dcb7fda072609e57345f2424c1629042551aa4a70969d308bd7444b79e",
+    "case": "combination-4k"
+  },
+  {
+    "path": "C:\\Users\\Kenny\\.codex\\worktrees\\mesa-aco-0101\\OpenRR\\build\\aco-runtime-trace\\runs-next-optimization-2026-11-10\\combination-4k\\Correctness\\round-0\\candidate-steady-0.bin",
+    "bytes": 66355200,
+    "sha256": "df29d8e3143b72b0b9e1d0e6d268f88fb11fcf3cfaec2df16ba55c63fdbd3cf1",
+    "case": "combination-4k"
+  },
+  {
+    "path": "C:\\Users\\Kenny\\.codex\\worktrees\\mesa-aco-0101\\OpenRR\\build\\aco-runtime-trace\\runs-next-optimization-2026-11-10\\combination-4k\\Correctness\\round-0\\candidate-steady-1.bin",
+    "bytes": 66355200,
+    "sha256": "e290643ff0b3494134a1781944147e816d98fb71c9ce9c63c1eadf91ad779f6b",
+    "case": "combination-4k"
+  },
+  {
+    "path": "C:\\Users\\Kenny\\.codex\\worktrees\\mesa-aco-0101\\OpenRR\\build\\aco-runtime-trace\\runs-next-optimization-2026-11-10\\combination-4k\\Correctness\\round-0\\candidate-steady-2.bin",
+    "bytes": 66355200,
+    "sha256": "fd1fe7e87cf4feffb044e085e776d53c7bc4893b794c67d4fda50a278d13d364",
+    "case": "combination-4k"
+  },
+  {
+    "path": "C:\\Users\\Kenny\\.codex\\worktrees\\mesa-aco-0101\\OpenRR\\build\\aco-runtime-trace\\runs-next-optimization-2026-11-10\\combination-4k\\Correctness\\round-0\\candidate-steady-3.bin",
+    "bytes": 66355200,
+    "sha256": "40b1e421bc4cbe607abbea64e16d659cb95b22ea61048d151f16f9a3dea5362c",
+    "case": "combination-4k"
+  },
+  {
+    "path": "C:\\Users\\Kenny\\.codex\\worktrees\\mesa-aco-0101\\OpenRR\\build\\aco-runtime-trace\\runs-next-optimization-2026-11-10\\combination-4k\\Correctness\\round-0\\candidate-steady-4.bin",
+    "bytes": 66355200,
+    "sha256": "c01122fedb4c3eea35d07c72cf9224d9a39bd08dbe275cec20325c1527b4d5fe",
+    "case": "combination-4k"
+  },
+  {
+    "path": "C:\\Users\\Kenny\\.codex\\worktrees\\mesa-aco-0101\\OpenRR\\build\\aco-runtime-trace\\runs-next-optimization-2026-11-10\\combination-4k\\Correctness\\round-0\\candidate-steady-5.bin",
+    "bytes": 66355200,
+    "sha256": "a785e0fe798eb2bfd0ee05bb93db1d36fc9d9bc699fde367349d36bea432e05e",
+    "case": "combination-4k"
+  },
+  {
+    "path": "C:\\Users\\Kenny\\.codex\\worktrees\\mesa-aco-0101\\OpenRR\\build\\aco-runtime-trace\\runs-next-optimization-2026-11-10\\combination-4k\\Correctness\\round-0\\candidate-steady-6.bin",
+    "bytes": 66355200,
+    "sha256": "32ad1ad0ca70ec8c93f4700855655d60d11c488123137bd33cf32e5c40c007f3",
+    "case": "combination-4k"
+  },
+  {
+    "path": "C:\\Users\\Kenny\\.codex\\worktrees\\mesa-aco-0101\\OpenRR\\build\\aco-runtime-trace\\runs-next-optimization-2026-11-10\\combination-4k\\Correctness\\round-0\\candidate-steady-7.bin",
+    "bytes": 66355200,
+    "sha256": "8d8f7ba4245b1edbb1ab6ba4c004ba9d7db1c190e5d529a99963671f916b9c45",
+    "case": "combination-4k"
+  }
+]

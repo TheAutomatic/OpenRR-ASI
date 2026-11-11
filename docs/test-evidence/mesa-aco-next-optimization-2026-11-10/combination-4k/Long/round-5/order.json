@@ -1,0 +1,10 @@
+{
+  "candidate": "build/aco-runtime-trace/comparison-4k/latest",
+  "steady": 240,
+  "baseline_data": "build/aco-runtime-trace/comparison-4k/original/data",
+  "candidate_role": "original",
+  "round": 5,
+  "warmup": 48,
+  "baseline_role": "variant",
+  "drs": 64
+}

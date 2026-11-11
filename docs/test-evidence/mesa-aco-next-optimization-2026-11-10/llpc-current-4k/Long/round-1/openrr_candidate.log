@@ -1,0 +1,141 @@
+20:44:15.095 compiler requested: LLPC
+20:44:15.095 OpenRR 0.1.2 runtime: create, output 3840x2160, render up to 2560x1440, shaders C:\Users\Kenny\.codex\worktrees\mesa-aco-0101\OpenRR\build\aco-runtime-trace\comparison-4k\latest\data\shaders, weights from C:/Users/Kenny/Downloads/dlssnr_on_amd_setup/dist/weights/nvngx_dlssd.dll
+20:44:15.254 Vulkan device: AMD Radeon RX 9070 XT, driver 26.10.1 (LLPC)
+20:44:15.554 [openrr compiler] ingest spv=83008aab2deab055 compiler=LLPC
+20:44:15.556 [openrr compiler] pack spv=fdc5ed41ade87e02 compiler=LLPC
+20:44:15.558 [openrr compiler] selftest spv=0c5629eb03f4fe89 compiler=LLPC
+20:44:15.559 [openrr compiler] clear_range spv=cffca948d4b28dac compiler=LLPC
+20:44:15.559 [openrr compiler] d3d_ingest spv=055cdb1ca00ecf88 compiler=LLPC
+20:44:15.561 [openrr compiler] d3d_pack spv=37b54dc8375d23da compiler=LLPC
+20:44:15.566 D3D12 backend: self-test passed (root constants, spill table, workgroup count, indirect dispatch); 6 ELFs from the cache, 0 built, in 23 ms
+20:44:15.573 D3D12 backend: the guides are read from the game's textures and the output written in place (check passed)
+20:44:15.579 [openrr compiler] selftest_tex spv=fcef346c12cfe86f compiler=LLPC
+20:44:15.584 D3D12 backend: the post samples its history through the sampler, as on Vulkan (check passed)
+20:44:15.584 backend: D3D12 (asked for), kernels recorded into the game's command list; ELF cache C:\Users\Kenny\AppData\Local\OpenRR\cache
+20:44:15.585 frame 1: no transparency layer
+20:44:15.585 frame 1: disocclusion mask absent, SSS guide absent (both go into the first encoder)
+20:44:15.585 frame 1: responsivity mask absent, ColorBeforeTransparency absent, depth of field guide absent, reflection motion vectors absent (first encoder); transparency opacity absent, its motion vectors absent (downsample, with the layer); specular hit distance given
+20:44:15.898 weights rebuilt from C:/Users/Kenny/Downloads/dlssnr_on_amd_setup/dist/weights/nvngx_dlssd.dll (version 310.9.1.0) in 314 ms
+20:44:15.899 [openrr compiler] pooled_history2 spv=7fcd28c3e1986a33 compiler=LLPC
+20:44:15.900 [openrr compiler] ae spv=8053435623e90df5 compiler=LLPC
+20:44:15.902 [openrr compiler] enc0_attr_f spv=b7ec90ad9bb77d31 compiler=LLPC
+20:44:16.350 [openrr compiler] post_f spv=afe8e28b8283b96b compiler=LLPC
+20:44:16.353 [openrr compiler] downsample spv=1868a527fddfb730 compiler=LLPC
+20:44:16.354 [openrr compiler] downsample_tl spv=71f444e6a4c8f74a compiler=LLPC
+20:44:16.355 [openrr compiler] post_tile spv=350eb51855cd5995 compiler=LLPC
+20:44:16.356 [openrr compiler] dfn_export spv=5eff19ab0da39495 compiler=LLPC
+20:44:16.357 [openrr compiler] dfn_import spv=92deee5eb00fde72 compiler=LLPC
+20:44:16.358 [openrr compiler] post_dlt_f spv=f59fecb0c6c722dd compiler=LLPC
+20:44:16.362 [openrr compiler] enc0_stage_32_64_f spv=4f4d742046c9b6f1 compiler=LLPC
+20:44:16.368 [openrr compiler] enc_stage_64_64_96_f spv=59a8847a905b419b compiler=LLPC
+20:44:16.372 [openrr compiler] enc_stage_96_128_128_f spv=8d07ac141832d300 compiler=LLPC
+20:44:16.376 [openrr compiler] enc_stage_128_128_160_f spv=f6ccd66e59440a06 compiler=LLPC
+20:44:16.380 [openrr compiler] enc_stage_160_256_160_f spv=38501fcf01b1e652 compiler=LLPC
+20:44:16.384 [openrr compiler] enc_stage_160_256_0_f spv=0d775a6335a1b380 compiler=LLPC
+20:44:16.388 [openrr compiler] dec_up_160_256_160_f spv=6d872e31c95afce5 compiler=LLPC
+20:44:16.393 [openrr compiler] dec_dfn_160_256_f spv=81d017418fe547af compiler=LLPC
+20:44:16.398 [openrr compiler] dec_up_128_128_160_f spv=8207a2a6f176a4d8 compiler=LLPC
+20:44:16.402 [openrr compiler] dec_dfn_128_128_f spv=a536c1aee1b5b373 compiler=LLPC
+20:44:16.406 [openrr compiler] dec_up_96_128_128_f spv=7397e05f8c2da77a compiler=LLPC
+20:44:16.409 [openrr compiler] dec_dfn_96_128_f spv=50c4593efddb5754 compiler=LLPC
+20:44:16.415 [openrr compiler] dec_up_64_64_96_f spv=238fcc9bcf09fa55 compiler=LLPC
+20:44:16.421 [openrr compiler] dec_dfn_64_64_f spv=777985d1831329ca compiler=LLPC
+20:44:16.426 [openrr compiler] dec_up_32_64_64_f spv=addffdc4c6b922e8 compiler=LLPC
+20:44:16.431 [openrr compiler] dec_head_32_64_f spv=b799ea871f0212a5 compiler=LLPC
+20:44:16.437 [openrr compiler] d3d_downsample spv=fa1ab80252e2a7e5 compiler=LLPC
+20:44:16.439 [openrr compiler] d3d_downsample_tl spv=66226a06cd06c7f3 compiler=LLPC
+20:44:16.442 [openrr compiler] d3d_enc0_attr_f spv=b3655442fe0ad69e compiler=LLPC
+20:44:17.005 [openrr compiler] d3d_ae spv=176dd5c87be9b223 compiler=LLPC
+20:44:17.006 [openrr compiler] enc0_attr_f_w spv=2a1805e8888ee841 compiler=LLPC
+20:44:17.390 [openrr compiler] enc0_stage_32_64_f_w spv=da0466da433262b2 compiler=LLPC
+20:44:17.398 [openrr compiler] d3d_enc0_attr_f_w spv=fc15342056305889 compiler=LLPC
+20:44:18.006 [openrr compiler] enc_stage_96_128_128_fl spv=7425bd19500d6479 compiler=LLPC
+20:44:18.010 [openrr compiler] enc_stage_128_128_160_fl spv=231bf803323201db compiler=LLPC
+20:44:18.014 [openrr compiler] enc_stage_160_256_160_fl spv=4d98a31a6a7789ad compiler=LLPC
+20:44:18.019 [openrr compiler] enc_stage_160_256_0_fl spv=c5ef1c72a8fa61ac compiler=LLPC
+20:44:18.022 [openrr compiler] dec_up_160_256_160_fl spv=09ae4164fbb15cf1 compiler=LLPC
+20:44:18.026 [openrr compiler] dec_dfn_160_256_fl spv=a89b668e3da09f5b compiler=LLPC
+20:44:18.031 [openrr compiler] dec_up_128_128_160_fl spv=6be5b3c53083b759 compiler=LLPC
+20:44:18.034 [openrr compiler] dec_dfn_128_128_fl spv=095787dd4133557e compiler=LLPC
+20:44:18.037 [openrr compiler] dec_up_96_128_128_fl spv=94faa2ccbba8501e compiler=LLPC
+20:44:18.040 [openrr compiler] dec_dfn_96_128_fl spv=608c28c0029891f3 compiler=LLPC
+20:44:18.043 network kernels ready on D3D12 (26 pipelines: 39 ELFs from the cache, 4 built) in 2.1 s
+20:44:18.044 [openrr compiler] d3d_downsample_lt spv=b8457d1fbeb4e9e3 compiler=LLPC
+20:44:18.045 [openrr compiler] d3d_downsample_tl_lt spv=518e6587dc9e69b8 compiler=LLPC
+20:44:18.047 [openrr compiler] d3d_enc0_attr_f_lt spv=1d6fd9f4cc1c893c compiler=LLPC
+20:44:18.568 [openrr compiler] d3d_enc0_attr_f_w_lt spv=2bfe14fa9a6e5624 compiler=LLPC
+20:44:19.168 [openrr compiler] dec_dfn_128_128_f_lt spv=28bc7057f2b8ac76 compiler=LLPC
+20:44:19.172 [openrr compiler] dec_dfn_128_128_fl_lt spv=4ecf3b5cd58f6a11 compiler=LLPC
+20:44:19.177 [openrr compiler] dec_dfn_160_256_f_lt spv=c29f41aeb581fce8 compiler=LLPC
+20:44:19.179 [openrr compiler] dec_dfn_160_256_fl_lt spv=6bc90aef575d98cf compiler=LLPC
+20:44:19.183 [openrr compiler] dec_dfn_64_64_f_lt spv=52722875f5de9eb1 compiler=LLPC
+20:44:19.186 [openrr compiler] dec_dfn_96_128_f_lt spv=941882166ce09254 compiler=LLPC
+20:44:19.190 [openrr compiler] dec_dfn_96_128_fl_lt spv=607b418f7ed5346e compiler=LLPC
+20:44:19.852 [openrr compiler] dec_head_32_64_f_lt spv=3eccd9693a0d87ef compiler=LLPC
+20:44:19.856 [openrr compiler] dec_up_128_128_160_f_lt spv=28e6b3fa305be4bc compiler=LLPC
+20:44:19.860 [openrr compiler] dec_up_128_128_160_fl_lt spv=5d05fcc3de384276 compiler=LLPC
+20:44:19.864 [openrr compiler] dec_up_160_256_160_f_lt spv=d4cad4131a9d2071 compiler=LLPC
+20:44:19.867 [openrr compiler] dec_up_160_256_160_fl_lt spv=360f7a5dd195af7c compiler=LLPC
+20:44:19.872 [openrr compiler] dec_up_32_64_64_f_lt spv=b7dd12c10dab8afb compiler=LLPC
+20:44:19.875 [openrr compiler] dec_up_64_64_96_f_lt spv=40dc71ff1cd2b848 compiler=LLPC
+20:44:19.879 [openrr compiler] dec_up_96_128_128_f_lt spv=79ea9a0f90a74b24 compiler=LLPC
+20:44:19.883 [openrr compiler] dec_up_96_128_128_fl_lt spv=caa3f6091e490cda compiler=LLPC
+20:44:19.886 [openrr compiler] dfn_export_lt spv=8cadc24c9e03891b compiler=LLPC
+20:44:19.887 [openrr compiler] dfn_import_lt spv=9494ed55ba8520ba compiler=LLPC
+20:44:19.889 [openrr compiler] downsample_lt spv=af1b93f587f9f210 compiler=LLPC
+20:44:19.890 [openrr compiler] downsample_tl_lt spv=4c4d3749900919fe compiler=LLPC
+20:44:19.892 [openrr compiler] enc0_attr_f_lt spv=904cfe3480396ab7 compiler=LLPC
+20:44:20.300 [openrr compiler] enc0_attr_f_w_lt spv=037978cdd8781555 compiler=LLPC
+20:44:20.799 [openrr compiler] enc0_stage_32_64_f_lt spv=0705fad577a0f8a7 compiler=LLPC
+20:44:20.805 [openrr compiler] enc0_stage_32_64_f_w_lt spv=a1da9aadc8fc409c compiler=LLPC
+20:44:20.812 [openrr compiler] enc_stage_128_128_160_f_lt spv=9cfa240f087e7153 compiler=LLPC
+20:44:20.817 [openrr compiler] enc_stage_128_128_160_fl_lt spv=7637570aac01b415 compiler=LLPC
+20:44:21.396 [openrr compiler] enc_stage_160_256_0_f_lt spv=1499d383d594a247 compiler=LLPC
+20:44:21.402 [openrr compiler] enc_stage_160_256_0_fl_lt spv=f2418b8d764403b6 compiler=LLPC
+20:44:21.406 [openrr compiler] enc_stage_160_256_160_f_lt spv=543b3fdebddc2f1d compiler=LLPC
+20:44:21.410 [openrr compiler] enc_stage_160_256_160_fl_lt spv=d80cf61e2f2f74ec compiler=LLPC
+20:44:21.413 [openrr compiler] enc_stage_64_64_96_f_lt spv=8cca057e36e2b4cc compiler=LLPC
+20:44:21.417 [openrr compiler] enc_stage_96_128_128_f_lt spv=2d30684c45e56b62 compiler=LLPC
+20:44:21.421 [openrr compiler] enc_stage_96_128_128_fl_lt spv=f3817f3fb0a26545 compiler=LLPC
+20:44:21.873 [openrr compiler] pooled_history2_lt spv=f9a40136548780ff compiler=LLPC
+20:44:21.874 [openrr compiler] post_dlt_f_lt spv=06a7db5bd94c81e0 compiler=LLPC
+20:44:21.877 [openrr compiler] post_f_lt spv=67c230d72edf262e compiler=LLPC
+20:44:21.880 fast mode kernels ready (40 pipelines: 33 ELFs from the cache, 7 built) in 3.84 s
+20:44:21.905 ready
+20:44:21.905 fast mode on at frame 0
+20:44:21.967 network sized: render 2560x1440 (grid 2560x1440), output 3840x2160, internal 5760x3240
+20:44:21.967 VRAM: this feature 964 MB (1 features alive); the game's process 1195 MB of a 15419 MB budget
+20:44:21.967 small levels: row flags
+20:44:21.967 runtime paths: direct_guides=1 direct_output=1 sampler=1 flow=1
+20:44:21.967 frame 1: render 2560x1440 -> 3840x2160, fast mode on, D3D12, GPU raw 0.24 ms (p50 0.24, p95 0.24 of 1), clean 0.24 ms (average 0.24 ms; mean since the last line: ingest 0.000, network 0.00, pack 0.000)
+20:44:27.715 network sized: render 2176x1224 (grid 2176x1248), output 3840x2160, internal 5760x3240
+20:44:27.716 VRAM: this feature 964 MB (1 features alive); the game's process 1195 MB of a 15419 MB budget
+20:44:27.756 network sized: render 2560x1440 (grid 2560x1440), output 3840x2160, internal 5760x3240
+20:44:27.757 VRAM: this feature 964 MB (1 features alive); the game's process 1195 MB of a 15419 MB budget
+20:44:27.808 network sized: render 2176x1224 (grid 2176x1248), output 3840x2160, internal 5760x3240
+20:44:27.809 VRAM: this feature 964 MB (1 features alive); the game's process 1195 MB of a 15419 MB budget
+20:44:27.848 network sized: render 2560x1440 (grid 2560x1440), output 3840x2160, internal 5760x3240
+20:44:27.848 VRAM: this feature 964 MB (1 features alive); the game's process 1195 MB of a 15419 MB budget
+20:44:27.899 network sized: render 2176x1224 (grid 2176x1248), output 3840x2160, internal 5760x3240
+20:44:27.900 VRAM: this feature 964 MB (1 features alive); the game's process 1195 MB of a 15419 MB budget
+20:44:27.939 network sized: render 2560x1440 (grid 2560x1440), output 3840x2160, internal 5760x3240
+20:44:27.940 VRAM: this feature 964 MB (1 features alive); the game's process 1195 MB of a 15419 MB budget
+20:44:27.991 network sized: render 2176x1224 (grid 2176x1248), output 3840x2160, internal 5760x3240
+20:44:27.992 VRAM: this feature 964 MB (1 features alive); the game's process 1195 MB of a 15419 MB budget
+20:44:28.032 network sized: render 2560x1440 (grid 2560x1440), output 3840x2160, internal 5760x3240
+20:44:28.033 VRAM: this feature 964 MB (1 features alive); the game's process 1195 MB of a 15419 MB budget
+20:44:28.083 network sized: render 2176x1224 (grid 2176x1248), output 3840x2160, internal 5760x3240
+20:44:28.084 VRAM: this feature 964 MB (1 features alive); the game's process 1195 MB of a 15419 MB budget
+20:44:28.128 network sized: render 2560x1440 (grid 2560x1440), output 3840x2160, internal 5760x3240
+20:44:28.128 VRAM: this feature 964 MB (1 features alive); the game's process 1195 MB of a 15419 MB budget
+20:44:28.193 network sized: render 2176x1224 (grid 2176x1248), output 3840x2160, internal 5760x3240
+20:44:28.193 VRAM: this feature 964 MB (1 features alive); the game's process 1195 MB of a 15419 MB budget
+20:44:28.240 network sized: render 2560x1440 (grid 2560x1440), output 3840x2160, internal 5760x3240
+20:44:28.240 VRAM: this feature 964 MB (1 features alive); the game's process 1195 MB of a 15419 MB budget
+20:44:28.302 network sized: render 2176x1224 (grid 2176x1248), output 3840x2160, internal 5760x3240
+20:44:28.303 VRAM: this feature 964 MB (1 features alive); the game's process 1195 MB of a 15419 MB budget
+20:44:28.352 network sized: render 2560x1440 (grid 2560x1440), output 3840x2160, internal 5760x3240
+20:44:28.352 VRAM: this feature 964 MB (1 features alive); the game's process 1195 MB of a 15419 MB budget
+20:44:28.414 network sized: render 2176x1224 (grid 2176x1248), output 3840x2160, internal 5760x3240
+20:44:28.414 VRAM: this feature 964 MB (1 features alive); the game's process 1195 MB of a 15419 MB budget
+20:44:30.133 destroy after 354 network frames
