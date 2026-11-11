@@ -147,44 +147,6 @@ public:
     void set_lite(const Kernels* k) { lk_ = k; }
     void set_lite_on(bool on) { lite_on_ = on; }
     bool lite_active() const { return frame_lite_; }
-    void set_pool_dec1_tail(bool on) {
-        if (pool_dec1_tail_ != on || pool_dec1_f0_race_) {
-            pool_dec1_tail_ = on;
-            pool_dec1_f0_race_ = false;
-            sized_fast_ = !fast_;
-        }
-    }
-    bool pool_dec1_tail() const { return pool_dec1_tail_; }
-    // Test-only negative control: places dec1_l_[2..4].tensor at f0+0 (overlapping enc_l_[1].pooled / dfn_pool during flow).
-    void set_pool_dec1_f0_race_for_test(bool on) {
-        if (pool_dec1_f0_race_ != on) {
-            pool_dec1_f0_race_ = on;
-            sized_fast_ = !fast_;
-        }
-    }
-    bool pool_dec1_f0_race_for_test() const { return pool_dec1_f0_race_; }
-    // Deterministic static address-overlap audit for flow-concurrent buffers (enc_l_[0].dfn_pool, enc_l_[1].pooled / dfn_pool,
-    // enc_l_[2..5], dec0_l_[1..4].tensor vs dec1_l_[2..4].tensor / dfn).
-    bool has_flow_buffer_overlap() const {
-        auto overlaps = [](const Buffer& a, const Buffer& b) {
-            return a.addr && b.addr && a.size && b.size && a.addr < b.addr + b.size && b.addr < a.addr + a.size;
-        };
-        const Buffer* flow_bufs[] = {
-            &enc_l_[0].dfn_pool, &enc_l_[1].pooled, &enc_l_[1].dfn_pool,
-            &enc_l_[2].tensor, &enc_l_[2].dfn, &enc_l_[2].pooled, &enc_l_[2].dfn_pool,
-            &enc_l_[3].tensor, &enc_l_[3].dfn, &enc_l_[3].pooled, &enc_l_[3].dfn_pool,
-            &enc_l_[4].tensor, &enc_l_[4].dfn, &enc_l_[4].pooled, &enc_l_[4].dfn_pool,
-            &enc_l_[5].tensor, &enc_l_[5].dfn, &enc_l_[5].pooled, &enc_l_[5].dfn_pool,
-            &dec0_l_[1].tensor, &dec0_l_[2].tensor, &dec0_l_[3].tensor, &dec0_l_[4].tensor,
-            &dec1_l_[2].tensor, &dec1_l_[2].dfn, &dec1_l_[3].tensor, &dec1_l_[3].dfn,
-            &dec1_l_[4].tensor, &dec1_l_[4].dfn,
-        };
-        constexpr size_t n = sizeof(flow_bufs) / sizeof(flow_bufs[0]);
-        for (size_t i = 0; i < n; ++i)
-            for (size_t j = i + 1; j < n; ++j)
-                if (overlaps(*flow_bufs[i], *flow_bufs[j])) return true;
-        return false;
-    }
     void set_fp8_ok(bool on) { fp8_ok_ = on; }
     bool fp8_ok() const { return fp8_ok_; }
 
@@ -206,7 +168,7 @@ private:
     const Kernels* lk_ = nullptr;
     bool lite_on_ = false, frame_lite_ = false;   // frame_lite_: this frame's, taken in record_net
     const Weights* w_ = nullptr;
-    bool fast_ = true, sized_fast_ = true, flow_on_ = true, pool_dec1_tail_ = true, pool_dec1_f0_race_ = false, fp8_ok_ = false;
+    bool fast_ = true, sized_fast_ = true, flow_on_ = true, fp8_ok_ = false;
     std::vector<Buffer> fixed_, sized_;
     StageBufs enc_[6], dec0_[5], dec1_[5];
     Buffer embed_w_, embed_b_, lut_, masks_, tab_, bicubic_, gtab_;
@@ -233,6 +195,8 @@ private:
     // driver lays them out otherwise
     Image hist_img_[2];
     VkSampler hist_smp_ = VK_NULL_HANDLE;
+    size_t fast_layout(I2 pad, size_t rp, size_t ip, uint64_t base);
+    Buffer arena_;   // fast mode: the frame-scoped buffers (fast_layout)
     Buffer attr_, img_, ero_, nond_, pmv2_[2], hidden_[2], down_[2], hist_[2], expo_[2];
     Buffer pdst_, acc_, blk_, tile_, fix_, frg_, fb_, ajab_, mvf_, aniso_, prm_;
     Buffer attr_wide_;   // the 64-byte record (enc0_attr_f_w), made on the first frame that needs it

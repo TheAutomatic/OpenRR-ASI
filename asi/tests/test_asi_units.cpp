@@ -903,68 +903,41 @@ static int test_d3d12_gpu_and_engine() {
                         }
                     }
 
-                    // ---- Item B1: Isolated Fast-mode VRAM pooling verification (B1 on vs B1 off, wide path, and f0+0 negative control) ----
+                    // Arena lifetime regression: repeat the same sequence, including
+                    // wide attributes, and compare output bit-for-bit across fresh engines.
                     {
-                        auto run_b1_seq = [&](bool pool_on, bool race_f0, std::vector<std::vector<uint16_t>>& frames_out, uint64_t& vram_bytes, uint64_t& vram_wide_bytes, bool& had_overlap) {
-                            onr::Engine e_b1;
-                            e_b1.init(d3d, k_fast, w);
-                            e_b1.set_fast(true);
-                            e_b1.set_lite(&k_lite);
-                            e_b1.set_lite_on(true);
-                            e_b1.set_pool_dec1_tail(pool_on);
-                            if (race_f0) e_b1.set_pool_dec1_f0_race_for_test(true);
-                            e_b1.resize(r_sz, o_sz);
-                            vram_bytes = d3d.bytes();
-                            vram_wide_bytes = vram_bytes;
-                            had_overlap = e_b1.has_flow_buffer_overlap();
-                            frames_out.resize(20);
+                        auto run = [&](std::vector<std::vector<uint16_t>>& frames) {
+                            onr::Engine arena;
+                            arena.init(d3d, k_fast, w);
+                            arena.set_fast(true);
+                            arena.set_lite(&k_lite);
+                            arena.set_lite_on(true);
+                            arena.resize(r_sz, o_sz);
+                            frames.resize(20);
                             for (int f = 0; f < 20; ++f) {
                                 ef.reset = (f == 0);
                                 ef.jitter[0] = (f & 1) ? 0.25f : -0.25f;
                                 ef.jitter[1] = (f & 2) ? 0.25f : -0.25f;
-                                // Frame 10..14 exercises the wide-attr in-place replacement (graveyard-deferred old t0) & dec1_l_[1..4] delta-shift path (depth_of_field != 0)
-                                ef.depth_of_field = (!race_f0 && f >= 10 && f < 15) ? p_dep.addr : 0;
+                                ef.depth_of_field = (f >= 10 && f < 15) ? p_dep.addr : 0;
                                 d3d.begin_own();
-                                e_b1.record(ef, pg, p_out.addr);
+                                arena.record(ef, pg, p_out.addr);
                                 d3d.submit_own();
-                                if (f == 10 && !race_f0) vram_wide_bytes = d3d.bytes();
-                                ef.depth_of_field = 0;
-                                had_overlap |= e_b1.has_flow_buffer_overlap();
-                                frames_out[f].resize(size_t(o_sz.x) * o_sz.y * 4);
-                                d3d.download(p_out, frames_out[f].data(), frames_out[f].size() * 2);
+                                frames[f].resize(size_t(o_sz.x) * o_sz.y * 4);
+                                d3d.download(p_out, frames[f].data(), frames[f].size() * 2);
                             }
-                            e_b1.destroy();
+                            ef.depth_of_field = 0;
+                            arena.destroy();
                         };
-                        std::vector<std::vector<uint16_t>> b1_off_frames, b1_on_a, b1_on_b, b1_race_frames;
-                        uint64_t bytes_off = 0, bytes_on_a = 0, bytes_on_b = 0, bytes_race = 0;
-                        uint64_t wide_off = 0, wide_on_a = 0, wide_on_b = 0, wide_race = 0;
-                        bool ov_off = false, ov_on_a = false, ov_on_b = false, ov_race = false;
-                        run_b1_seq(false, false, b1_off_frames, bytes_off, wide_off, ov_off);
-                        run_b1_seq(true, false, b1_on_a, bytes_on_a, wide_on_a, ov_on_a);
-                        run_b1_seq(true, false, b1_on_b, bytes_on_b, wide_on_b, ov_on_b);
-                        run_b1_seq(true, true, b1_race_frames, bytes_race, wide_race, ov_race);
-                        uint32_t max_ulp_ab = 0, max_ulp_rep = 0, max_ulp_race = 0;
-                        size_t diff_ab = 0, diff_rep = 0, diff_race = 0;
-                        for (int f = 0; f < 20; ++f) {
-                            for (size_t i = 0; i < b1_off_frames[f].size(); ++i) {
-                                uint16_t u0 = b1_off_frames[f][i], u1 = b1_on_a[f][i], u2 = b1_on_b[f][i], ur = b1_race_frames[f][i];
-                                if (u0 != u1) { ++diff_ab; max_ulp_ab = std::max(max_ulp_ab, uint32_t(u0 > u1 ? u0 - u1 : u1 - u0)); }
-                                if (u1 != u2) { ++diff_rep; max_ulp_rep = std::max(max_ulp_rep, uint32_t(u1 > u2 ? u1 - u2 : u2 - u1)); }
-                                if (u0 != ur) { ++diff_race; max_ulp_race = std::max(max_ulp_race, uint32_t(u0 > ur ? u0 - ur : ur - u0)); }
-                            }
-                        }
-                        const double saved_mb = double(bytes_off > bytes_on_a ? bytes_off - bytes_on_a : 0) / double(1u << 20);
-                        const double wide_delta_mb = double(wide_on_a > bytes_on_a ? wide_on_a - bytes_on_a : 0) / double(1u << 20);
-                        const size_t apx = size_t((r_sz.x + 31) & ~31) * ((r_sz.y + 31) & ~31);
-                        const uint64_t max_wide_delta = apx * 16 + 256;
-                        if (diff_ab != 0 || diff_rep != 0 || bytes_on_a >= bytes_off || ov_off || ov_on_a || ov_on_b || !ov_race ||
-                            wide_on_a <= bytes_on_a || (wide_on_a - bytes_on_a) > max_wide_delta) {
-                            std::fprintf(stderr, "FAIL: B1 isolated Fast pooling check failed at %s (diff_ab=%zu max_ulp=%u, diff_rep=%zu, ov_on=%d, ov_race=%d, saved=%.2f MB, wide_delta=%.2f MB)\n",
-                                         label, diff_ab, max_ulp_ab, diff_rep, int(ov_on_a), int(ov_race), saved_mb, wide_delta_mb);
+                        std::vector<std::vector<uint16_t>> a, b;
+                        run(a); run(b);
+                        size_t bad = 0;
+                        for (const auto& frame : a)
+                            for (uint16_t value : frame) bad += ((value & 0x7c00u) == 0x7c00u);
+                        if (a != b || bad) {
+                            std::fprintf(stderr, "FAIL: arena/wide sequence at %s (repeat=%d, nonfinite=%zu)\n", label, int(a == b), bad);
                             k2_failed = true;
                         } else {
-                            std::printf("[PASS] Item B1 (%s isolated Fast dec1_l_[1..4] tail pooling in t0 + wide path, 20 frames x 2 runs): diff_vs_unpooled=%zu (max_ulp_diff=%u), repeat_diff=%zu, flow_overlap_audit=%s (neg_ctrl_f0_race_caught=%s, race_diff=%zu), saved=%.2f MB, wide_vram_delta=+%.2f MB (<=+16 B/px)\n",
-                                        label, diff_ab, max_ulp_ab, diff_rep, ov_on_a ? "OVERLAP" : "CLEAN", ov_race ? "YES" : "NO", diff_race, saved_mb, wide_delta_mb);
+                            std::printf("[PASS] arena/wide sequence %s: 20 frames, exact repeat, finite output\n", label);
                         }
                     }
 
@@ -1362,6 +1335,18 @@ static int test_d3d12_gpu_and_engine() {
                                     onr::vk_note_command_pool_destroyed(dev_r1, pool_r1);
                                     api5.v4.v3.v2.v1.Destroy(ctx_r1);
                                     vkDestroyCommandPool(dev_r1, pool_r1, nullptr);
+                                    // Create starts the network builder for a main view. Destroy
+                                    // immediately, before the host releases its Vulkan device.
+                                    ci_r1.output_width = 1920; ci_r1.output_height = 1080;
+                                    ci_r1.dlssd_path = w_dlssd.c_str();
+                                    void* early_ctx = nullptr;
+                                    const int early_rc = api5.v4.v3.v2.v1.Create(&ci_r1, &early_ctx);
+                                    if (early_ctx) api5.v4.v3.v2.v1.Destroy(early_ctx);
+                                    if (early_rc != ONR_RR_OK || !early_ctx) {
+                                        std::fprintf(stderr, "FAIL: Vulkan early-destroy Create rc=%d\n", early_rc);
+                                        return 1;
+                                    }
+                                    std::printf("[PASS] Vulkan main-view Create/immediate Destroy before host device destruction\n");
                                     vkDestroyDevice(dev_r1, nullptr);
                                     vkDestroyInstance(inst_r1, nullptr);
                                     inst_r1 = VK_NULL_HANDLE;
@@ -1381,7 +1366,13 @@ static int test_d3d12_gpu_and_engine() {
                         }
 
                         // ---- R10: Verify Create(data_dir = nullptr) discovers default openrr-amd/shaders directory ----
-                        const auto def_dir = std::filesystem::path("build/asi/openrr-amd/shaders");
+                        const auto def_root = bdir / "openrr-amd";
+                        const auto def_dir = def_root / "shaders";
+                        if (std::filesystem::exists(def_root)) {
+                            std::fprintf(stderr, "FAIL: R10 fixture directory already exists; refusing to overwrite it\n");
+                            dev->Release();
+                            return 1;
+                        }
                         std::error_code ec_r10;
                         std::filesystem::create_directories(def_dir, ec_r10);
                         for (const auto& entry : std::filesystem::directory_iterator(spv_dir, ec_r10)) {
@@ -1399,7 +1390,7 @@ static int test_d3d12_gpu_and_engine() {
                         void* ctx_r10 = nullptr;
                         const int32_t rc_r10 = api5.v4.v3.v2.v1.Create(&ci_r10, &ctx_r10);
                         if (ctx_r10) api5.v4.v3.v2.v1.Destroy(ctx_r10);
-                        std::filesystem::remove_all("build/asi/openrr-amd", ec_r10);
+                        std::filesystem::remove_all(def_root, ec_r10);
                         if (rc_r10 != ONR_RR_OK || !ctx_r10) {
                             std::fprintf(stderr, "FAIL: R10 Create(data_dir=nullptr) returned rc=%d ctx=%p\n", rc_r10, ctx_r10);
                             dev->Release();

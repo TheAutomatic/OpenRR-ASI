@@ -8,6 +8,8 @@ For details about the OpenRR network reimplementation, RDNA4 shader architecture
 
 ---
 
+This fork integrates upstream **v0.1.4**, including Fast-mode memory reuse and preprojected weights, while retaining its ASI integration, menu, and GPU resource lifetime protections. Test figures for earlier versions are retained below as historical results.
+
 ## What this fork adds
 
 ### Optional OptiFG host mode
