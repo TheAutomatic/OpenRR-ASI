@@ -76,7 +76,15 @@ bool hist_disabled() { return (pc.hist_off & 1u) != 0u; }
 // and Legacy keeps the library calls and its bit-exact record set.
 #if defined(LT_ATTR_TAB) && defined(ATTR_WIDE)
 float attr_log2(float x) {
+    // IEEE edges first, so a NaN / negative guide pixel cannot be laundered into a finite ~128.6
+    // (which would defeat signed_log's isnan cleanup): NaN and x < 0 -> NaN, +-0 -> -inf,
+    // +inf -> +inf. Subnormals clamp to the smallest normal; no legitimate channel value reaches
+    // them (the callers' inputs are clamped to >= 1e-4), but the clamp keeps the result finite.
+    if (isnan(x) || x < 0.0) return uintBitsToFloat(0x7fc00000u);
+    if (x == 0.0) return uintBitsToFloat(0xff800000u);
+    if (isinf(x)) return x;
     uint b = floatBitsToUint(x);
+    if ((b & 0x7f800000u) == 0u) b = 0x00800000u;
     precise float e = float(int(b >> 23) - 127);
     precise float m = uintBitsToFloat((b & 0x7fffffu) | 0x3f800000u) - 1.0;
     precise float r = fma(m, -0.079150554, 0.31221360);
@@ -85,8 +93,13 @@ float attr_log2(float x) {
     r = fma(m, r, 0.00020418);
     return e + r;
 }
-// same for the history decode's exp2: exponent split + explicit-fma quartic (max 7.3e-6 relative)
+// same for the history decode's exp2: exponent split + explicit-fma quartic (max 7.3e-6 relative).
+// NaN passes through for the caller's no_nan() cleanup; i >= 128 would carry into the sign bit and
+// i < -126 would land in the subnormal encoding hole, so those ends saturate instead.
 float attr_exp2(float x) {
+    if (isnan(x)) return x;
+    if (x >= 128.0) return uintBitsToFloat(0x7f800000u);
+    if (x < -126.0) return 0.0;
     precise float i = floor(x);
     precise float f = x - i;
     precise float p = fma(f, 0.01367648, 0.05166693);
