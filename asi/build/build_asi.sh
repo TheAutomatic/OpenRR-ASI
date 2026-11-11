@@ -145,8 +145,12 @@ mkdir -p -- "$out/b2_base" "$out/b2_post_exp" "$out/b2_post_log" "$out/b2_attr_r
 
 # Offline ACO packaging. Native Mesa stays outside the Windows package.
 if [[ "${OPENRR_BUILD_ACO:-1}" == "1" ]]; then
-    bash asi/build/mesa/build_capture.sh
-    python3 asi/build/build_aco_records.py --out "$stage/openrr-amd/aco" \
+    bash asi/build/mesa/build_capture_263.sh
+    tools=build/mesa-comparison/mesa-263-drirc-toolchain
+    DRIRC_CONFIGDIR="$PWD/build/mesa-comparison/mesa-263-drirc/drirc" \
+    python3 asi/build/build_aco_records.py \
+        --toolchain "$tools/toolchain.json" --capture "$tools/aco_capture" \
+        --out "$stage/openrr-amd/aco" \
         --capture-dir "$out/aco-capture" \
         --precision "${OPENRR_ACO_PRECISION:-global}" --matrix-loads "${OPENRR_ACO_MATRIX_LOADS:-vector8}" \
         "$stage/openrr-amd/shaders" "$out/occ_nopad" "$out/occ_pad16k" "$out"/b2_* \
