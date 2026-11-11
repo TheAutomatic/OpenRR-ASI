@@ -102,7 +102,7 @@ Legacy（fast-mode 0）：ACO vs LLPC **1080p/4K 全帧 100.0000% / ulp 0 位一
 跨版本自检：Legacy 0.1.5 vs v0.1.2（MSVC 基线）1080p **逐位一致**【4K 见 §9 汇总】。
 覆盖：trace 帧全部 25 个 dispatch **aco=1**，含 LT_UP8/LT_MI8 三内核、post 系列、_w 宽路径（d3d_enc0_attr_f_w_lt、enc0_stage_32_64_f_w_lt）；post_dlt 由单元 R 项覆盖。
 
-**已知问题（发布前必须解决）**：guides=1（全可选引导）下 ACO/LLPC 出现数值敏感差异——本轮 Fast+guides 短测 p99 0.00854、PSNR_01 55.09。这是 `mesa-guide-isolation-2026-11-11.md` 已记录的 ACO/LLPC 数值敏感问题在 0.1.5 下的延续（0.1.4 全 guide 43.8 dB、LT_VO 放大），**不是**短 warmup 瞬态（统一口径复核：guides=1 稳态直接互比 1080p ~32.7 dB，见 §9.2 表 C——比 0.1.4 的 43.8 更差）。本轮不修，列入发布前必须解决项；正式结论均基于 guides=0。
+**已知问题（发布前必须解决）**：guides=1（全可选引导）下 ACO/LLPC 出现数值敏感差异——本轮 Fast+guides 短测 p99 0.00854、PSNR_01 55.09。这是 `mesa-guide-isolation-2026-11-11.md` 已记录的 ACO/LLPC 数值敏感问题在 0.1.5 下的延续（0.1.4 全 guide 43.8 dB、LT_VO 放大），**不是**短 warmup 瞬态（统一口径复核：guides=1 稳态直接互比 1080p ~32.7 dB，见 §9.2 表 C——比 0.1.4 的 43.8 更差；Legacy @ guides=1 下 ACO/LLPC 仍近逐位一致（≥121 dB），分歧确认完全来自 _lt 近似内核）。本轮不修，列入发布前必须解决项；正式结论均基于 guides=0。
 
 ## 7. 记录对照（vs 0.1.4-drirc 生产记录，ship key 严格匹配）
 
@@ -203,6 +203,7 @@ Legacy 0.1.5 vs v0.1.2（MSVC）：1080p 与 4K 均**逐位一致**（exact 100.
 | 1 | 1440p | steady 全 999 / drs_7 53.82 | 同 g0 |
 | 1 | 4K | 53.40 / 62.31 / 53.40 | |
 
+补充检验（补测格）：**Legacy @ guides=1 的 ACO vs LLPC = 1080p/4K 全程最差 121.3/122.1 dB**（稳态末帧 127.9/127.3，仅 DRS 帧个别半 ULP）——Legacy 精确路径在两编译器下确定一致（guides=0 此前已验，guides=1 现补验）。由此归因钉死：**guides=1 的 33 dB 分歧完全经 `_lt` fast 内核的近似进入**（LT_VO 嫌疑），与 Legacy 路径无关。
 → **改正旧结论**：原文"ACO/LLPC 敏感性远小于两者对 v0.1.2 的距离"方向写反且论据错误（PSNR 不满足三角不等式，误差方向可部分抵消：g1-1080p 直接互比 32.7 dB 的两侧，各自对 v0.1.2 却都是 64.5 dB，数学上完全自洽）。正确表述：**guides=1 下 ACO/LLPC 的直接分歧（steady ~29–33 dB@1080p/1440p 锚点口径、32.7 dB 直接口径）远大于 guides=0（~59.5+），是发布前必须解决的数值敏感项**；g0 下分歧很小且 DRS 段多处逐位一致。1440p 的稳态逐位一致与 1080p 的 33 dB 并存说明该敏感性与内容和分辨率强相关。
 
 ### 9.3 逐核耗时（串行化重测，v2 —— 旧方法作废，见 §9.6）
