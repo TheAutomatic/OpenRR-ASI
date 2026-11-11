@@ -44,16 +44,13 @@ f16vec3 texel(int x, int y, int lo, int hi) {
 #endif
 }
 
-#ifdef LT_DS_FAST
-// the weights as selects of constants: the array is a load per lane from the code's constants, with 64-bit addresses
+// the weights as selects of constants: the W_ODD array form lowers to a literal pool after the code on ACO,
+// which the strict record format cannot carry; the constants and their indexing are identical either way
 #define WT1(k_, a_, b_) case k_: return p ? hbits(a_) : hbits(b_);
 float16_t wt(int k, int parity) {
     bool p = parity == 1;
     switch (k) { WT1(0, 0xa8e7u, 0xa94bu) WT1(1, 0x35f4u, 0x2d96u) WT1(2, 0x38f6u, 0x38f6u) WT1(3, 0x2d96u, 0x35f4u) default: return p ? hbits(0xa94bu) : hbits(0xa8e7u); }
 }
-#else
-float16_t wt(int k, int parity) { return hbits(W_ODD[parity == 1 ? k : 4 - k]); }
-#endif
 
 f16vec3 hpass(int row, int cx, int px, int lo, int hi) {
     precise f16vec3 acc = f16vec3(0.0hf);
