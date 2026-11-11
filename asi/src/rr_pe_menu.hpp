@@ -15,8 +15,11 @@ struct IUnknown;
 namespace openrr::pe::menu {
 
 void install();
+void prepare_dxgi(); // Synchronous factory-method hooks; outside loader lock.
+// Non-test Present heartbeat, independent of menu visibility and queue availability.
+using PresentBeatHook = void (*)();
+void on_present_beat(PresentBeatHook hook);
 void hook_swapchain_vtable(IDXGISwapChain* sc);
-void watch_queues(ID3D12Device* device);
 
 using D3D12PresentHook = void (*)(IDXGISwapChain* swap_chain, ID3D12CommandQueue* queue, int encoding);
 void on_d3d12_present(D3D12PresentHook hook);
@@ -24,13 +27,8 @@ void on_d3d12_present(D3D12PresentHook hook);
 using D3D12ShownHook = void (*)(IDXGISwapChain* swap_chain, ID3D12CommandQueue* queue);
 void on_d3d12_shown(D3D12ShownHook hook);
 
-void note_swapchain_queue(IDXGISwapChain* swap_chain, ID3D12CommandQueue* queue);
-
 using D3D11PresentHook = void (*)(IDXGISwapChain* swap_chain, ID3D11Device* device);
 void on_d3d11_present(D3D11PresentHook hook);
-
-using ExecuteObserver = void (*)(ID3D12CommandQueue* queue, unsigned count, ID3D12CommandList* const* lists);
-void on_execute(ExecuteObserver observer);
 
 void draw_game(IDXGISwapChain* swap_chain, IUnknown* device, bool new_frame = true);
 bool colour_space_of(IDXGISwapChain* swap_chain, int* space);

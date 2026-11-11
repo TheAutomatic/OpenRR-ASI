@@ -1,5 +1,7 @@
 # OpenRR-ASI (`openrr-amd.asi`)
 
+简体中文 | [English](README.en.md)
+
 本仓库是基于上游 [OpenNeuralRendering/OpenRR](https://github.com/OpenNeuralRendering/OpenRR) 构建的**独立 OptiScaler `.asi` 插件分支**，用于在 AMD Radeon RX 9000 系列（RDNA4）显卡上运行 NVIDIA DLSS Ray Reconstruction（光线重建，`nvngx_dlssd.dll` 310.9.1）。
 
 关于 OpenRR 的网络重实现原理、RDNA4 着色器架构、Clean-room 验证方法与基准数据，请直接参阅上游主仓库 **[OpenNeuralRendering/OpenRR](https://github.com/OpenNeuralRendering/OpenRR)**，本文不再赘述。
@@ -25,6 +27,7 @@
 - **D3D12 Direct 完整 Compute 状态恢复**：在发现 D3D12 设备时即通过 MinHook 挂钩 `D3D12Core` 底层函数（不触碰对象虚表），全程追踪并在 `Record` 后完整恢复游戏的 Descriptor Heaps、Compute Root Signature、全部 Root 实参（Descriptor Table / CBV / SRV / UAV / 32-bit Root Constants）以及 PSO / State Object。无需依赖定制版 OptiScaler 内部恢复逻辑，即可原生支持《生化危机 9 (`re9.exe`)》《怪物猎人：荒野》《龙之信条 2》《007 First Light》等游戏。
 - **D3D12 ↔ Vulkan 桥接自动回退与硬化**：在无 `amdxc64.dll` ELF 直通的环境（如 Linux vkd3d-proton，或手动指定 `Backend = vulkan`）下自动回退至命令列表切分（Split）+ Vulkan 共享资源互操作桥接；补齐防自递归回退保护以及 Split Barrier / Enhanced Barrier / RTAS / MetaCommand 拒绝规则。
 - **原生 Vulkan 游戏直通（`RecordVk`）**：通过 `LdrRegisterDllNotification` 监听晚加载的 `vulkan-1.dll`，在游戏 `vkCreateDevice` 时自动注入所需扩展、特性与独立计算队列，并在设备未就绪时自动隐藏 RR 选项避免崩溃。
+- **无全局 DXGI 伪装时的 Streamline RR**：配合 `OptiPatcher.asi`（`Dxgi=auto/false`）时，OpenRR 仅在 `sl.dlss_d.dll` 的 `slOnPluginLoad` 同步调用期间，把 OpenRR 可用的 AMD 适配器在 `sl.common` 的 SystemCaps 中临时显示为 NVIDIA，返回后逐字段恢复，并从插件返回的 JSON 中去掉两个 NVX 专用 Vulkan 扩展。已知限制：假定 slInit 加载插件期间没有其他线程读取这份 caps。
 
 ### 3. 与 [`dlssnr-amd.asi`](https://gitlab.com/mochizuki0323/DLSSNR-AMD) 无缝共存
 - 当 `plugins\` 目录下同时存在 [`dlssnr-amd.asi`](https://gitlab.com/mochizuki0323/DLSSNR-AMD) 与 `openrr-amd.asi` 时，无需修改任何一方配置：OpenRR 会自动启用 D3D12 Direct 模式（不叠加第二层命令列表 vtable hook），自动识别并追踪切分后的 continuation 命令列表，并在菜单打开时透传 `Insert`（OptiScaler）与 `End`（`dlssnr-amd`）快捷键。

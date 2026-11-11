@@ -3,6 +3,8 @@
 #include "rr_path_win.hpp"
 #include "rr_number.hpp"
 #include "rr_pe_menu.hpp"
+#include "rr_present_scope.hpp"
+#include "rr_dxgi_queue.hpp"
 #include "mingw_d3d12_compat.h"
 #include "rr_control_shared.hpp"
 #include "rr_ini_edit.hpp"
@@ -1065,22 +1067,7 @@ struct D3D12Overlay {
     }
 };
 
-using ExecuteFn = void(STDMETHODCALLTYPE*)(ID3D12CommandQueue*, UINT, ID3D12CommandList* const*);
-ExecuteFn g_execute = nullptr;
-std::atomic<ExecuteObserver> g_execute_observer{nullptr};
-thread_local ID3D12CommandQueue* t_last_direct = nullptr;
-thread_local ID3D12CommandQueue* t_last_seen = nullptr;
-
-void STDMETHODCALLTYPE execute_hook(ID3D12CommandQueue* q, UINT n, ID3D12CommandList* const* lists) {
-    if (q != t_last_seen) {
-        t_last_seen = q;
-        if (q->GetDesc().Type == D3D12_COMMAND_LIST_TYPE_DIRECT) t_last_direct = q;
-    }
-    g_execute(q, n, lists);
-    if (const ExecuteObserver observer = g_execute_observer.load()) observer(q, n, lists);
-}
-
-ID3D12CommandQueue* last_direct_queue() { return t_last_direct; }
+std::atomic<PresentBeatHook> g_present_beat{nullptr};
 std::atomic<D3D12PresentHook> g_d3d12_hook{nullptr};
 std::atomic<D3D11PresentHook> g_d3d11_hook{nullptr};
 std::atomic<D3D12ShownHook> g_d3d12_shown{nullptr};
@@ -1104,35 +1091,13 @@ bool dump_wanted() { return false; }
 
 #include "rr_pe_menu_vk.inl"
 
-struct CreatedQueue { IDXGISwapChain* sc; ID3D12CommandQueue* queue; };
-std::mutex g_created_mutex;
-std::vector<CreatedQueue> g_created;
-constexpr size_t kCreatedKept = 8;
-
-bool queue_removed(ID3D12CommandQueue* q) {
-    ID3D12Device* d = nullptr;
-    const bool removed = SUCCEEDED(q->GetDevice(IID_PPV_ARGS(&d))) && d && d->GetDeviceRemovedReason() != S_OK;
-    release(d);
-    return removed;
-}
-
-ID3D12CommandQueue* created_queue(IDXGISwapChain* sc) {
-    std::lock_guard<std::mutex> g(g_created_mutex);
-    for (auto it = g_created.begin(); it != g_created.end(); ++it) {
-        if (it->sc != sc) continue;
-        if (queue_removed(it->queue)) { it->queue->Release(); g_created.erase(it); return nullptr; }
-        it->queue->AddRef();
-        return it->queue;
-    }
-    return nullptr;
-}
-
 std::atomic<ULONGLONG> g_system_drawn_ms{0};
 
 void draw_on(IDXGISwapChain* sc, UINT flags, IUnknown* known = nullptr) {
     if (!known) ++g_presents;
     if (t_inside || (flags & DXGI_PRESENT_TEST)) return;
     t_inside = true;
+    if (!known) { if (const auto beat = g_present_beat.load()) beat(); }
     std::unique_lock<std::mutex> lock(g_mutex, std::defer_lock);
     if (known) lock.lock();
     else (void)lock.try_lock();
@@ -1157,7 +1122,7 @@ void draw_on(IDXGISwapChain* sc, UINT flags, IUnknown* known = nullptr) {
     try {
         ID3D11Device* d11 = nullptr;
         ID3D12CommandQueue* q12 = nullptr;
-        ID3D12Device* d12dev = nullptr;
+
         if (known) {
             if (FAILED(known->QueryInterface(IID_PPV_ARGS(&d11))) || !d11) {
                 release(d11);
@@ -1166,24 +1131,11 @@ void draw_on(IDXGISwapChain* sc, UINT flags, IUnknown* known = nullptr) {
             if (!d11 && !q12) { t_inside = false; return; }
         } else if (FAILED(sc->GetDevice(IID_PPV_ARGS(&d11))) || !d11) {
             release(d11);
-            if ((FAILED(sc->GetDevice(IID_PPV_ARGS(&q12))) || !q12) && SUCCEEDED(sc->GetDevice(IID_PPV_ARGS(&d12dev))) &&
-                d12dev) {
+            // Only use a queue supplied by the swap chain; never infer it from submissions.
+            if (FAILED(sc->GetDevice(IID_PPV_ARGS(&q12))) || !q12) {
                 release(q12);
-                if ((q12 = created_queue(sc))) {
-                    ID3D12Device* owner = nullptr;
-                    if (FAILED(q12->GetDevice(IID_PPV_ARGS(&owner))) || owner != d12dev) release(q12);
-                    release(owner);
-                }
-                if (ID3D12CommandQueue* last = q12 ? nullptr : last_direct_queue()) {
-                    ID3D12Device* owner = nullptr;
-                    if (SUCCEEDED(last->GetDevice(IID_PPV_ARGS(&owner))) && owner == d12dev) { q12 = last; q12->AddRef(); }
-                    release(owner);
-                }
-                release(d12dev);
-                if (!q12) {
-                    t_inside = false;
-                    return;
-                }
+                q12 = dxgi_queue::get(sc);
+                if (!q12) { t_inside = false; return; }
             }
         }
         static const bool d3d11_menu_enabled = [] {
@@ -1267,6 +1219,9 @@ void draw_on(IDXGISwapChain* sc, UINT flags, IUnknown* known = nullptr) {
 using PresentFn = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain*, UINT, UINT);
 using Present1Fn = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain1*, UINT, UINT, const DXGI_PRESENT_PARAMETERS*);
 using SetColorSpace1Fn = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain3*, DXGI_COLOR_SPACE_TYPE);
+using Resize1Fn = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain3*, UINT, UINT, UINT, DXGI_FORMAT, UINT, const UINT*, IUnknown* const*);
+Resize1Fn g_resize1[2]{};
+int g_resize1_used = 0;
 PresentFn g_present[2]{};
 Present1Fn g_present1[2]{};
 SetColorSpace1Fn g_colour_space[2]{};
@@ -1274,13 +1229,31 @@ std::mutex g_hook_vtable_mutex;
 std::vector<void*> g_hooked_fns;
 int g_present_used = 0, g_present1_used = 0, g_cs_used = 0;
 
+template <int N> HRESULT STDMETHODCALLTYPE resize1_hook(IDXGISwapChain3* sc, UINT count, UINT w, UINT h,
+    DXGI_FORMAT format, UINT flags, const UINT* masks, IUnknown* const* queues) {
+    const HRESULT hr = g_resize1[N](sc, count, w, h, format, flags, masks, queues);
+    if (SUCCEEDED(hr) && queues) {
+        DXGI_SWAP_CHAIN_DESC desc{};
+        const UINT n = count ? count : (SUCCEEDED(sc->GetDesc(&desc)) ? desc.BufferCount : 0);
+        // Multi-node chains can select a different queue per buffer. Skip drawing
+        // rather than retain an obsolete single-queue association in that case.
+        bool same = n != 0;
+        for (UINT i = 1; i < n; ++i) same = same && queues[i] == queues[0];
+        sc->SetPrivateDataInterface(dxgi_queue::queue_key, nullptr);
+        if (same) dxgi_queue::remember(sc, queues[0]);
+    }
+    return hr;
+}
+
 template <int N> HRESULT STDMETHODCALLTYPE present_hook(IDXGISwapChain* sc, UINT interval, UINT flags) {
-    draw_on(sc, flags);
+    const PresentScope scope;
+    if (scope.outermost()) draw_on(sc, flags);
     return g_present[N](sc, interval, flags);
 }
 template <int N> HRESULT STDMETHODCALLTYPE present1_hook(IDXGISwapChain1* sc, UINT interval, UINT flags,
                                                          const DXGI_PRESENT_PARAMETERS* p) {
-    draw_on(sc, flags);
+    const PresentScope scope;
+    if (scope.outermost()) draw_on(sc, flags);
     return g_present1[N](sc, interval, flags, p);
 }
 template <int N> HRESULT STDMETHODCALLTYPE colour_space_hook(IDXGISwapChain3* sc, DXGI_COLOR_SPACE_TYPE space) {
@@ -1324,6 +1297,8 @@ void hook_sc_methods(IDXGISwapChain* sc) {
     IDXGISwapChain3* sc3 = nullptr;
     if (SUCCEEDED(sc->QueryInterface(IID_PPV_ARGS(&sc3))) && sc3) {
         void** vt3 = *reinterpret_cast<void***>(sc3);
+        try_hook(vt3[39], reinterpret_cast<void*>(&resize1_hook<0>), reinterpret_cast<void*>(&resize1_hook<1>),
+                 reinterpret_cast<void**>(&g_resize1[0]), reinterpret_cast<void**>(&g_resize1[1]), g_resize1_used);
         try_hook(vt3[38], reinterpret_cast<void*>(&colour_space_hook<0>), reinterpret_cast<void*>(&colour_space_hook<1>),
                  reinterpret_cast<void**>(&g_colour_space[0]), reinterpret_cast<void**>(&g_colour_space[1]), g_cs_used);
         sc3->Release();
@@ -1333,6 +1308,7 @@ void hook_sc_methods(IDXGISwapChain* sc) {
 
 // In-process probe using system dxgi.dll + d3d11.dll (no external probe.exe needed).
 void install_now() {
+    prepare_dxgi();
     openrr::pe::control::start_input();
     {
         std::lock_guard<std::mutex> lock(g_hook_vtable_mutex);
@@ -1382,6 +1358,11 @@ void install_now() {
 }
 
 } // namespace
+
+void prepare_dxgi() {
+    if (!dxgi_queue::install(&hook_sc_methods))
+        say("system DXGI factory hooks incomplete; menu may be unavailable on untracked swap chains");
+}
 
 void hook_swapchain_vtable(IDXGISwapChain* sc) {
     hook_sc_methods(sc);
@@ -1479,42 +1460,9 @@ void vulkan_forget(VkDevice device, VkSwapchainKHR sc) {
     }
 }
 
-void watch_queues(ID3D12Device* device) {
-    static std::once_flag once;
-    std::call_once(once, [device] {
-        D3D12_COMMAND_QUEUE_DESC qd{};
-        qd.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
-        ID3D12CommandQueue* q = nullptr;
-        if (!device || FAILED(device->CreateCommandQueue(&qd, IID_PPV_ARGS(&q))) || !q) return;
-        void* fn = (*reinterpret_cast<void***>(q))[10];
-        q->Release();
-        const MH_STATUS init = MH_Initialize();
-        if ((init == MH_OK || init == MH_ERROR_ALREADY_INITIALIZED)) {
-            if (MH_CreateHook(fn, reinterpret_cast<void*>(&execute_hook), reinterpret_cast<void**>(&g_execute)) == MH_OK)
-                MH_EnableHook(fn);
-        }
-    });
-}
-
+void on_present_beat(PresentBeatHook hook) { g_present_beat.store(hook); }
 void on_d3d12_present(D3D12PresentHook hook) { g_d3d12_hook.store(hook); }
 void on_d3d12_shown(D3D12ShownHook hook) { g_d3d12_shown.store(hook); }
-
-void note_swapchain_queue(IDXGISwapChain* swap_chain, ID3D12CommandQueue* queue) {
-    if (!swap_chain || !queue) return;
-    {
-        ID3D12CommandQueue* own = nullptr;
-        const bool handed = SUCCEEDED(swap_chain->GetDevice(IID_PPV_ARGS(&own))) && own;
-        release(own);
-        if (handed) return;
-    }
-    std::lock_guard<std::mutex> g(g_created_mutex);
-    for (auto it = g_created.begin(); it != g_created.end();)
-        if (it->sc == swap_chain || queue_removed(it->queue)) { it->queue->Release(); it = g_created.erase(it); }
-        else ++it;
-    while (g_created.size() >= kCreatedKept) { g_created.front().queue->Release(); g_created.erase(g_created.begin()); }
-    queue->AddRef();
-    g_created.push_back({swap_chain, queue});
-}
 
 void draw_game(IDXGISwapChain* swap_chain, IUnknown* device, bool new_frame) {
     if (!swap_chain || !device) return;
@@ -1531,7 +1479,6 @@ void draw_game(IDXGISwapChain* swap_chain, IUnknown* device, bool new_frame) {
 }
 
 void on_d3d11_present(D3D11PresentHook hook) { g_d3d11_hook.store(hook); }
-void on_execute(ExecuteObserver observer) { g_execute_observer.store(observer); }
 
 bool colour_space_of(IDXGISwapChain* swap_chain, int* space) {
     std::lock_guard<std::mutex> lock(g_spaces_mutex);

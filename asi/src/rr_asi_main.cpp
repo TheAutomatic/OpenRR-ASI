@@ -35,6 +35,7 @@
 #include <exception>
 #include <filesystem>
 #include <initializer_list>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -988,10 +989,7 @@ bool g_api_ready = false;
 std::vector<std::wstring> g_ngx_search_paths;
 std::wstring g_dlssd_path;
 std::string g_dlssd_source;
-bool g_checked = false;
 bool g_usable = false;
-LUID g_checked_luid{};
-bool g_checked_has_luid = false;
 std::string g_unusable_reason;
 std::string g_blocked_reason;
 
@@ -1247,8 +1245,16 @@ bool check_gpu_cheap_vulkan(const LUID* luid, std::string& out_gpu_name, std::st
     return true;
 }
 
-uint64_t g_checked_dlssd_mtime = 0;
-ULONGLONG g_last_check_fail_tick = 0;
+struct UsabilityCheck {
+    bool usable = false;
+    ULONGLONG tick = 0;
+    uint64_t mtime = 0;
+    std::wstring path;
+    std::string source, reason;
+};
+// One cached result per adapter LUID (plus the automatic selection): an iGPU that fails the check
+// (e.g. enumerated by Streamline) must not disable OpenRR for the dGPU, and vice versa.
+std::map<std::pair<bool, uint64_t>, UsabilityCheck> g_usability_checks;
 
 bool check_usable(const LUID* luid) {
     if (!openrr::pe::current_config().enabled) return false;
@@ -1256,43 +1262,43 @@ bool check_usable(const LUID* luid) {
     if (!g_blocked_reason.empty()) return false;
     if (!ensure_api()) return false;
 
+    uint64_t id = 0;
+    if (luid) std::memcpy(&id, luid, sizeof(id));
+    auto& cached = g_usability_checks[{luid != nullptr, id}];
     const ULONGLONG now = GetTickCount64();
-    if (g_checked && !g_usable && (now - g_last_check_fail_tick) < 30000) {
-        return false;
+    if (cached.tick && ((!cached.usable && now - cached.tick < 30000) ||
+        (cached.usable && cached.mtime && file_mtime_64(cached.path) == cached.mtime))) {
+        g_usable = cached.usable;
+        g_dlssd_path = cached.path;
+        g_dlssd_source = cached.source;
+        g_unusable_reason = cached.reason;
+        return cached.usable;
     }
-
-    const bool same_luid = (luid == nullptr && !g_checked_has_luid) ||
-                           (luid != nullptr && g_checked_has_luid &&
-                            luid->LowPart == g_checked_luid.LowPart && luid->HighPart == g_checked_luid.HighPart);
-    if (g_checked && g_usable && (same_luid || luid == nullptr) && !g_dlssd_path.empty()) {
-        const uint64_t cur_mtime = file_mtime_64(g_dlssd_path);
-        if (cur_mtime == g_checked_dlssd_mtime && cur_mtime != 0) {
-            return true;
+    struct SaveCheck {
+        UsabilityCheck& entry;
+        ULONGLONG now;
+        ~SaveCheck() {
+            entry = {g_usable, now, g_dlssd_path.empty() ? 0 : file_mtime_64(g_dlssd_path),
+                     g_dlssd_path, g_dlssd_source, g_unusable_reason};
         }
-    }
+    } save{cached, now};
 
     const auto t0 = std::chrono::steady_clock::now();
     const char* source = nullptr;
     g_dlssd_path = find_dlssd_locked(&source);
     g_dlssd_source = source ? source : "";
-    g_checked = true;
-    g_checked_has_luid = (luid != nullptr);
-    if (luid) g_checked_luid = *luid;
 
     if (g_dlssd_path.empty()) {
         g_usable = false;
-        g_last_check_fail_tick = now;
         g_unusable_reason = "nvngx_dlssd.dll (310.9.1) not found";
         const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
         log("[openrr] cheap Check failed in %.1f ms: %s", ms, g_unusable_reason.c_str());
         return false;
     }
 
-    g_checked_dlssd_mtime = file_mtime_64(g_dlssd_path);
     std::string why;
     if (!check_dlssd_version_310_9_1(g_dlssd_path, why)) {
         g_usable = false;
-        g_last_check_fail_tick = now;
         g_unusable_reason = why;
         const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
         log("[openrr] cheap Check failed in %.1f ms: %s (%s)", ms, why.c_str(), utf8_from_wide(g_dlssd_path).c_str());
@@ -1302,7 +1308,6 @@ bool check_usable(const LUID* luid) {
     std::string gpu_name;
     if (!check_gpu_cheap_vulkan(luid, gpu_name, why)) {
         g_usable = false;
-        g_last_check_fail_tick = now;
         g_unusable_reason = why;
         const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
         log("[openrr] cheap Check failed in %.1f ms: %s", ms, why.c_str());
@@ -1727,7 +1732,7 @@ bool g_ngx_depth_hw = true;
 bool g_ngx_roughness_seen = false;
 int g_ngx_roughness_packed = -1;
 
-bool fill_d3d12_frame(RrContext& ctx, const NVSDK_NGX_Parameter& params, OnrRrFrame& frame) {
+bool fill_d3d12_frame(RrContext& ctx, const NVSDK_NGX_Parameter& params, OnrRrFrame& frame, bool host_owned) {
     const openrr::pe::Config cfg = openrr::pe::current_config();
     frame = {};
     frame.size = sizeof(frame);
@@ -1804,7 +1809,9 @@ bool fill_d3d12_frame(RrContext& ctx, const NVSDK_NGX_Parameter& params, OnrRrFr
     frame.specular_ray_direction_hit_distance = tex(NVSDK_NGX_Parameter_DLSSD_SpecularRayDirectionHitDistance, nullptr,
                                                     NVSDK_NGX_Parameter_DLSSD_SpecularRayDirectionHitDistance_Subrect_Base_X, nullptr,
                                                     NVSDK_NGX_Parameter_DLSSD_SpecularRayDirectionHitDistance_Subrect_Base_Y, nullptr, read_state);
-    frame.output = tex(NVSDK_NGX_Parameter_Output, "DLSSD.Output",
+    // Preserve ordinary output priority; only the host prefers generic Output.
+    frame.output = tex(host_owned ? NVSDK_NGX_Parameter_Output : "DLSSD.Output",
+                       host_owned ? "DLSSD.Output" : NVSDK_NGX_Parameter_Output,
                        "DLSS.Output.Subrect.Base.X", nullptr,
                        "DLSS.Output.Subrect.Base.Y", nullptr, output_state);
 
@@ -2132,6 +2139,8 @@ PFN_ReleaseFeature real_d3d12_release = nullptr;
 PFN_Shutdown real_d3d12_shutdown = nullptr;
 PFN_D3D12_Shutdown1 real_d3d12_shutdown1 = nullptr;
 
+void on_dxgi_present_cb();
+
 void on_d3d12_device_seen(ID3D12Device* dev) {
     ensure_cmd_sig_hook(dev);
     ensure_deferred_init();
@@ -2147,7 +2156,8 @@ void on_d3d12_device_seen(ID3D12Device* dev) {
             ensure_direct_state_hooks(dev, nullptr);
         }
     }
-    openrr::pe::menu::watch_queues(dev);
+    openrr::pe::menu::on_present_beat(&on_dxgi_present_cb);
+    openrr::pe::menu::prepare_dxgi();
     openrr::pe::menu::install();
 }
 
@@ -2425,7 +2435,7 @@ NVSDK_NGX_Result evaluate_d3d12_rr(ID3D12GraphicsCommandList* cmd, const NVSDK_N
     }
 
     OnrRrFrame frame{};
-    if (!fill_d3d12_frame(ctx, *params, frame)) {
+    if (!fill_d3d12_frame(ctx, *params, frame, host_owned)) {
         return NVSDK_NGX_Result_Fail;
     }
 
@@ -3402,6 +3412,8 @@ HRESULT WINAPI hk_d3d12_create_device(IUnknown* adapter, D3D_FEATURE_LEVEL min_l
         ID3D12Device* dev = nullptr;
         if (SUCCEEDED(static_cast<IUnknown*>(*out)->QueryInterface(IID_PPV_ARGS(&dev))) && dev) {
             ensure_cmd_sig_hook(dev);
+            openrr::pe::menu::on_present_beat(&on_dxgi_present_cb);
+            openrr::pe::menu::prepare_dxgi();
             dev->Release();
         }
     }
@@ -3416,6 +3428,192 @@ void hook_d3d12_device_creation() {
     if (fn && MH_CreateHook(fn, reinterpret_cast<void*>(&hk_d3d12_create_device), reinterpret_cast<void**>(&real_d3d12_create_device)) == MH_OK) {
         MH_EnableHook(fn);
     }
+}
+
+// ---- Streamline sl.dlss_d.dll load adaptation (DXGI spoofing off, e.g. OptiPatcher) ----
+// sl.dlss_d offers RR only if sl.common's SystemCaps report a supported NVIDIA adapter. During its synchronous
+// slOnPluginLoad (slInit, before any device or present work) adapters OpenRR can serve are shown as NVIDIA in the
+// caps object sl.common shares with it; every touched field is restored on return. This covers DLSS-D's own read and
+// the sl.common callbacks it calls from there (NGXGetFeatureRequirements, updateCommonEmbeddedJSONConfig).
+// Known limits: no other thread is expected to read the caps during slInit's plugin load, and callbacks a plugin
+// might defer past slOnPluginLoad see the real caps.
+// sl::param::IParameters with the MSVC ABI: vtable[7] = get(const char*, void**).
+struct SlParametersVtable { void* slots[15]; };
+struct SlParameters { const SlParametersVtable* vtable; };
+struct SlAdapter {
+    LUID id{};
+    uint32_t vendor{};
+    uint32_t bit{};
+    uint32_t architecture{};
+    uint32_t implementation{};
+    uint32_t revision{};
+    uint32_t deviceId{};
+    void* nativeInterface{};
+};
+constexpr uint32_t kSlMaxNumSupportedGPUs = 8;
+struct SlSystemCaps {
+    uint32_t gpuCount{};
+    uint32_t osVersionMajor{};
+    uint32_t osVersionMinor{};
+    uint32_t osVersionBuild{};
+    uint32_t driverVersionMajor{};
+    uint32_t driverVersionMinor{};
+    SlAdapter adapters[kSlMaxNumSupportedGPUs]{};
+    uint32_t gpuLoad[kSlMaxNumSupportedGPUs]{};
+    bool hwsSupported{};
+    bool laptopDevice{};
+};
+
+using PFN_slGetPluginFunction = void*(RR_NGX_MSABI*)(const char*);
+using PFN_slOnPluginLoad = bool(RR_NGX_MSABI*)(SlParameters*, const char*, const char**);
+std::atomic<void*> g_dlssd_hook_target{nullptr};
+std::atomic<PFN_slGetPluginFunction> g_real_dlssd_get{nullptr};
+std::atomic<PFN_slOnPluginLoad> g_real_dlssd_load{nullptr};
+
+bool sl_caps_usable(const SlSystemCaps* c) {
+    MEMORY_BASIC_INFORMATION mbi{};
+    if (!c || !VirtualQuery(c, &mbi, sizeof(mbi)) || mbi.State != MEM_COMMIT || (mbi.Protect & PAGE_GUARD) ||
+        !(mbi.Protect & (PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)) ||
+        reinterpret_cast<uintptr_t>(c) + sizeof(*c) > reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize)
+        return false;
+    return c->gpuCount > 0 && c->gpuCount <= kSlMaxNumSupportedGPUs && c->osVersionMajor == 10;
+}
+
+struct SlCapsPatch {
+    SlSystemCaps* caps = nullptr;
+    uint32_t mask = 0;
+    uint32_t vendor[kSlMaxNumSupportedGPUs]{}, architecture[kSlMaxNumSupportedGPUs]{};
+    uint32_t driver_major = 0, driver_minor = 0;
+    bool hws = false;
+
+    explicit SlCapsPatch(SlParameters* params) {
+        if (!params || !params->vtable || !params->vtable->slots[7] || !openrr::pe::current_config().enabled) return;
+        using GetPtr = bool(RR_NGX_MSABI*)(SlParameters*, const char*, void**);
+        void* raw = nullptr;
+        if (!reinterpret_cast<GetPtr>(params->vtable->slots[7])(params, "sl.param.common.gpuInfo", &raw)) return;
+        auto* c = static_cast<SlSystemCaps*>(raw);
+        if (!sl_caps_usable(c)) return;
+        for (uint32_t i = 0; i < c->gpuCount; ++i) {
+            SlAdapter& a = c->adapters[i];
+            const bool candidate = a.vendor == 0x1002u || (a.vendor == 0x10DEu && a.architecture < 0x160u);
+            if (!candidate || !(a.id.LowPart || a.id.HighPart) || !check_usable(&a.id)) continue;
+            vendor[i] = a.vendor;
+            architecture[i] = a.architecture;
+            mask |= 1u << i;
+            a.vendor = 0x10DEu;
+            if (a.architecture < 0x160u) a.architecture = 0x190u;
+        }
+        if (!mask) return;
+        caps = c;
+        driver_major = c->driverVersionMajor;
+        driver_minor = c->driverVersionMinor;
+        hws = c->hwsSupported;
+        if (driver_major < 535u || (driver_major == 535u && driver_minor < 15u)) {
+            c->driverVersionMajor = 999u;
+            c->driverVersionMinor = 0u;
+        }
+        c->hwsSupported = true;
+    }
+    ~SlCapsPatch() {
+        if (!caps) return;
+        for (uint32_t i = 0; i < kSlMaxNumSupportedGPUs; ++i) {
+            if (!(mask & (1u << i))) continue;
+            caps->adapters[i].vendor = vendor[i];
+            caps->adapters[i].architecture = architecture[i];
+        }
+        caps->driverVersionMajor = driver_major;
+        caps->driverVersionMinor = driver_minor;
+        caps->hwsSupported = hws;
+    }
+    SlCapsPatch(const SlCapsPatch&) = delete;
+    SlCapsPatch& operator=(const SlCapsPatch&) = delete;
+};
+
+void remove_json_token(std::string& json, const char* token) {
+    const std::string quoted = std::string("\"") + token + "\"";
+    auto blank = [](char ch) { return ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n'; };
+    size_t pos = 0;
+    while ((pos = json.find(quoted, pos)) != std::string::npos) {
+        size_t start = pos, end = pos + quoted.size(), after = end;
+        while (after < json.size() && blank(json[after])) ++after;
+        if (after < json.size() && json[after] == ',') {
+            end = after + 1;
+        } else {
+            size_t before = start;
+            while (before > 0 && blank(json[before - 1])) --before;
+            if (before > 0 && json[before - 1] == ',') start = before - 1;
+        }
+        json.erase(start, end - start);
+        pos = start;
+    }
+}
+
+bool RR_NGX_MSABI hk_dlssd_on_plugin_load(SlParameters* params, const char* loader_json, const char** plugin_json) {
+    const PFN_slOnPluginLoad real = g_real_dlssd_load.load(std::memory_order_acquire);
+    if (!real) return false;
+    static thread_local bool inside = false;
+    if (inside) return real(params, loader_json, plugin_json);
+    struct Inside { Inside() { inside = true; } ~Inside() { inside = false; } } guard;
+
+    uint32_t adapted = 0;
+    bool result = false;
+    {
+        SlCapsPatch patch(params);
+        adapted = patch.mask;
+        result = real(params, loader_json, plugin_json);
+    }
+    if (!adapted) return result;
+    log("[openrr] sl.dlss_d: SystemCaps adapted during slOnPluginLoad (adapter mask 0x%x) -> %s",
+        adapted, result ? "loaded" : "refused");
+    if (result && plugin_json && *plugin_json) {
+        // OpenRR does not use NVIDIA-only Vulkan extensions; the host must not be asked to enable them.
+        std::string patched = *plugin_json;
+        remove_json_token(patched, "VK_NVX_binary_import");
+        remove_json_token(patched, "VK_NVX_image_view_handle");
+        static std::mutex mutex;
+        static std::unordered_set<std::string> pool; // Returned strings stay valid for the process lifetime.
+        std::lock_guard<std::mutex> lock(mutex);
+        *plugin_json = pool.insert(std::move(patched)).first->c_str();
+    }
+    return result;
+}
+
+void* RR_NGX_MSABI hk_dlssd_get_plugin_fn(const char* name) {
+    const PFN_slGetPluginFunction get = g_real_dlssd_get.load(std::memory_order_acquire);
+    void* fn = get ? get(name) : nullptr;
+    if (fn && name && std::strcmp(name, "slOnPluginLoad") == 0) {
+        g_real_dlssd_load.store(reinterpret_cast<PFN_slOnPluginLoad>(fn), std::memory_order_release);
+        return reinterpret_cast<void*>(&hk_dlssd_on_plugin_load);
+    }
+    return fn;
+}
+
+// sl.dlss_d exports only slGetPluginFunction; sl.interposer resolves slOnPluginLoad through it right after loading.
+void hook_sl_dlssd(HMODULE mod) {
+    void* fn = mod ? reinterpret_cast<void*>(GetProcAddress(mod, "slGetPluginFunction")) : nullptr;
+    void* expected = nullptr;
+    if (!fn || !g_dlssd_hook_target.compare_exchange_strong(expected, fn, std::memory_order_acq_rel)) return;
+    const MH_STATUS init = MH_Initialize();
+    void* orig = nullptr;
+    if ((init == MH_OK || init == MH_ERROR_ALREADY_INITIALIZED) &&
+        MH_CreateHook(fn, reinterpret_cast<void*>(&hk_dlssd_get_plugin_fn), &orig) == MH_OK) {
+        g_real_dlssd_get.store(reinterpret_cast<PFN_slGetPluginFunction>(orig), std::memory_order_release);
+        if (MH_EnableHook(fn) == MH_OK) return;
+        MH_RemoveHook(fn);
+    }
+    g_real_dlssd_get.store(nullptr, std::memory_order_release);
+    g_dlssd_hook_target.store(nullptr, std::memory_order_release);
+    log("[openrr] sl.dlss_d.dll: slGetPluginFunction could not be hooked; Streamline RR then needs DXGI spoofing");
+}
+
+void unhook_sl_dlssd(const void* base, ULONG size) {
+    void* fn = g_dlssd_hook_target.load(std::memory_order_acquire);
+    const auto at = reinterpret_cast<uintptr_t>(fn), begin = reinterpret_cast<uintptr_t>(base);
+    if (!fn || at < begin || at - begin >= size) return;
+    MH_RemoveHook(fn); // The image is still mapped while the unload notification runs.
+    g_real_dlssd_load.store(nullptr, std::memory_order_release);
+    g_real_dlssd_get.store(nullptr, std::memory_order_release);
+    g_dlssd_hook_target.store(nullptr, std::memory_order_release);
 }
 
 // Late vulkan-1.dll / d3d12.dll load notification via LdrRegisterDllNotification (Item #9)
@@ -3439,8 +3637,15 @@ using PFN_LdrRegisterDllNotification = LONG(NTAPI*)(ULONG, PFN_LdrDllNotificatio
 PVOID g_dll_notif_cookie = nullptr;
 
 VOID NTAPI on_dll_loaded_notification(ULONG reason, const LDR_DLL_NOTIFICATION_DATA_T* data, PVOID) {
-    if (reason != 1 || !data || !data->Loaded.BaseDllName || !data->Loaded.BaseDllName->Buffer) return; // 1 = LDR_DLL_NOTIFICATION_REASON_LOADED
+    // 1 = LDR_DLL_NOTIFICATION_REASON_LOADED, 2 = LDR_DLL_NOTIFICATION_REASON_UNLOADED
+    if ((reason != 1 && reason != 2) || !data || !data->Loaded.BaseDllName || !data->Loaded.BaseDllName->Buffer) return;
     const USHORT chars = data->Loaded.BaseDllName->Length / sizeof(wchar_t);
+    if (chars == 13 && _wcsnicmp(data->Loaded.BaseDllName->Buffer, L"sl.dlss_d.dll", 13) == 0) {
+        if (reason == 1) hook_sl_dlssd(static_cast<HMODULE>(data->Loaded.DllBase));
+        else unhook_sl_dlssd(data->Loaded.DllBase, data->Loaded.SizeOfImage);
+        return;
+    }
+    if (reason != 1) return;
     if (chars == 12 && _wcsnicmp(data->Loaded.BaseDllName->Buffer, L"vulkan-1.dll", 12) == 0) {
         hook_device_creation();
         hook_present_beat();
@@ -3456,143 +3661,10 @@ void register_vulkan_dll_notification() {
     if (reg) reg(0, &on_dll_loaded_notification, nullptr, &g_dll_notif_cookie);
 }
 
-// ---- DXGI Factory & SwapChain Hooks (Present beat + menu overlay) ----
-void on_d3d12_present_cb(IDXGISwapChain*, ID3D12CommandQueue*, int) {
+// ---- Present Heartbeat Callbacks (registered with openrr::pe::menu) ----
+void on_dxgi_present_cb() {
     ensure_deferred_init();
     openrr::pe::watchdog::beat();
-}
-
-void on_d3d11_present_cb(IDXGISwapChain*, ID3D11Device*) {
-    ensure_deferred_init();
-    openrr::pe::watchdog::beat();
-}
-
-void adopt_swapchain(IUnknown* device, IDXGISwapChain* sc) {
-    if (!device || !sc) return;
-    ID3D12CommandQueue* queue = nullptr;
-    if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&queue))) && queue) {
-        openrr::pe::menu::note_swapchain_queue(sc, queue);
-        ID3D12Device* d = nullptr;
-        if (SUCCEEDED(queue->GetDevice(IID_PPV_ARGS(&d))) && d) {
-            on_d3d12_device_seen(d);
-            d->Release();
-        }
-        queue->Release();
-    }
-    openrr::pe::menu::on_d3d12_present(&on_d3d12_present_cb);
-    openrr::pe::menu::on_d3d11_present(&on_d3d11_present_cb);
-    openrr::pe::menu::hook_swapchain_vtable(sc);
-}
-
-using PFN_CreateSwapChain = HRESULT(STDMETHODCALLTYPE*)(IDXGIFactory*, IUnknown*, DXGI_SWAP_CHAIN_DESC*, IDXGISwapChain**);
-using PFN_CreateSwapChainForHwnd = HRESULT(STDMETHODCALLTYPE*)(IDXGIFactory2*, IUnknown*, HWND, const DXGI_SWAP_CHAIN_DESC1*, const DXGI_SWAP_CHAIN_FULLSCREEN_DESC*, IDXGIOutput*, IDXGISwapChain1**);
-using PFN_CreateSwapChainForCoreWindow = HRESULT(STDMETHODCALLTYPE*)(IDXGIFactory2*, IUnknown*, IUnknown*, const DXGI_SWAP_CHAIN_DESC1*, IDXGIOutput*, IDXGISwapChain1**);
-using PFN_CreateSwapChainForComposition = HRESULT(STDMETHODCALLTYPE*)(IDXGIFactory2*, IUnknown*, const DXGI_SWAP_CHAIN_DESC1*, IDXGIOutput*, IDXGISwapChain1**);
-
-PFN_CreateSwapChain real_sc_create[2]{};
-PFN_CreateSwapChainForHwnd real_sc_hwnd[2]{};
-PFN_CreateSwapChainForCoreWindow real_sc_core[2]{};
-PFN_CreateSwapChainForComposition real_sc_comp[2]{};
-int g_sc_create_used = 0, g_sc_hwnd_used = 0, g_sc_core_used = 0, g_sc_comp_used = 0;
-std::mutex g_fac_mutex;
-std::vector<void*> g_fac_hooked;
-
-template <int N>
-HRESULT STDMETHODCALLTYPE hk_sc_create(IDXGIFactory* f, IUnknown* dev, DXGI_SWAP_CHAIN_DESC* desc, IDXGISwapChain** out) {
-    const HRESULT hr = real_sc_create[N](f, dev, desc, out);
-    if (SUCCEEDED(hr) && out && *out) adopt_swapchain(dev, *out);
-    return hr;
-}
-
-template <int N>
-HRESULT STDMETHODCALLTYPE hk_sc_hwnd(IDXGIFactory2* f, IUnknown* dev, HWND hwnd, const DXGI_SWAP_CHAIN_DESC1* d1,
-                                     const DXGI_SWAP_CHAIN_FULLSCREEN_DESC* fs, IDXGIOutput* restrict_out, IDXGISwapChain1** out) {
-    const HRESULT hr = real_sc_hwnd[N](f, dev, hwnd, d1, fs, restrict_out, out);
-    if (SUCCEEDED(hr) && out && *out) adopt_swapchain(dev, *out);
-    return hr;
-}
-
-template <int N>
-HRESULT STDMETHODCALLTYPE hk_sc_core(IDXGIFactory2* f, IUnknown* dev, IUnknown* win, const DXGI_SWAP_CHAIN_DESC1* d1,
-                                     IDXGIOutput* restrict_out, IDXGISwapChain1** out) {
-    const HRESULT hr = real_sc_core[N](f, dev, win, d1, restrict_out, out);
-    if (SUCCEEDED(hr) && out && *out) adopt_swapchain(dev, *out);
-    return hr;
-}
-
-template <int N>
-HRESULT STDMETHODCALLTYPE hk_sc_comp(IDXGIFactory2* f, IUnknown* dev, const DXGI_SWAP_CHAIN_DESC1* d1,
-                                     IDXGIOutput* restrict_out, IDXGISwapChain1** out) {
-    const HRESULT hr = real_sc_comp[N](f, dev, d1, restrict_out, out);
-    if (SUCCEEDED(hr) && out && *out) adopt_swapchain(dev, *out);
-    return hr;
-}
-
-void adopt_factory(void* factory) {
-    if (!factory) return;
-    std::lock_guard<std::mutex> lock(g_fac_mutex);
-    auto try_hk = [&](void* fn, void* d0, void* d1, void** r0, void** r1, int& used) {
-        if (!fn || used >= 2) return;
-        if (std::find(g_fac_hooked.begin(), g_fac_hooked.end(), fn) != g_fac_hooked.end()) return;
-        void* detour = (used == 0) ? d0 : d1;
-        void** real = (used == 0) ? r0 : r1;
-        if (MH_CreateHook(fn, detour, real) == MH_OK && MH_EnableHook(fn) == MH_OK) {
-            ++used;
-            g_fac_hooked.push_back(fn);
-        }
-    };
-    IDXGIFactory* f = nullptr;
-    if (SUCCEEDED(static_cast<IUnknown*>(factory)->QueryInterface(IID_PPV_ARGS(&f))) && f) {
-        void** vt = *reinterpret_cast<void***>(f);
-        try_hk(vt[10], reinterpret_cast<void*>(&hk_sc_create<0>), reinterpret_cast<void*>(&hk_sc_create<1>),
-               reinterpret_cast<void**>(&real_sc_create[0]), reinterpret_cast<void**>(&real_sc_create[1]), g_sc_create_used);
-        f->Release();
-    }
-    IDXGIFactory2* f2 = nullptr;
-    if (SUCCEEDED(static_cast<IUnknown*>(factory)->QueryInterface(IID_PPV_ARGS(&f2))) && f2) {
-        void** vt2 = *reinterpret_cast<void***>(f2);
-        try_hk(vt2[15], reinterpret_cast<void*>(&hk_sc_hwnd<0>), reinterpret_cast<void*>(&hk_sc_hwnd<1>),
-               reinterpret_cast<void**>(&real_sc_hwnd[0]), reinterpret_cast<void**>(&real_sc_hwnd[1]), g_sc_hwnd_used);
-        try_hk(vt2[16], reinterpret_cast<void*>(&hk_sc_core<0>), reinterpret_cast<void*>(&hk_sc_core<1>),
-               reinterpret_cast<void**>(&real_sc_core[0]), reinterpret_cast<void**>(&real_sc_core[1]), g_sc_core_used);
-        try_hk(vt2[24], reinterpret_cast<void*>(&hk_sc_comp<0>), reinterpret_cast<void*>(&hk_sc_comp<1>),
-               reinterpret_cast<void**>(&real_sc_comp[0]), reinterpret_cast<void**>(&real_sc_comp[1]), g_sc_comp_used);
-        f2->Release();
-    }
-}
-
-using CreateFactoryFn = HRESULT(WINAPI*)(REFIID, void**);
-using CreateFactory2Fn = HRESULT(WINAPI*)(UINT, REFIID, void**);
-CreateFactoryFn real_create_factory = nullptr, real_create_factory1 = nullptr;
-CreateFactory2Fn real_create_factory2 = nullptr;
-
-HRESULT WINAPI hk_create_factory(REFIID riid, void** out) {
-    const HRESULT hr = real_create_factory(riid, out);
-    if (SUCCEEDED(hr) && out) adopt_factory(*out);
-    return hr;
-}
-HRESULT WINAPI hk_create_factory1(REFIID riid, void** out) {
-    const HRESULT hr = real_create_factory1(riid, out);
-    if (SUCCEEDED(hr) && out) adopt_factory(*out);
-    return hr;
-}
-HRESULT WINAPI hk_create_factory2(UINT flags, REFIID riid, void** out) {
-    const HRESULT hr = real_create_factory2(flags, riid, out);
-    if (SUCCEEDED(hr) && out) adopt_factory(*out);
-    return hr;
-}
-
-void hook_game_dxgi() {
-    HMODULE dxgi = GetModuleHandleW(L"dxgi.dll");
-    if (!dxgi) return;
-    const std::pair<const char*, std::pair<void*, void**>> entries[] = {
-        {"CreateDXGIFactory", {reinterpret_cast<void*>(&hk_create_factory), reinterpret_cast<void**>(&real_create_factory)}},
-        {"CreateDXGIFactory1", {reinterpret_cast<void*>(&hk_create_factory1), reinterpret_cast<void**>(&real_create_factory1)}},
-        {"CreateDXGIFactory2", {reinterpret_cast<void*>(&hk_create_factory2), reinterpret_cast<void**>(&real_create_factory2)}}};
-    for (const auto& [name, hk] : entries) {
-        void* fn = reinterpret_cast<void*>(GetProcAddress(dxgi, name));
-        if (fn && MH_CreateHook(fn, hk.first, hk.second) == MH_OK) MH_EnableHook(fn);
-    }
 }
 
 // ---- Process Termination Watch & Hook Helper ----
@@ -3791,7 +3863,10 @@ extern "C" __declspec(dllexport) void InitializeASI() {
     hook_d3d12_device_creation();
     hook_present_beat();
     register_vulkan_dll_notification();
-    hook_game_dxgi();
+    hook_sl_dlssd(GetModuleHandleW(L"sl.dlss_d.dll")); // Normally loaded later by slInit (notification path).
+    // No CreateDXGIFactory* export hooks: on OptiScaler 10 they sit on OptiScaler's own exports (which decide by
+    // caller module) and make the game's swapchain creation fail. Present is reached through the menu's
+    // swapchain methods; system factory methods retain the actual present queue.
 
     log("[openrr] NGX hooks installed (D3D12=%s, Vulkan=%s, UnrealByExe=%s)",
         d3d12_ok ? "ok" : "failed", vk_ok ? "ok" : "failed", g_unreal_by_exe ? "yes" : "no");

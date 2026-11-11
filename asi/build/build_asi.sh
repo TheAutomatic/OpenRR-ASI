@@ -92,6 +92,9 @@ EXPORTS
 EOF
 
 echo "[3/4] Generating Vulkan lazy loader & linking openrr-amd.asi..."
+"$cxx" -std=c++20 -O2 -Iasi/src asi/tests/test_present_scope.cpp -static -o "$out/test_present_scope.exe"
+"$cxx" -std=c++20 -O2 -Iasi/src -I"$minhook/include" asi/tests/test_dxgi_queue.cpp \
+    "$out"/mh_*.o -ld3d12 -ldxgi -lole32 -static -static-libgcc -static-libstdc++ -o "$out/test_dxgi_queue.exe"
 count=$(bash asi/build/vulkan_lazy.sh "$out" "$cxx" -shared "${objs[@]}" "${ldflags[@]}" | grep -o '[0-9]*$')
 "$cxx" -shared -o "$stage/plugins/openrr-amd.asi" "$out/openrr.def" "${objs[@]}" "$out/vulkan_lazy_s.o" "$out/vulkan_lazy_c.o" "${ldflags[@]}"
 rm -f "$out/openrr-amd.debug"
