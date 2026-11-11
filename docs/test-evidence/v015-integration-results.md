@@ -102,7 +102,7 @@ Legacy（fast-mode 0）：ACO vs LLPC **1080p/4K 全帧 100.0000% / ulp 0 位一
 跨版本自检：Legacy 0.1.5 vs v0.1.2（MSVC 基线）1080p **逐位一致**【4K 见 §9 汇总】。
 覆盖：trace 帧全部 25 个 dispatch **aco=1**，含 LT_UP8/LT_MI8 三内核、post 系列、_w 宽路径（d3d_enc0_attr_f_w_lt、enc0_stage_32_64_f_w_lt）；post_dlt 由单元 R 项覆盖。
 
-**已知问题（发布前必须解决）**：guides=1（全可选引导）下 ACO/LLPC 出现数值敏感差异——本轮 Fast+guides 短测 p99 0.00854、PSNR_01 55.09。这是 `mesa-guide-isolation-2026-11-11.md` 已记录的 ACO/LLPC 数值敏感问题在 0.1.5 下的延续（0.1.4 全 guide 43.8 dB、LT_VO 放大），**不是**短 warmup 瞬态。本轮不修，列入发布前必须解决项；正式结论均基于 guides=0。
+**已知问题（发布前必须解决）**：guides=1（全可选引导）下 ACO/LLPC 出现数值敏感差异——本轮 Fast+guides 短测 p99 0.00854、PSNR_01 55.09。这是 `mesa-guide-isolation-2026-11-11.md` 已记录的 ACO/LLPC 数值敏感问题在 0.1.5 下的延续（0.1.4 全 guide 43.8 dB、LT_VO 放大），**不是**短 warmup 瞬态（统一口径复核：guides=1 稳态直接互比 1080p ~32.7 dB，见 §9.2 表 C——比 0.1.4 的 43.8 更差）。本轮不修，列入发布前必须解决项；正式结论均基于 guides=0。
 
 ## 7. 记录对照（vs 0.1.4-drirc 生产记录，ship key 严格匹配）
 
@@ -137,7 +137,7 @@ FP8 WMMA（**llvm-mc 按编码长度解析最终 ISA**，严格 ship key；初�
 
 - 采纳：**MSVC 构建**（源 = 纯 tag `f75fadb`，零补丁；cl 19.44.35207 /std:c++20 /O2；vulkan-1.lib 由 74 符号 def 经 `lib /def:` 生成；178 个 spv 复用同 tag 的 WSL glslang 产物）。自检：bench 加载、40 条 fast 管线自建 13.3s、干净销毁。`baselines/v0.1.2-msvc/`（SHA256SUMS 187 文件，DLL `8a65797f…`）。
 - 弃用留档：MinGW 交叉版（`baselines/v0.1.2/`）能加载但 Vulkan 设备创建后 C0000005（两代 bench 均同），六个 MSVC 兼容补丁见其 BUILD-NOTES；不作为基线。
-- 首个画质数据点（Fast 1080p，guides=0，0.1.5-ACO 对 v0.1.2）：PSNR_01 50.48 / TM 54.87 / p99 0.00757（8 帧短测、跨版本口径，不适用编译器门禁；完整矩阵见 §9）。
+- 旧画质数据点作废说明：原"Fast 1080p 对 v0.1.2 = 50.48 dB"为单帧单点口径（稳态末帧读回、无逐帧），同参数重跑得 59.96 dB、统一口径得 52.06 dB——跨版本 PSNR 对历史演化与调度扰动混沌敏感（±10 dB 量级），单点数字无意义；统一口径三统计与逐帧曲线见 §9.2 表 B，50.48 的归因见 §9.6。
 
 ## 9. 新基线测量
 
@@ -162,55 +162,105 @@ Legacy 0.1.5 vs v0.1.2（MSVC）：1080p 与 4K 均**逐位一致**（exact 100.
 - **ACO vs LLPC（b）**：0.1.5 上 ACO 慢 8–12.4%。对照 0.1.2 时代未调优时的 −16~18%，**差距收窄约 5–7 个百分点**（Stage 1.5 保留项 + 0.1.5 内核变化混合效果）；方向未反转，ACO 仍落后 LLPC。Legacy 侧 ACO 落后 10.6–12.4%（Legacy 无 level-1 保留项加持）。
 - DRS 同向：Fast a −4.1%/−4.6%，b ACO +9.8~11.1% 慢。
 
-### 9.2 画质余量 vs v0.1.2（guides=0；guides=1 见下表）
+### 9.2 画质（统一口径重测，v2 —— 旧表作废，见 §9.6）
 
-| 编译器 | 分辨率 | PSNR_01 | PSNR_TM | p99 | 最差帧 max | 非有限 |
+统一参数：warmup 32 / steady 32 / DRS 8 / parity-all-frames / 逐帧 PSNR_01·PSNR_TM·p99；三个统计量 = **全程最差帧 / 稳态末帧 / DRS 段最差帧**。bench 默认（不开 all-frames 时）只比"稳态末帧 + DRS 末帧"两帧（`steadyPixels/drsPixels` 段尾读回）——旧数据的口径混乱即源于此。v0.1.2 侧因无 OnrRrDiagnostic 不能相位对齐（由内容确定性保证可比，同参数跨进程帧逐位一致已验证）；0.1.5 内部对比全部带 align。
+
+**表 A：画质锚点 = 0.1.5 Fast(level 1) 对 0.1.5 Legacy（上游自接受的 Fast 损失，画质预算起点）**，PSNR_01 dB：
+
+| guides | 分辨率 | ACO 最差/末帧/DRS最差 | LLPC 最差/末帧/DRS最差 |
+|---|---|---|---|
+| 0 | 1080p | 38.15（steady_3 瞬态）/ 49.53 / 58.04 | 38.29 / 49.51 / 58.04 |
+| 0 | 1440p | 57.67 / 58.75 / 57.67 | 57.67 / 58.75 / 57.67 |
+| 0 | 4K | 45.85（steady_0 瞬态）/ 59.41 / 49.01 | 45.86 / 59.39 / 49.01 |
+| 1 | 1080p | 31.22 / 32.00 / 43.23 | 29.03 / 29.69 / 43.23 |
+| 1 | 1440p | 29.25 / 29.25 / 41.83 | 29.25 / 29.25 / 41.83 |
+| 1 | 4K | 33.93 / 33.97 / 43.29 | 33.92 / 33.97 / 43.45 |
+
+→ ① ACO 与 LLPC 的锚点值几乎重合（差 ≤0.6 dB）：Fast-vs-Legacy 的损失与编译器无关。② guides=0 时 Fast 损失约 49.5–59.4 dB（分辨率相关，1080p 最弱且带 38 dB 前几帧瞬态）；**guides=1 时坍到 ~29–34 dB**——全引导内容把 Fast 的近似放大一个数量级，这是画质预算的真正边界。
+
+**表 B：对冻结 v0.1.2（历史参照；历史混沌敏感，见 §9.6）**，PSNR_01 dB：
+
+| guides | 分辨率 | ACO 最差/末帧/DRS最差 | LLPC 最差/末帧/DRS最差 |
+|---|---|---|---|
+| 0 | 1080p | 46.19 / 52.06 / 50.69 | 58.85 / 58.85 / 59.92 |
+| 0 | 1440p | 59.81 / 60.97 / 59.81 | 59.81 / 60.97 / 59.81 |
+| 0 | 4K | 58.44 / 61.14 / 58.44 | 58.44 / 61.13 / 58.44 |
+| 1 | 1080p | 51.91 / 64.49 / 51.91 | 52.10 / 64.51 / 52.10 |
+| 1 | 1440p | 50.79 / 64.34 / 50.79 | 50.79 / 64.34 / 50.79 |
+| 1 | 4K | 50.13 / 62.75 / 50.13 | 49.84 / 62.87 / 49.84 |
+
+→ 除 g0-1080p 外 ACO/LLPC 对 v0.1.2 基本重合；g0-1080p 的 ACO 曲线呈 46→55 dB 的历史瞬态（LLPC 平直 58.9）——ACO 在该配置的历史轨迹更慢收敛，逐帧曲线见 `q2/q2-summary.json`。
+
+**表 C：ACO 对 LLPC 直接对比（同 SPIR-V，align）**，PSNR_01 dB：
+
+| guides | 分辨率 | 最差/末帧/DRS最差 | 备注 |
+|---|---|---|---|
+| 0 | 1080p | 58.96 / 59.52 / 70.55 | steady 平直 59–60.5；DRS 段 7/8 帧逐位一致 |
+| 0 | 1440p | steady 全 999 / drs_7 53.82 | 稳态 ACO≡LLPC 逐位一致 |
+| 0 | 4K | 60.54 / 61.12 / 60.54 | |
+| 1 | 1080p | **32.22 / 32.74** / 61.00 | steady 平直 ~33（比 0.1.4 的 43.8 更差）；DRS 段反而 61–133 |
+| 1 | 1440p | steady 全 999 / drs_7 53.82 | 同 g0 |
+| 1 | 4K | 53.40 / 62.31 / 53.40 | |
+
+→ **改正旧结论**：原文"ACO/LLPC 敏感性远小于两者对 v0.1.2 的距离"方向写反且论据错误（PSNR 不满足三角不等式，误差方向可部分抵消：g1-1080p 直接互比 32.7 dB 的两侧，各自对 v0.1.2 却都是 64.5 dB，数学上完全自洽）。正确表述：**guides=1 下 ACO/LLPC 的直接分歧（steady ~29–33 dB@1080p/1440p 锚点口径、32.7 dB 直接口径）远大于 guides=0（~59.5+），是发布前必须解决的数值敏感项**；g0 下分歧很小且 DRS 段多处逐位一致。1440p 的稳态逐位一致与 1080p 的 33 dB 并存说明该敏感性与内容和分辨率强相关。
+
+### 9.3 逐核耗时（串行化重测，v2 —— 旧方法作废，见 §9.6）
+
+**方法**：从 ship 数据目录移除 10 个 `_fl_lt` 内核（`Engine::flow_kernel_names` 全集），引擎回退到带屏障的 `_f_lt/_f` 变体；ONR_RR_STAMPS=1，1250 帧。此时每个 dispatch 前后都有 barrier+时间戳，间隔即单核纯耗时。Legacy 本就无 flow，同一目录口径一致。
+**自检**：全部 8 组"间隔和 vs 关 flow 后帧中位"偏差 **0.01–0.43%**（门槛 5%），加和性成立。代价：帧时间略高于生产路径（屏障+stamps 开销，如 Fast ACO 1080p 3.458 vs 生产 3.361 ms），故占比与 ACO/LLPC 比值有效，绝对值偏高。
+
+Top-12（同一份 SPIR-V，ACO 与 LLPC 各单跑；间隔和：Fast 1080p 3.452/3.013 ms=**1.146×**、4K 12.805/11.499=**1.114×**；Legacy 1080p 3.951/3.492=**1.131×**、4K 14.570/13.204=**1.103×**）：
+
+| 内核 | ACO 1080p | LLPC 1080p | 比 | ACO 4K | LLPC 4K | 比 |
 |---|---|---|---|---|---|---|
-| ACO | 1080p | 59.21 | 63.60 | 0.00317 | 0.01465 | 0 |
-| ACO | 1440p | 60.99 | 65.84 | 0.00269 | 0.00928 | 0 |
-| ACO | 4K | 61.22 | 66.04 | 0.00269 | 0.02075 | 0 |
-| LLPC | 1080p | 59.27 | 63.66 | 0.00317 | 0.01196 | 0 |
-| LLPC | 1440p | 60.99 | 65.84 | 0.00269 | 0.00928 | 0 |
-| LLPC | 4K | 61.21 | 66.03 | 0.00269 | 0.02417 | 0 |
+| dec_up_160_256_160_fl | 0.3644 | 0.3484 | 1.05 | 1.4418 | 1.3971 | 1.03 |
+| dec_up_128_128_160_fl | 0.2744 | 0.2631 | 1.04 | 1.0201 | 1.0149 | 1.01 |
+| enc_stage_160_256_160_fl | 0.2312 | 0.1942 | 1.19 | 0.9373 | 0.8451 | 1.11 |
+| dec_up_96_128_128_fl | 0.2018 | 0.1638 | 1.23 | 0.6688 | 0.5277 | 1.27 |
+| dec_up_64_64_96_f_lt（FP8） | 0.0905 | 0.0492 | **1.84** | 0.3426 | 0.2199 | **1.56** |
+| dec_up_32_64_64_f_lt（FP8） | 0.0871 | 0.0626 | **1.39** | 0.2059 | 0.1310 | **1.57** |
+| post_f_lt | 0.0752 | 0.0507 | **1.48** | 0.0726 | 0.0452 | **1.61** |
+| enc_stage_96_128_128_fl | 0.0148 | 0.0141 | 1.05 | 0.0551 | 0.0533 | 1.03 |
+| enc0_stage_32_64_f_lt | 0.0077 | 0.0084 | **0.92** | 0.0381 | 0.0390 | 0.98 |
+| pooled_history2_lt | 0.0048 | 0.0049 | 0.98 | 0.0053 | 0.0053 | 1.00 |
+| dec_dfn_128_128_fl | 0.0006 | 0.0020 | 0.30 | 0.0038 | 0.0036 | 1.06 |
+| dec_dfn_160_256_fl | 0.0007 | 0.0016 | 0.44 | 0.0056 | 0.0066 | 0.85 |
 
-→ ACO 与 LLPC 对 v0.1.2 的画质差 ≤0.06 dB：**画质差几乎全部来自 0.1.5 算法本身，与编译器无关**。
-guides=1（全可选引导，同口径对 v0.1.2；rc=1 为跨版本比较触发 bench 编译器门禁，数据有效）：
+Legacy 对照（确认劣势的普遍性）：
 
-| 编译器 | 分辨率 | PSNR_01 | PSNR_TM | p99 | 最差帧 max | DRS PSNR_01 |
-|---|---|---|---|---|---|---|
-| ACO | 1080p | 64.55 | 71.81 | 0.00146 | 0.00391 | 53.28 |
-| ACO | 1440p | 64.28 | 71.55 | 0.00171 | 0.00537 | 51.09 |
-| ACO | 4K | 62.56 | 69.83 | 0.00244 | 0.00830 | 51.03 |
-| LLPC | 1080p | 64.55 | 71.81 | 0.00146 | 0.00439 | 53.15 |
-| LLPC | 1440p | 64.28 | 71.55 | 0.00171 | 0.00537 | 50.96 |
-| LLPC | 4K | 62.51 | 69.76 | 0.00244 | 0.00732 | 50.95 |
+| 内核 | ACO/LLPC 1080p | ACO/LLPC 4K |
+|---|---|---|
+| dec_up_64_64_96_f（非 FP8 变体） | **2.06** | **1.56** |
+| dec_up_32_64_64_f | **1.40** | **1.58** |
+| post_f | **1.50** | **1.63** |
+| dec_up_96_128_128_fl | 1.21 | 1.08 |
+| dec_up_160_256_160_fl / dec_up_128_128_160_fl / enc_stage_160_256_160_fl | 1.02–1.06 | 1.00–1.06 |
+| enc0_stage_32_64_f | 1.01 | 1.03 |
 
-→ guides=1 下 ACO/LLPC 对 v0.1.2 同样几乎重合（差 ≤0.05 dB / ≤0.001）：§6 的 ACO/LLPC 直接互比敏感性问题（43.8 dB 级）远小于两者对 0.1.2 的共同距离；该敏感项仍列发布前必须解决。
-
-### 9.3 逐核耗时（ONR_RR_STAMPS，1250 帧，间隔均值；stamps 会略微放大帧时间，占比与相对差有效）
-
-Top-8（1080p 间隔和 ACO 3.365 ms vs LLPC 3.052 ms，**+10.3%**；4K 12.980 vs 11.719，**+10.8%**——与端到端 b 单元自洽）：
-
-| 内核 | ACO 1080p | LLPC 1080p | ACO 4K | LLPC 4K |
-|---|---|---|---|---|
-| dec_up_160_256_160_fl_lt | 0.3635 | 0.3500 | 1.4457 | 1.3982 |
-| dec_up_128_128_160_fl_lt | 0.2696 | 0.2644 | 1.0206 | 1.0169 |
-| enc_stage_160_256_160_fl_lt | 0.2328 | 0.1947 | 0.9382 | 0.8509 |
-| dec_up_96_128_128_fl_lt | 0.1667 | 0.1699 | 0.5769 | 0.5838 |
-| dec_up_32_64_64_f_lt（FP8） | 0.0888 | 0.0614 | 0.2136 | 0.1291 |
-| post_f_lt | 0.0770 | 0.0476 | 0.0726 | 0.0460 |
-| dec_up_64_64_96_f_lt（FP8） | 0.0741 | 0.0588 | 0.2447 | 0.2240 |
-| enc_stage_96_128_128_fl_lt | 0.0150 | 0.0143 | 0.0551 | 0.0531 |
-
-LT_UP8/LT_MI8 三内核的 ACO 对 LLPC 差距：
-- dec_up_32_64_64：1080p **+44.6%**、4K **+65.4%**（FP8 WMMA 路径 ACO 劣化最重，LLPC 的 fp8 代码生成优势明显）
-- dec_up_64_64_96：1080p +26.0%、4K +9.2%
-- enc_stage_64_64_96：stamps 间隔记 0.0000（槽位时间戳与相邻重叠，间隔不可分辨，耗时被邻核吸收）——Stage 2 精确量化需单独引擎级工具
-- post_f_lt（非 FP8，上游重写后 −24 VGPR）：ACO 慢 61–62%（1080p 0.0770 vs 0.0476）——上游新 post 在 ACO 26.3.0 的劣势是端到端 gap 的第三大来源
+结论（替换旧版单核结论）：
+- ACO 的劣势集中在 **dec_up 家族的 32_64_64 与 64_64_96 两个形状 + post**（1.39–2.06×），**与 FP8 无关**——Legacy 的同名非 FP8 内核同样 1.40–2.06×；FP8（LT_UP8）只是叠加在该形状上（Fast 64_64_96 从 Legacy 2.06× 收到 1.84×@1080p、1.56×@4K）。
+- 最大的三个 `_fl` 内核（160_256/128_128 家族）比值仅 1.00–1.19×，**不是**差距主要来源；enc0_stage_32_64 反而 ACO 略快（0.92×）。
+- Stage 2 优化目标排序由此改写：① dec_up 32/64 形状的 ACO 代码生成（对照 LLPC 的排程/寄存器策略）② 上游新 post ③ enc_stage_160_256_160（1.11–1.19×）。
 
 ### 9.4 显存（6 轮中位）
 全部分辨率/单元/编译器组合：**feature 207.0 MB（1080p）、789.0 MB（4K）；进程增量 229.1 / 810.3 MB**——与 0.1.4 生产完全一致，0.1.5+重捕零显存变化。
 
+### 9.6 测量方法修正（v2 重测依据）
+
+**问题一：flow 下逐核计时无效（旧 §9.3 作废）**
+`_fl_` 内核走 flow 路径，相邻 dispatch 之间没有 barrier、并发执行；ONR_RR_STAMPS 的时间戳间隔把耗时记到相邻内核上。证据：enc_stage_64_64_96 记 0.0000；旧 #1 enc0_stage_32_64/#4 dec_head_32_64 掉出 Top-8；post_f_lt 0.077 ms（B2 基线口径 0.327 ms）。
+修正：从数据目录移除 10 个 `_fl_lt` 内核 → 引擎回退带屏障变体，stamps 间隔即单核纯耗时。自检：8 组"间隔和 vs 帧中位"偏差 0.01–0.43%（门槛 5%）。旧结论（dec_up_32 +44.6%、post +61%、enc_stage_96 0.0000 等）全部作废，被 §9.3 v2 替换；新结论的方向性变化见该节（劣势集中点从 FP8 内核改为 dec_up 32/64 形状 + post，且 Legacy 同样存在）。
+
+**问题二：画质采样口径不一致（旧 §8/§9.2 作废）**
+bench 默认只比"稳态末帧 + DRS 末帧"两帧；旧数据各轮 warmup/帧数不同，末帧的历史收敛深度不同，出现 50.48 vs 59.21（对 v0.1.2，同配置不同帧深）与 55.09 vs 64.55×2（表面三角矛盾）这类不可同时成立的数字。
+修正：统一 warmup 32/32/8 + parity-all-frames，报三统计 + 逐帧曲线。关键验证：
+1. **同参数跨进程逐位可复现**（两个 v012 进程的 v0.1.2 帧逐位一致）→ 无底层随机性；
+2. **align 与 no-align 的帧不同**（engine 相位改变历史演化）→ 跨参数组的比较无效，"三角矛盾"实为 align/不 align 两组数据各说各话；PSNR 本身不满足三角不等式（误差可部分抵消），表 C 的 32.7 dB 与表 B 的 64.5×2 并不矛盾；
+3. **50.48 不可复现**：同参数重跑 59.96——单点跨版本 PSNR 对读回扰动/调度混沌敏感（读回会扰动调度，bench 源码注释明言），逐帧曲线（`q2/q2-summary.json`）才是有效信息；
+4. v012-aco-g0-1080p 的 46→55 dB 历史瞬态（LLPC 平直 58.9）为真实编译器相关历史轨迹差异，非噪声。
+
+**其他修正**：§11 分支头更新；可再生逐帧 bin 已清理（68 GB → 汇总 2 MB：summary/anchor JSON + 日志保留）。
 
 ## 10. 失败与诊断记录（按时间）
 
@@ -225,10 +275,10 @@ LT_UP8/LT_MI8 三内核的 ACO 对 LLPC 差距：
 
 ## 11. 交付清单
 
-- 分支（均未推送）：`main` = `d9a3b2d`（= v0.1.5 tag）；`asi-plugin` = `975c5f3`（v0.1.5 merge `bdbbd0f` + occ/b2 define 对齐 `ab113ff` + _lx 构建 `975c5f3`）；`codex/mesa-263-comparison` = `2adc957`（rebase 线性化后的 ACO 线 + 捕获路由 + downsample/enc0_attr 修复 + 本报告）。
+- 分支（均未推送）：`main` = `d9a3b2d`（= v0.1.5 tag）；`asi-plugin` = `975c5f3`（v0.1.5 merge `bdbbd0f` + occ/b2 define 对齐 `ab113ff` + _lx 构建 `975c5f3`）；`codex/mesa-263-comparison` = 本报告 v2 提交后的 HEAD（v1 为 `75fd141`；线上含 rebase 线性化的 ACO 线、捕获路由、downsample/enc0_attr 修复与报告）。
 - 保护 tag：`aco-014-prod`（=原 992b6f8）、`asi-014`（=原 9cfa9d7）。冻结基线：`baselines/aco-014-prod/`、`baselines/v0.1.2-msvc/`。
 - WSL 工具链核查：`~/work/openrr-mesa-263-comparison` 的 libvulkan_radeon.so SHA256 前缀 `7fc443f30e8abe99` 与本轮 toolchain.json/manifest 一致；基线冻结之后无任何 .so 重编（newer 计数 0）；`~/src/mesa-deps` pkgconfig 5 项在位；`~/archives/` 未动。
-- 原始数据：`build/v015-runs/`（long/quality/profile3/asm/AB/legacyparity + paired_summary.json）；`build/asi-015-aco/`（109 记录 + abi-probe + capture-diag）；`build/aco-v015/`（trace runtime/bench/units）。逐帧读回按"可再生"清理，summary/console/日志/trace 保留。
+- 原始数据：`build/v015-runs/`（long + paired_summary.json / **q2**（统一口径画质：summary·anchor JSON·逐帧曲线，q2-summary.json）/ **noflow**（串行化逐核 + kernel_ms.json）/ profile3（作废版留档）/ asm / AB / legacyparity）；`build/asi-015-aco/`（109 记录 + abi-probe + capture-diag）；`build/aco-v015/`（trace runtime/bench/units）。逐帧 bin 已清理（q2 曾达 68 GB → 2 MB），summary/console/日志/trace 保留。
 
 ## 12. 复现命令（关键路径）
 
@@ -244,6 +294,17 @@ build/aco-v015/openrr_bench.exe --runtime build/aco-v015/openrr-trace.asi --base
   --warmup 8 --frames 20 --drs-frames 12 --fast-mode 1 --optional-guides 0 --parity-all-frames 1 --align-engine-phase 1 --out <dir>
 # ABI 探针
 OPENRR_ACO_PROBE=1 OPENRR_SPV_DIR=<probe-shaders> ONR_ACO_DIR=<abi-probe records> test_aco_units.exe
+# v2 串行化逐核（去 flow 数据目录 + stamps；自检加和 <5%）
+cp -r build/asi-015-aco/stage/openrr-amd build/v015-runs/noflow-data  # 并删 *_fl_lt.spv
+ONR_RR_STAMPS=1 build/aco-v015/openrr_bench.exe --runtime build/aco-v015/openrr-trace.asi \
+  --data-dir build/v015-runs/noflow-data --baseline-compiler aco-strict --candidate-compiler aco-strict \
+  --rw 1280 --rh 720 --ow 1920 --oh 1080 --warmup 10 --frames 1250 --fast-mode 1 --out <dir>
+# v2 统一口径画质（示例：锚点 Fast-vs-Legacy 的 Legacy 侧；Fast 侧即 direct 轮 candidate 帧）
+build/aco-v015/openrr_bench.exe --runtime build/aco-v015/openrr-trace.asi --data-dir <data> \
+  --baseline-compiler aco-strict --candidate-compiler aco-strict --rw 1280 --rh 720 --ow 1920 --oh 1080 \
+  --warmup 32 --frames 32 --drs-frames 8 --parity-all-frames 1 --align-engine-phase 1 --fast-mode 0 --optional-guides 0 --out <dir>
+python build/v015-runs/psnr_frames.py <a.bin> <b.bin>          # 离线逐帧 PSNR（与 bench 公式一致）
+python build/v015-runs/anchor_compare.py <fast_dir> <legacy_dir> aco   # 锚点逐帧比较
 # v0.1.2 基线
 --baseline-runtime baselines/v0.1.2-msvc/runtime/OpenNrRrRuntime.dll --baseline-data-dir baselines/v0.1.2-msvc/runtime --baseline-compiler env
 ```
