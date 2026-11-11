@@ -1,0 +1,1565 @@
+{
+  "stage": "build\\asi-014\\stage",
+  "fingerprint": "41fd934b121b1cd97650e96c450cd0bce86a9e04d20f695483ed36a01d104ac9",
+  "runtime_count": 90,
+  "record_count": 103,
+  "package_files": 200,
+  "package_bytes": 16110719,
+  "compile_options": {
+    "subgroup": 32,
+    "require_full_subgroups": true,
+    "features": "gpu/src/vk.cpp Device::init",
+    "precision": "global",
+    "matrix_loads": "vector8",
+    "address_adaptation": "assembler-dual-sentinel-v1",
+    "cmat_address_shaders": [
+      "dec_dfn_96_128_fl_lt",
+      "enc_stage_128_128_160_fl_lt"
+    ]
+  },
+  "runtime": [
+    {
+      "shader": "ae.spv",
+      "spv": "8053435623e90df5",
+      "code": "1b97ef89ffcd1d1d",
+      "record_sha256": "a4f47dc6b5da86319b015719035d16814f094a61cca110fdb59c598db9b081a7"
+    },
+    {
+      "shader": "clear_range.spv",
+      "spv": "cffca948d4b28dac",
+      "code": "b0c0dce87366a22f",
+      "record_sha256": "e40cdd6632436f197c329a57f15c8fd8cfd081d2bf6cf9f73b282ba33da3838b"
+    },
+    {
+      "shader": "d3d_ae.spv",
+      "spv": "176dd5c87be9b223",
+      "code": "8c6bfbfe5b17f8c7",
+      "record_sha256": "b1a4a7a7981c64add9173724e1a99dc70de9af307adbb7f34f73c5f97fbf31ce"
+    },
+    {
+      "shader": "d3d_downsample.spv",
+      "spv": "fa1ab80252e2a7e5",
+      "code": "7312297a92f3e083",
+      "record_sha256": "c57d6da166e90a99995f959d4f28e7f2f16618a7985e82be0fd875fde2583cb2"
+    },
+    {
+      "shader": "d3d_downsample_lt.spv",
+      "spv": "b8457d1fbeb4e9e3",
+      "code": "72741d6e137dcf1d",
+      "record_sha256": "fe5b88160f8e857fdc3c64950092203e658bf36d58fe9d7fe2dceec8b9c2922f"
+    },
+    {
+      "shader": "d3d_downsample_tl.spv",
+      "spv": "66226a06cd06c7f3",
+      "code": "7d018158ac8dfb7e",
+      "record_sha256": "b2481f050e6d9f783931d952c7840699fc854553afededa42fbbfa254670552a"
+    },
+    {
+      "shader": "d3d_downsample_tl_lt.spv",
+      "spv": "518e6587dc9e69b8",
+      "code": "00c5b54e23e485b3",
+      "record_sha256": "29c91efe8c372fab3494b1a33c179df91b5194012ffbe9ea57956d9b60b7c66a"
+    },
+    {
+      "shader": "d3d_enc0_attr_f.spv",
+      "spv": "b3655442fe0ad69e",
+      "code": "4816ae15222c6012",
+      "record_sha256": "8df9cc3154e8a094533e89bd5046a008c0db0928d84aced0eb307bd3e92a8efc"
+    },
+    {
+      "shader": "d3d_enc0_attr_f_lt.spv",
+      "spv": "1d6fd9f4cc1c893c",
+      "code": "573daf074f5a5b8d",
+      "record_sha256": "606553bad8f00d86b4ed75ff8c5709189968b5ea6c531e4427530ae7b395ba4b"
+    },
+    {
+      "shader": "d3d_enc0_attr_f_w.spv",
+      "spv": "fc15342056305889",
+      "code": "a1a0804b84fa25b3",
+      "record_sha256": "845acca01c829443d3472821f44a15567abe2213210209c37c0fb41792b5f8df"
+    },
+    {
+      "shader": "d3d_enc0_attr_f_w_lt.spv",
+      "spv": "2bfe14fa9a6e5624",
+      "code": "59cf37228a954311",
+      "record_sha256": "0590628cfff7d571015d4375740028acc4bf80030bc60aab1754bc97519c7023"
+    },
+    {
+      "shader": "d3d_ingest.spv",
+      "spv": "487ba381e5bfa6a7",
+      "code": "71f9f859c92386ce",
+      "record_sha256": "46e0771099884d0c79b542f00dd34f64bb57786508bfe37a6b947fd0f43c5910"
+    },
+    {
+      "shader": "d3d_pack.spv",
+      "spv": "37b54dc8375d23da",
+      "code": "b86afbf81420b860",
+      "record_sha256": "ab045fc33cfcd46c6b542424bcb32a55aff67d8b59280d0ced1b225244b490e4"
+    },
+    {
+      "shader": "dec_dfn_128_128_f.spv",
+      "spv": "a536c1aee1b5b373",
+      "code": "c51f4a7bfbe82048",
+      "record_sha256": "6716e5a096383721af00210a5b1e398f924579cd003a08051db1bb42d763119f"
+    },
+    {
+      "shader": "dec_dfn_128_128_f_lt.spv",
+      "spv": "28bc7057f2b8ac76",
+      "code": "6749a96505f99932",
+      "record_sha256": "4a3cd382c7059e1a0a85391e48d1b416f57da0903a6f0784a3be6d4dd0ad67bd"
+    },
+    {
+      "shader": "dec_dfn_128_128_fl.spv",
+      "spv": "095787dd4133557e",
+      "code": "5869f3c31f00d0bd",
+      "record_sha256": "f56942ab5e479aa2f0660d762b7ca2981bebd112f26af98b2a0f52b9911743be"
+    },
+    {
+      "shader": "dec_dfn_128_128_fl_lt.spv",
+      "spv": "4ecf3b5cd58f6a11",
+      "code": "e7d460bb2a09f6be",
+      "record_sha256": "d9ea7b9c753ac21729f9930ba066b5e08781a021e64e7a4a3869cbf460a3a840"
+    },
+    {
+      "shader": "dec_dfn_160_256_f.spv",
+      "spv": "81d017418fe547af",
+      "code": "4ead6d758a32112c",
+      "record_sha256": "a1c9c197ce1b8cab247587f6e850d45c82eacab2031ad9f0227fe2ee99c7dc28"
+    },
+    {
+      "shader": "dec_dfn_160_256_f_lt.spv",
+      "spv": "c29f41aeb581fce8",
+      "code": "71878601c9cdc311",
+      "record_sha256": "9eb4c990b8439a65fdb331ce3e15c18a939a9c48d29cae667c872ca12397453c"
+    },
+    {
+      "shader": "dec_dfn_160_256_fl.spv",
+      "spv": "a89b668e3da09f5b",
+      "code": "ca3eac984ab25730",
+      "record_sha256": "74f3ccb14054e72c7166fc9c25930b54afd0f573e16e9ee2037941cec828bdd5"
+    },
+    {
+      "shader": "dec_dfn_160_256_fl_lt.spv",
+      "spv": "6bc90aef575d98cf",
+      "code": "4010c67442c38c42",
+      "record_sha256": "2d68c3b627f60227a1a9629c4936345942b2e8c335cc6ba6803882e5cf1d0b07"
+    },
+    {
+      "shader": "dec_dfn_64_64_f.spv",
+      "spv": "777985d1831329ca",
+      "code": "580c0978a783c337",
+      "record_sha256": "f541dde397b05f89a9ff5ce0411b7554dd2cf88dc898a0036862336c7ee5710f"
+    },
+    {
+      "shader": "dec_dfn_64_64_f_lt.spv",
+      "spv": "52722875f5de9eb1",
+      "code": "5304c000e549db59",
+      "record_sha256": "b077ce74fdab7fb435a371f685ad09ed05b07392e1a03511ba24352ff4b486ee"
+    },
+    {
+      "shader": "dec_dfn_96_128_f.spv",
+      "spv": "50c4593efddb5754",
+      "code": "7f92da59898322f4",
+      "record_sha256": "213ccc0573f8e5f0fd1d9f579af7bd16ab32e62c7cb02c081c24b080e04865cd"
+    },
+    {
+      "shader": "dec_dfn_96_128_f_lt.spv",
+      "spv": "941882166ce09254",
+      "code": "6cf4e1b1f3e0bc03",
+      "record_sha256": "3e19b138a8d805d202a384b54343a70f0ed7c6b15b4aa6ed2537f62af369ee96"
+    },
+    {
+      "shader": "dec_dfn_96_128_fl.spv",
+      "spv": "608c28c0029891f3",
+      "code": "7876888c6770325f",
+      "record_sha256": "22587f0218fa197a0baace78f29dd7f2a93d4e20976c5e29443b71c3f47f2467"
+    },
+    {
+      "shader": "dec_dfn_96_128_fl_lt.spv",
+      "spv": "607b418f7ed5346e",
+      "code": "6a4ccda0cd2efb14",
+      "record_sha256": "71d2f7695881c63562177a5903fee57ee098434effbfe3d6b47cfc6945a7702b"
+    },
+    {
+      "shader": "dec_head_32_64_f.spv",
+      "spv": "b799ea871f0212a5",
+      "code": "4b3029b1f62f1b1d",
+      "record_sha256": "41eb38dfbf5fe098e9812237633f02cb0c9d97d6c2f496e7ecd76637d60b2db6"
+    },
+    {
+      "shader": "dec_head_32_64_f_lt.spv",
+      "spv": "91dab286712a2560",
+      "code": "f3746edda77b1d1a",
+      "record_sha256": "b6aa0403e34366985f914cbd1c05ac0679a84f94a70fd16d3eabcf89ad70a865"
+    },
+    {
+      "shader": "dec_up_128_128_160_f.spv",
+      "spv": "8207a2a6f176a4d8",
+      "code": "db8ac04104df53e0",
+      "record_sha256": "39ec9d310ca3d17262465d0a89235cb1e0543099f2b47b35404aab2389989b26"
+    },
+    {
+      "shader": "dec_up_128_128_160_f_lt.spv",
+      "spv": "28e6b3fa305be4bc",
+      "code": "92dd7455fc6723f2",
+      "record_sha256": "af7fb6f3ac18cf926c827c24152668373c5fb276a6d1f1a86a6e46ca963c3200"
+    },
+    {
+      "shader": "dec_up_128_128_160_fl.spv",
+      "spv": "6be5b3c53083b759",
+      "code": "c33a0693a3a3bcd3",
+      "record_sha256": "02929267f00a0da2ae142d1303e531d13e02149e290cd01298b02b9f189a4b5f"
+    },
+    {
+      "shader": "dec_up_128_128_160_fl_lt.spv",
+      "spv": "5d05fcc3de384276",
+      "code": "15c9b5324c717c47",
+      "record_sha256": "fd72cbad04a0dd84ed0d49145798092e941090fcc54c2de64261838524d76e81"
+    },
+    {
+      "shader": "dec_up_160_256_160_f.spv",
+      "spv": "6d872e31c95afce5",
+      "code": "b31c73e7199458f1",
+      "record_sha256": "e0e22a6c380e5125f35a82f89158347b2cd9e51195d852300268b3f92e67d699"
+    },
+    {
+      "shader": "dec_up_160_256_160_f_lt.spv",
+      "spv": "d4cad4131a9d2071",
+      "code": "430936089c693f50",
+      "record_sha256": "fb158c6a22371d114d52da8a0763df2c1a4eb38fc4dd3ee23d79d9df38819721"
+    },
+    {
+      "shader": "dec_up_160_256_160_fl.spv",
+      "spv": "09ae4164fbb15cf1",
+      "code": "41f45380f9be5675",
+      "record_sha256": "fcb4855ec0e0c25b80e48f4b680e830929e69a55023fcf8e90a4baf37d5ce095"
+    },
+    {
+      "shader": "dec_up_160_256_160_fl_lt.spv",
+      "spv": "360f7a5dd195af7c",
+      "code": "a7b1b74789a10351",
+      "record_sha256": "29505c5ef288b3253e03432fd26972886ecf35b564c62a6139c084a809152900"
+    },
+    {
+      "shader": "dec_up_32_64_64_f.spv",
+      "spv": "addffdc4c6b922e8",
+      "code": "b5d3e1afde630213",
+      "record_sha256": "73e25e3e485c0bf3b958be5b8405b25f364fb175f13104dafb65a661e4f07993"
+    },
+    {
+      "shader": "dec_up_32_64_64_f_lt.spv",
+      "spv": "8bb23aa9f0379d4c",
+      "code": "95071d5407b5ab84",
+      "record_sha256": "163fbaecf40950093652d73bd89d0068f1e63310632d6ee98505f9827b6e482f"
+    },
+    {
+      "shader": "dec_up_64_64_96_f.spv",
+      "spv": "238fcc9bcf09fa55",
+      "code": "569a731b86cb0315",
+      "record_sha256": "d46f7986271b81b939bda71576d629d9817b7498d344fae6f4984a94cdac7907"
+    },
+    {
+      "shader": "dec_up_64_64_96_f_lt.spv",
+      "spv": "40dc71ff1cd2b848",
+      "code": "6fb426bc05b24c11",
+      "record_sha256": "f5250f12ed3f485577d26a763836826f912242895bd0e16ad0d520921f2d0b65"
+    },
+    {
+      "shader": "dec_up_96_128_128_f.spv",
+      "spv": "7397e05f8c2da77a",
+      "code": "fb1a8498315dd476",
+      "record_sha256": "3fbfbd6cea7ef071226dc13721b57a331e621b9481a162a0494c23b064b66e56"
+    },
+    {
+      "shader": "dec_up_96_128_128_f_lt.spv",
+      "spv": "79ea9a0f90a74b24",
+      "code": "4973be64f7f3f88d",
+      "record_sha256": "4eba6f482a296684d168faf62c2b98b67dbc5516cca2ada0c4ae9fda452b5bf8"
+    },
+    {
+      "shader": "dec_up_96_128_128_fl.spv",
+      "spv": "94faa2ccbba8501e",
+      "code": "1647c94f8c80607c",
+      "record_sha256": "6a54fa132eb6c28a9bb3964fa790a58d3ab35a2f7f93f999f1293c3fd2306fa0"
+    },
+    {
+      "shader": "dec_up_96_128_128_fl_lt.spv",
+      "spv": "caa3f6091e490cda",
+      "code": "f59fabdfd44c6570",
+      "record_sha256": "a78340835c5b074fdb08caf351d82804ea59a4ce1ba7a22f48a46286a7ee3658"
+    },
+    {
+      "shader": "dfn_export.spv",
+      "spv": "5eff19ab0da39495",
+      "code": "a6d372a583bc9e1a",
+      "record_sha256": "b15f31f153f80fa5ecdd08c768a3baf14a8624e33518654f39eb9039ecba6b08"
+    },
+    {
+      "shader": "dfn_export_lt.spv",
+      "spv": "8cadc24c9e03891b",
+      "code": "2be231489eebef8e",
+      "record_sha256": "54218447dca834a532c0fa11b633a72053d55a5f9ab92abe69a45ddd8e97bb97"
+    },
+    {
+      "shader": "dfn_import.spv",
+      "spv": "92deee5eb00fde72",
+      "code": "8db1f7f7f5f6da23",
+      "record_sha256": "acd197c8d6436828a7088f58f25377465ce98b1330427fa0f1e3d0d970050b9d"
+    },
+    {
+      "shader": "dfn_import_lt.spv",
+      "spv": "9494ed55ba8520ba",
+      "code": "85ba239981a72486",
+      "record_sha256": "3d46193f2d68371a355b3f301dd972f3d03e5a2f8116c3157600c8417140b300"
+    },
+    {
+      "shader": "downsample.spv",
+      "spv": "1868a527fddfb730",
+      "code": "be3b3929628e1190",
+      "record_sha256": "c061351d3894ef1dc0180ca86c4e4c9e2016e69b2fac9ebc804bf6b2c70d405b"
+    },
+    {
+      "shader": "downsample_lt.spv",
+      "spv": "af1b93f587f9f210",
+      "code": "2b26bf790b1efb38",
+      "record_sha256": "8631d9fea13518a4d6072ae1dfe7100aa787baaaf3e093e3398c97d5347eee58"
+    },
+    {
+      "shader": "downsample_tl.spv",
+      "spv": "71f444e6a4c8f74a",
+      "code": "0fe312d3121892fd",
+      "record_sha256": "c2d3d7bd34f580f3ce4e5ac5aba38403a88ed90626eadfe1f518f218a8b010b2"
+    },
+    {
+      "shader": "downsample_tl_lt.spv",
+      "spv": "4c4d3749900919fe",
+      "code": "e495ac468ca81542",
+      "record_sha256": "801d4f03e2ae8514d5085d54e0e753edc613789a20d6b9914c0f5407fa70d1f2"
+    },
+    {
+      "shader": "enc0_attr_f.spv",
+      "spv": "b7ec90ad9bb77d31",
+      "code": "f4095337895569dd",
+      "record_sha256": "1c35a1b0fcf25473b93f5dcd252a904b5831c591c6d749e8878533d7b4a163a7"
+    },
+    {
+      "shader": "enc0_attr_f_lt.spv",
+      "spv": "904cfe3480396ab7",
+      "code": "ed6fd17230792053",
+      "record_sha256": "4e7bccb8ade7d1e277e79820c49cbc07cc19c86db0353a2f250525fac8dae5b2"
+    },
+    {
+      "shader": "enc0_attr_f_w.spv",
+      "spv": "2a1805e8888ee841",
+      "code": "bcaff28dd23fa537",
+      "record_sha256": "b88548428e441672b7c0f6e4e297713c6a5541cae4cc112c91399999a7caa0ac"
+    },
+    {
+      "shader": "enc0_attr_f_w_lt.spv",
+      "spv": "037978cdd8781555",
+      "code": "a81a375ccc8c1294",
+      "record_sha256": "c009f6ee6d78146ca38ea120b3ad4e636b7510c4136a0ee0c824bfee3b0960d1"
+    },
+    {
+      "shader": "enc0_stage_32_64_f.spv",
+      "spv": "4f4d742046c9b6f1",
+      "code": "a599d9b3300c02b2",
+      "record_sha256": "fc4949564eb872ad0425c128fc9dcfcc8d9b4d6c0bc35423fb0abba6e89c2a31"
+    },
+    {
+      "shader": "enc0_stage_32_64_f_lt.spv",
+      "spv": "58ef13c7737446ba",
+      "code": "96bb73a0b203ef60",
+      "record_sha256": "4bfc09693642ef14ef5f3e8859c6d0f7adebc642eac04ae548ac228e75e77a31"
+    },
+    {
+      "shader": "enc0_stage_32_64_f_w.spv",
+      "spv": "da0466da433262b2",
+      "code": "5e2796a28d4e2c66",
+      "record_sha256": "2b78db0685de231ce7b22165e99da5c4c1fa6bb45cb78817e2e94e860b6b5fc1"
+    },
+    {
+      "shader": "enc0_stage_32_64_f_w_lt.spv",
+      "spv": "53b5b6225b8030d7",
+      "code": "36b9bf66138d02a3",
+      "record_sha256": "2895b685cf04db469ad22661b93bc5a8bfabf14121ebb033adee7b023e0a2027"
+    },
+    {
+      "shader": "enc_stage_128_128_160_f.spv",
+      "spv": "f6ccd66e59440a06",
+      "code": "6dd0744fc7e535cb",
+      "record_sha256": "26fdda338ac471d8bc7211ff8c09cdaf9d24de07ec4cd2267cbe91e757a9c6d7"
+    },
+    {
+      "shader": "enc_stage_128_128_160_f_lt.spv",
+      "spv": "9cfa240f087e7153",
+      "code": "89e613da345f7188",
+      "record_sha256": "046cd9ada83104a6463d9e3ae3efa80698fa8a6545f9fd44c078d0f29270b93d"
+    },
+    {
+      "shader": "enc_stage_128_128_160_fl.spv",
+      "spv": "231bf803323201db",
+      "code": "0a32c6ae4ab0c710",
+      "record_sha256": "8180b44e893ff80e6a4960ca94dfc9414b1e25d906df050d350754078fee95ec"
+    },
+    {
+      "shader": "enc_stage_128_128_160_fl_lt.spv",
+      "spv": "7637570aac01b415",
+      "code": "591c303d1916df59",
+      "record_sha256": "4aebe010e595724866f94ecf64b2ee868a021b1f210dddd2e8fa1a0706817380"
+    },
+    {
+      "shader": "enc_stage_160_256_0_f.spv",
+      "spv": "0d775a6335a1b380",
+      "code": "89117114647e4ccc",
+      "record_sha256": "559ba9316f6fdb127b4d81d56e3756310d93a5dfb8e2aa0d2a1ed9acfffa3d63"
+    },
+    {
+      "shader": "enc_stage_160_256_0_f_lt.spv",
+      "spv": "1499d383d594a247",
+      "code": "a0e46789efa4c4c5",
+      "record_sha256": "b5b7e42f2f69074d74e1236937faf50b169337be0814c83feff7de3ff95e6ec8"
+    },
+    {
+      "shader": "enc_stage_160_256_0_fl.spv",
+      "spv": "c5ef1c72a8fa61ac",
+      "code": "1768214d2b760720",
+      "record_sha256": "4b4a751b189d854d68f59d7b91fdbb917ea906715d9485d40b73bec95e202162"
+    },
+    {
+      "shader": "enc_stage_160_256_0_fl_lt.spv",
+      "spv": "f2418b8d764403b6",
+      "code": "094d5dec4c32fee5",
+      "record_sha256": "c76580d43105b71a8570a0a27baeaa97dd405c8949bb4f12ea7768c66752f102"
+    },
+    {
+      "shader": "enc_stage_160_256_160_f.spv",
+      "spv": "38501fcf01b1e652",
+      "code": "a267f095f2c68b3a",
+      "record_sha256": "5c9f79b931ef785e1681b440cccecf55660ef0c3cc8b31fb48994fb06ff604f9"
+    },
+    {
+      "shader": "enc_stage_160_256_160_f_lt.spv",
+      "spv": "543b3fdebddc2f1d",
+      "code": "f33a7bfb97ce71e2",
+      "record_sha256": "26d8cffa1a7e603370506f4ecfc1b2c7ee29eb01e89a8642f26800c849047b47"
+    },
+    {
+      "shader": "enc_stage_160_256_160_fl.spv",
+      "spv": "4d98a31a6a7789ad",
+      "code": "ee3c516bab287788",
+      "record_sha256": "8ae2847fcba81f4be7d8f916c265b5b685d5c315a7c4e01b41187922e41227e9"
+    },
+    {
+      "shader": "enc_stage_160_256_160_fl_lt.spv",
+      "spv": "d80cf61e2f2f74ec",
+      "code": "4718ebf0b2808df7",
+      "record_sha256": "0c85d6198a600d7f54ccd9c55326a84db881f9ebc45821ce43489496b3d676f5"
+    },
+    {
+      "shader": "enc_stage_64_64_96_f.spv",
+      "spv": "59a8847a905b419b",
+      "code": "5cce4e4cfb7532bb",
+      "record_sha256": "1f7afc9f1daafc47678716bb770e9b84de83a9422a15f9dabfc89be85e9582fe"
+    },
+    {
+      "shader": "enc_stage_64_64_96_f_lt.spv",
+      "spv": "8cca057e36e2b4cc",
+      "code": "e757e30fc1d260ca",
+      "record_sha256": "e820a748e1f9f9208d6176d3eb79aca6340b026928655898ae174b41642842a6"
+    },
+    {
+      "shader": "enc_stage_96_128_128_f.spv",
+      "spv": "8d07ac141832d300",
+      "code": "3a611c4f7927cbe7",
+      "record_sha256": "59737d6165967d19d0ac23fbd5a7ff9dee04a22c0df428f2e4929184923056c0"
+    },
+    {
+      "shader": "enc_stage_96_128_128_f_lt.spv",
+      "spv": "2d30684c45e56b62",
+      "code": "931692a436e75490",
+      "record_sha256": "38a0dd9fa90a7333d0a45dc3e7635cce9a23e40eeb5288b7eca54d1f9342e7c0"
+    },
+    {
+      "shader": "enc_stage_96_128_128_fl.spv",
+      "spv": "7425bd19500d6479",
+      "code": "77889bedc52be852",
+      "record_sha256": "26010a0c00a1085f16bc847d95d3d6c4a3e41750716ac62a8304460801814f5c"
+    },
+    {
+      "shader": "enc_stage_96_128_128_fl_lt.spv",
+      "spv": "f3817f3fb0a26545",
+      "code": "c08996618a61cd08",
+      "record_sha256": "9be9d6cf40d431c2c98d51f24c49e3ac9dbbf965268f23eeb583398e36280ebd"
+    },
+    {
+      "shader": "ingest.spv",
+      "spv": "b32221a3d7474c82",
+      "code": "49a3bf5b4bb9c332",
+      "record_sha256": "5a6b7cab15649bbede000db5fd806be1b2feca4e4142bb56fdf90fe14e111180"
+    },
+    {
+      "shader": "pack.spv",
+      "spv": "fdc5ed41ade87e02",
+      "code": "4094c2f3e7b854b6",
+      "record_sha256": "28759ad6589cad315825aba4cbe56429e8c779bfd307d52aeba1d16f3483d19f"
+    },
+    {
+      "shader": "pooled_history2.spv",
+      "spv": "7fcd28c3e1986a33",
+      "code": "663272ac7eec9702",
+      "record_sha256": "1248767351732208d50f74cd0b3fd4cee0b64d96abcd74170e6dd13481eb7b56"
+    },
+    {
+      "shader": "pooled_history2_lt.spv",
+      "spv": "f9a40136548780ff",
+      "code": "76cd368810cd25a3",
+      "record_sha256": "bd67684fb6619a16b7691838b9f254d641e6cd496f28aa253d5c037733b3eb3e"
+    },
+    {
+      "shader": "post_dlt_f.spv",
+      "spv": "f59fecb0c6c722dd",
+      "code": "c6ce80ee473311e3",
+      "record_sha256": "79526f519868eb3fecb9eb07ca6c1fd9c3c33b9226e7a081a16b4db63a71c203"
+    },
+    {
+      "shader": "post_dlt_f_lt.spv",
+      "spv": "06a7db5bd94c81e0",
+      "code": "eb3f96a39187d010",
+      "record_sha256": "2966522a7aab3e6e07b75d685ec2f72505eda458127ea4e1df07d880c2390688"
+    },
+    {
+      "shader": "post_f.spv",
+      "spv": "afe8e28b8283b96b",
+      "code": "0d1278ba148cd90b",
+      "record_sha256": "11e30061c68fb5a769b047c59083fecee613b23b12fb935c6c087b47e4cf683c"
+    },
+    {
+      "shader": "post_f_lt.spv",
+      "spv": "67c230d72edf262e",
+      "code": "b0d6c69e2691df75",
+      "record_sha256": "108b47e4530702eb8a7adcf046e9e4e939d74c362e6be0253884edd8616ffd69"
+    },
+    {
+      "shader": "post_tile.spv",
+      "spv": "350eb51855cd5995",
+      "code": "51ace62610bdec36",
+      "record_sha256": "5b9cafd15c301ed03da7285f183e5b06a003f3571ab1be220212f0fb40d00c31"
+    },
+    {
+      "shader": "selftest.spv",
+      "spv": "0c5629eb03f4fe89",
+      "code": "0890af203bc0575d",
+      "record_sha256": "5b34e8320e7bb1bf11a2847e5b33a73eb6ad0b1390fee120afd93656d334c007"
+    },
+    {
+      "shader": "selftest_tex.spv",
+      "spv": "fcef346c12cfe86f",
+      "code": "38a54099914ba0a6",
+      "record_sha256": "636b0715a2c06c1f73a5eb4473b22b0b663b0a9e99a37cf6bbbfa41ada08e8e4"
+    }
+  ],
+  "inventory": [
+    {
+      "path": "LICENSE",
+      "bytes": 1084,
+      "sha256": "b32556f9f3b05d5fc44bfe4ece49038dcfbd8e3bdcbe51a6ed160a751fbeeafe"
+    },
+    {
+      "path": "THIRD_PARTY.md",
+      "bytes": 6250,
+      "sha256": "0ba792c4aec9eaf4e3ca75336111497802ce5b681405d94991503d0ed63090d3"
+    },
+    {
+      "path": "openrr-amd.ini",
+      "bytes": 2023,
+      "sha256": "e790ce950b12a8b660d146fba010cecc5dd10c57db1a28626639429a7fc0c86b"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/002d1b4baa5c58ce.nrp",
+      "bytes": 38232,
+      "sha256": "8f790c5f36765fc9c27d71e8a86bdf2be08f5bdf438713bfbe1feff719ed71a4"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/037978cdd8781555.nrp",
+      "bytes": 23516,
+      "sha256": "c009f6ee6d78146ca38ea120b3ad4e636b7510c4136a0ee0c824bfee3b0960d1"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/03e17cddd77f0e90.nrp",
+      "bytes": 36800,
+      "sha256": "943dd62f3aecef314fbb525a95e67f9aad224406d9465ecbc0952677590c7f46"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/06a7db5bd94c81e0.nrp",
+      "bytes": 26192,
+      "sha256": "2966522a7aab3e6e07b75d685ec2f72505eda458127ea4e1df07d880c2390688"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/095787dd4133557e.nrp",
+      "bytes": 29752,
+      "sha256": "f56942ab5e479aa2f0660d762b7ca2981bebd112f26af98b2a0f52b9911743be"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/09ae4164fbb15cf1.nrp",
+      "bytes": 25068,
+      "sha256": "fcb4855ec0e0c25b80e48f4b680e830929e69a55023fcf8e90a4baf37d5ce095"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/0c5629eb03f4fe89.nrp",
+      "bytes": 308,
+      "sha256": "5b34e8320e7bb1bf11a2847e5b33a73eb6ad0b1390fee120afd93656d334c007"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/0d775a6335a1b380.nrp",
+      "bytes": 22376,
+      "sha256": "559ba9316f6fdb127b4d81d56e3756310d93a5dfb8e2aa0d2a1ed9acfffa3d63"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/1499d383d594a247.nrp",
+      "bytes": 22268,
+      "sha256": "b5b7e42f2f69074d74e1236937faf50b169337be0814c83feff7de3ff95e6ec8"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/176dd5c87be9b223.nrp",
+      "bytes": 1824,
+      "sha256": "b1a4a7a7981c64add9173724e1a99dc70de9af307adbb7f34f73c5f97fbf31ce"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/1868a527fddfb730.nrp",
+      "bytes": 3312,
+      "sha256": "c061351d3894ef1dc0180ca86c4e4c9e2016e69b2fac9ebc804bf6b2c70d405b"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/1d6fd9f4cc1c893c.nrp",
+      "bytes": 28604,
+      "sha256": "606553bad8f00d86b4ed75ff8c5709189968b5ea6c531e4427530ae7b395ba4b"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/231bf803323201db.nrp",
+      "bytes": 37668,
+      "sha256": "8180b44e893ff80e6a4960ca94dfc9414b1e25d906df050d350754078fee95ec"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/238fcc9bcf09fa55.nrp",
+      "bytes": 31816,
+      "sha256": "d46f7986271b81b939bda71576d629d9817b7498d344fae6f4984a94cdac7907"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/28bc7057f2b8ac76.nrp",
+      "bytes": 27892,
+      "sha256": "4a3cd382c7059e1a0a85391e48d1b416f57da0903a6f0784a3be6d4dd0ad67bd"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/28e6b3fa305be4bc.nrp",
+      "bytes": 27136,
+      "sha256": "af7fb6f3ac18cf926c827c24152668373c5fb276a6d1f1a86a6e46ca963c3200"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/2a1805e8888ee841.nrp",
+      "bytes": 25632,
+      "sha256": "b88548428e441672b7c0f6e4e297713c6a5541cae4cc112c91399999a7caa0ac"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/2bfe14fa9a6e5624.nrp",
+      "bytes": 28664,
+      "sha256": "0590628cfff7d571015d4375740028acc4bf80030bc60aab1754bc97519c7023"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/2d30684c45e56b62.nrp",
+      "bytes": 39060,
+      "sha256": "38a0dd9fa90a7333d0a45dc3e7635cce9a23e40eeb5288b7eca54d1f9342e7c0"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/350eb51855cd5995.nrp",
+      "bytes": 1468,
+      "sha256": "5b9cafd15c301ed03da7285f183e5b06a003f3571ab1be220212f0fb40d00c31"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/360f7a5dd195af7c.nrp",
+      "bytes": 24956,
+      "sha256": "29505c5ef288b3253e03432fd26972886ecf35b564c62a6139c084a809152900"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/37b54dc8375d23da.nrp",
+      "bytes": 3760,
+      "sha256": "ab045fc33cfcd46c6b542424bcb32a55aff67d8b59280d0ced1b225244b490e4"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/38501fcf01b1e652.nrp",
+      "bytes": 30212,
+      "sha256": "5c9f79b931ef785e1681b440cccecf55660ef0c3cc8b31fb48994fb06ff604f9"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/40dc71ff1cd2b848.nrp",
+      "bytes": 31288,
+      "sha256": "f5250f12ed3f485577d26a763836826f912242895bd0e16ad0d520921f2d0b65"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/487ba381e5bfa6a7.nrp",
+      "bytes": 31400,
+      "sha256": "46e0771099884d0c79b542f00dd34f64bb57786508bfe37a6b947fd0f43c5910"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/4c4d3749900919fe.nrp",
+      "bytes": 10576,
+      "sha256": "801d4f03e2ae8514d5085d54e0e753edc613789a20d6b9914c0f5407fa70d1f2"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/4d98a31a6a7789ad.nrp",
+      "bytes": 31908,
+      "sha256": "8ae2847fcba81f4be7d8f916c265b5b685d5c315a7c4e01b41187922e41227e9"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/4ecf3b5cd58f6a11.nrp",
+      "bytes": 29416,
+      "sha256": "d9ea7b9c753ac21729f9930ba066b5e08781a021e64e7a4a3869cbf460a3a840"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/4f4d742046c9b6f1.nrp",
+      "bytes": 28280,
+      "sha256": "fc4949564eb872ad0425c128fc9dcfcc8d9b4d6c0bc35423fb0abba6e89c2a31"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/50c4593efddb5754.nrp",
+      "bytes": 26364,
+      "sha256": "213ccc0573f8e5f0fd1d9f579af7bd16ab32e62c7cb02c081c24b080e04865cd"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/518e6587dc9e69b8.nrp",
+      "bytes": 10380,
+      "sha256": "29c91efe8c372fab3494b1a33c179df91b5194012ffbe9ea57956d9b60b7c66a"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/52722875f5de9eb1.nrp",
+      "bytes": 29276,
+      "sha256": "b077ce74fdab7fb435a371f685ad09ed05b07392e1a03511ba24352ff4b486ee"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/53b5b6225b8030d7.nrp",
+      "bytes": 24736,
+      "sha256": "2895b685cf04db469ad22661b93bc5a8bfabf14121ebb033adee7b023e0a2027"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/543b3fdebddc2f1d.nrp",
+      "bytes": 30096,
+      "sha256": "26d8cffa1a7e603370506f4ecfc1b2c7ee29eb01e89a8642f26800c849047b47"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/58ef13c7737446ba.nrp",
+      "bytes": 25108,
+      "sha256": "4bfc09693642ef14ef5f3e8859c6d0f7adebc642eac04ae548ac228e75e77a31"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/59a8847a905b419b.nrp",
+      "bytes": 37144,
+      "sha256": "1f7afc9f1daafc47678716bb770e9b84de83a9422a15f9dabfc89be85e9582fe"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/5d05fcc3de384276.nrp",
+      "bytes": 28504,
+      "sha256": "fd72cbad04a0dd84ed0d49145798092e941090fcc54c2de64261838524d76e81"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/5eff19ab0da39495.nrp",
+      "bytes": 912,
+      "sha256": "b15f31f153f80fa5ecdd08c768a3baf14a8624e33518654f39eb9039ecba6b08"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/607b418f7ed5346e.nrp",
+      "bytes": 24552,
+      "sha256": "71d2f7695881c63562177a5903fee57ee098434effbfe3d6b47cfc6945a7702b"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/608c28c0029891f3.nrp",
+      "bytes": 27944,
+      "sha256": "22587f0218fa197a0baace78f29dd7f2a93d4e20976c5e29443b71c3f47f2467"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/66226a06cd06c7f3.nrp",
+      "bytes": 10760,
+      "sha256": "b2481f050e6d9f783931d952c7840699fc854553afededa42fbbfa254670552a"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/67c230d72edf262e.nrp",
+      "bytes": 21100,
+      "sha256": "108b47e4530702eb8a7adcf046e9e4e939d74c362e6be0253884edd8616ffd69"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/6a401da9bbd2584c.nrp",
+      "bytes": 25144,
+      "sha256": "ed140d474a6fa7472727198e43b29edff23d65619ec930e71c34f57704d9a216"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/6bc90aef575d98cf.nrp",
+      "bytes": 24648,
+      "sha256": "2d68c3b627f60227a1a9629c4936345942b2e8c335cc6ba6803882e5cf1d0b07"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/6be5b3c53083b759.nrp",
+      "bytes": 28868,
+      "sha256": "02929267f00a0da2ae142d1303e531d13e02149e290cd01298b02b9f189a4b5f"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/6d872e31c95afce5.nrp",
+      "bytes": 23480,
+      "sha256": "e0e22a6c380e5125f35a82f89158347b2cd9e51195d852300268b3f92e67d699"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/7139737ce729e99e.nrp",
+      "bytes": 22444,
+      "sha256": "d71db0c1b570afd2870cc648924b8a2423198fc480947f1f60bfe91e9c739103"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/71f444e6a4c8f74a.nrp",
+      "bytes": 10936,
+      "sha256": "c2d3d7bd34f580f3ce4e5ac5aba38403a88ed90626eadfe1f518f218a8b010b2"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/7397e05f8c2da77a.nrp",
+      "bytes": 30556,
+      "sha256": "3fbfbd6cea7ef071226dc13721b57a331e621b9481a162a0494c23b064b66e56"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/7425bd19500d6479.nrp",
+      "bytes": 39876,
+      "sha256": "26010a0c00a1085f16bc847d95d3d6c4a3e41750716ac62a8304460801814f5c"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/7637570aac01b415.nrp",
+      "bytes": 33288,
+      "sha256": "4aebe010e595724866f94ecf64b2ee868a021b1f210dddd2e8fa1a0706817380"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/777985d1831329ca.nrp",
+      "bytes": 29836,
+      "sha256": "f541dde397b05f89a9ff5ce0411b7554dd2cf88dc898a0036862336c7ee5710f"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/79ea9a0f90a74b24.nrp",
+      "bytes": 30192,
+      "sha256": "4eba6f482a296684d168faf62c2b98b67dbc5516cca2ada0c4ae9fda452b5bf8"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/7a05b5994bc63f2b.nrp",
+      "bytes": 23128,
+      "sha256": "278c2105cf333fe589be782ed25b4d7002b4a6c2d33a5b20fa03397915f7cd63"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/7fcd28c3e1986a33.nrp",
+      "bytes": 2380,
+      "sha256": "1248767351732208d50f74cd0b3fd4cee0b64d96abcd74170e6dd13481eb7b56"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/8053435623e90df5.nrp",
+      "bytes": 1732,
+      "sha256": "a4f47dc6b5da86319b015719035d16814f094a61cca110fdb59c598db9b081a7"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/81d017418fe547af.nrp",
+      "bytes": 23300,
+      "sha256": "a1c9c197ce1b8cab247587f6e850d45c82eacab2031ad9f0227fe2ee99c7dc28"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/8207a2a6f176a4d8.nrp",
+      "bytes": 27524,
+      "sha256": "39ec9d310ca3d17262465d0a89235cb1e0543099f2b47b35404aab2389989b26"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/8bb23aa9f0379d4c.nrp",
+      "bytes": 25332,
+      "sha256": "163fbaecf40950093652d73bd89d0068f1e63310632d6ee98505f9827b6e482f"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/8cadc24c9e03891b.nrp",
+      "bytes": 844,
+      "sha256": "54218447dca834a532c0fa11b633a72053d55a5f9ab92abe69a45ddd8e97bb97"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/8cca057e36e2b4cc.nrp",
+      "bytes": 36800,
+      "sha256": "e820a748e1f9f9208d6176d3eb79aca6340b026928655898ae174b41642842a6"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/8d07ac141832d300.nrp",
+      "bytes": 39228,
+      "sha256": "59737d6165967d19d0ac23fbd5a7ff9dee04a22c0df428f2e4929184923056c0"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/904cfe3480396ab7.nrp",
+      "bytes": 23444,
+      "sha256": "4e7bccb8ade7d1e277e79820c49cbc07cc19c86db0353a2f250525fac8dae5b2"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/91dab286712a2560.nrp",
+      "bytes": 23128,
+      "sha256": "b6aa0403e34366985f914cbd1c05ac0679a84f94a70fd16d3eabcf89ad70a865"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/92deee5eb00fde72.nrp",
+      "bytes": 3460,
+      "sha256": "acd197c8d6436828a7088f58f25377465ce98b1330427fa0f1e3d0d970050b9d"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/941882166ce09254.nrp",
+      "bytes": 26152,
+      "sha256": "3e19b138a8d805d202a384b54343a70f0ed7c6b15b4aa6ed2537f62af369ee96"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/9494ed55ba8520ba.nrp",
+      "bytes": 3332,
+      "sha256": "3d46193f2d68371a355b3f301dd972f3d03e5a2f8116c3157600c8417140b300"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/94faa2ccbba8501e.nrp",
+      "bytes": 32016,
+      "sha256": "6a54fa132eb6c28a9bb3964fa790a58d3ab35a2f7f93f999f1293c3fd2306fa0"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/9cfa240f087e7153.nrp",
+      "bytes": 35772,
+      "sha256": "046cd9ada83104a6463d9e3ae3efa80698fa8a6545f9fd44c078d0f29270b93d"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/a3a647bb92620bdc.nrp",
+      "bytes": 32700,
+      "sha256": "df56c3b6e9a9f049c14a9699ae2eb717fbc4473314defac94c4675dfd836d2aa"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/a536c1aee1b5b373.nrp",
+      "bytes": 28352,
+      "sha256": "6716e5a096383721af00210a5b1e398f924579cd003a08051db1bb42d763119f"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/a89b668e3da09f5b.nrp",
+      "bytes": 24804,
+      "sha256": "74f3ccb14054e72c7166fc9c25930b54afd0f573e16e9ee2037941cec828bdd5"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/aaf5cb7a8ce116ff.nrp",
+      "bytes": 21988,
+      "sha256": "76c2c768f71d16773757e54d58ca4d5e9311fb413d62be6620b8ce74fedf356c"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/addffdc4c6b922e8.nrp",
+      "bytes": 28212,
+      "sha256": "73e25e3e485c0bf3b958be5b8405b25f364fb175f13104dafb65a661e4f07993"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/af1b93f587f9f210.nrp",
+      "bytes": 2956,
+      "sha256": "8631d9fea13518a4d6072ae1dfe7100aa787baaaf3e093e3398c97d5347eee58"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/afe8e28b8283b96b.nrp",
+      "bytes": 20856,
+      "sha256": "11e30061c68fb5a769b047c59083fecee613b23b12fb935c6c087b47e4cf683c"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/b32221a3d7474c82.nrp",
+      "bytes": 30808,
+      "sha256": "5a6b7cab15649bbede000db5fd806be1b2feca4e4142bb56fdf90fe14e111180"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/b3655442fe0ad69e.nrp",
+      "bytes": 30700,
+      "sha256": "8df9cc3154e8a094533e89bd5046a008c0db0928d84aced0eb307bd3e92a8efc"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/b799ea871f0212a5.nrp",
+      "bytes": 27356,
+      "sha256": "41eb38dfbf5fe098e9812237633f02cb0c9d97d6c2f496e7ecd76637d60b2db6"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/b7ec90ad9bb77d31.nrp",
+      "bytes": 25576,
+      "sha256": "1c35a1b0fcf25473b93f5dcd252a904b5831c591c6d749e8878533d7b4a163a7"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/b8457d1fbeb4e9e3.nrp",
+      "bytes": 2764,
+      "sha256": "fe5b88160f8e857fdc3c64950092203e658bf36d58fe9d7fe2dceec8b9c2922f"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/c29f41aeb581fce8.nrp",
+      "bytes": 23144,
+      "sha256": "9eb4c990b8439a65fdb331ce3e15c18a939a9c48d29cae667c872ca12397453c"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/c5ef1c72a8fa61ac.nrp",
+      "bytes": 23816,
+      "sha256": "4b4a751b189d854d68f59d7b91fdbb917ea906715d9485d40b73bec95e202162"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/caa3f6091e490cda.nrp",
+      "bytes": 31596,
+      "sha256": "a78340835c5b074fdb08caf351d82804ea59a4ce1ba7a22f48a46286a7ee3658"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/cffca948d4b28dac.nrp",
+      "bytes": 348,
+      "sha256": "e40cdd6632436f197c329a57f15c8fd8cfd081d2bf6cf9f73b282ba33da3838b"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/d1e35384549e752c.nrp",
+      "bytes": 26448,
+      "sha256": "331cf4c53862e83ada692291df691bcb61b44f14f8dc73f85bb3d0036a5bca5c"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/d4cad4131a9d2071.nrp",
+      "bytes": 23392,
+      "sha256": "fb158c6a22371d114d52da8a0763df2c1a4eb38fc4dd3ee23d79d9df38819721"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/d80cf61e2f2f74ec.nrp",
+      "bytes": 31908,
+      "sha256": "0c85d6198a600d7f54ccd9c55326a84db881f9ebc45821ce43489496b3d676f5"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/d89c77ffd1eb11fa.nrp",
+      "bytes": 19464,
+      "sha256": "7a77c7827fd4e4025e9ae6ae3b9eb6c6fdf6634cc7521ee0441b2d26830aefd3"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/da0466da433262b2.nrp",
+      "bytes": 28044,
+      "sha256": "2b78db0685de231ce7b22165e99da5c4c1fa6bb45cb78817e2e94e860b6b5fc1"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/de6a659020e0bbba.nrp",
+      "bytes": 21160,
+      "sha256": "7143a4ce4542355882e75daaa990f40922d5b4029d998a25bcfda090172f76e4"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/e631ce2b247fc02f.nrp",
+      "bytes": 25108,
+      "sha256": "41533ee78c61350dcd4fd2e318f10aad1ef9ca1fbbcbe818575972dc7e694b1c"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/ee9810da3013871c.nrp",
+      "bytes": 21100,
+      "sha256": "29efc0efacb666e77612b9cac38cead0a50449e7fe76d4cac511a1eb878ce92d"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/f2418b8d764403b6.nrp",
+      "bytes": 23696,
+      "sha256": "c76580d43105b71a8570a0a27baeaa97dd405c8949bb4f12ea7768c66752f102"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/f3817f3fb0a26545.nrp",
+      "bytes": 38208,
+      "sha256": "9be9d6cf40d431c2c98d51f24c49e3ac9dbbf965268f23eeb583398e36280ebd"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/f59fecb0c6c722dd.nrp",
+      "bytes": 25156,
+      "sha256": "79526f519868eb3fecb9eb07ca6c1fd9c3c33b9226e7a081a16b4db63a71c203"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/f6ccd66e59440a06.nrp",
+      "bytes": 35972,
+      "sha256": "26fdda338ac471d8bc7211ff8c09cdaf9d24de07ec4cd2267cbe91e757a9c6d7"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/f7d0914b380d5548.nrp",
+      "bytes": 29648,
+      "sha256": "05fd51573fbead07edcf5422caac1a223a858f7e6ee72693537dc65dda4728ee"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/f9a40136548780ff.nrp",
+      "bytes": 1152,
+      "sha256": "bd67684fb6619a16b7691838b9f254d641e6cd496f28aa253d5c037733b3eb3e"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/fa1ab80252e2a7e5.nrp",
+      "bytes": 3140,
+      "sha256": "c57d6da166e90a99995f959d4f28e7f2f16618a7985e82be0fd875fde2583cb2"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/fc15342056305889.nrp",
+      "bytes": 30768,
+      "sha256": "845acca01c829443d3472821f44a15567abe2213210209c37c0fb41792b5f8df"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/fcef346c12cfe86f.nrp",
+      "bytes": 544,
+      "sha256": "636b0715a2c06c1f73a5eb4473b22b0b663b0a9e99a37cf6bbbfa41ada08e8e4"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/fdc5ed41ade87e02.nrp",
+      "bytes": 3680,
+      "sha256": "28759ad6589cad315825aba4cbe56429e8c779bfd307d52aeba1d16f3483d19f"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/manifest.json",
+      "bytes": 130594,
+      "sha256": "260b8f8f67042d3408337974981de66d41fe2268ba892b680b0bed6242278b27"
+    },
+    {
+      "path": "openrr-amd/aco/gfx1201/openrr-d3d12-v1/manifest.msgpack",
+      "bytes": 20849,
+      "sha256": "bd84c690b3cc504281ad8ecaad7277f8cbcd7c37798f69bee2e267e216ad0d28"
+    },
+    {
+      "path": "openrr-amd/shaders/ae.spv",
+      "bytes": 9924,
+      "sha256": "24e1376b406d56f748e85bef1b729df1257772b67ec5484408e9685b46373d6c"
+    },
+    {
+      "path": "openrr-amd/shaders/clear_range.spv",
+      "bytes": 2612,
+      "sha256": "e6a793248d9b119713c35c12218f35d382f46a12e5fb19b61aaf64f22811df9f"
+    },
+    {
+      "path": "openrr-amd/shaders/d3d_ae.spv",
+      "bytes": 13168,
+      "sha256": "a7dba2adeb00cc27ac924af6bd379c0368bd096ee6fbdaa82a57ce3e065f0c1d"
+    },
+    {
+      "path": "openrr-amd/shaders/d3d_downsample.spv",
+      "bytes": 15128,
+      "sha256": "ea7f1cbe320c1136459e73db6f5263000c67a1a79e5ed57c5b0e16bfc1c63323"
+    },
+    {
+      "path": "openrr-amd/shaders/d3d_downsample_lt.spv",
+      "bytes": 15264,
+      "sha256": "9760541d1d498c3ef6205de31c2e9acf1e0decb66aed090cdeec20e323815d2d"
+    },
+    {
+      "path": "openrr-amd/shaders/d3d_downsample_tl.spv",
+      "bytes": 36920,
+      "sha256": "f5aa152dda63327dddf0762388628611bb53e879a789e1364833067062f89dc0"
+    },
+    {
+      "path": "openrr-amd/shaders/d3d_downsample_tl_lt.spv",
+      "bytes": 36888,
+      "sha256": "53cab801f74a4e85335ea046b33c7acdbf25cf49eea4894db5de6089e041f556"
+    },
+    {
+      "path": "openrr-amd/shaders/d3d_enc0_attr_f.spv",
+      "bytes": 95072,
+      "sha256": "da809345056406aa9042a7e9b9b04f82e8b2f7a649bcd0c95a9e253ddeb8db98"
+    },
+    {
+      "path": "openrr-amd/shaders/d3d_enc0_attr_f_lt.spv",
+      "bytes": 92488,
+      "sha256": "f41316b0132d96dcb107ee551c488e8c97f2c00e3a6e815136814aa9eedd51f1"
+    },
+    {
+      "path": "openrr-amd/shaders/d3d_enc0_attr_f_w.spv",
+      "bytes": 94964,
+      "sha256": "a534f0486ac20e13c16fa2f52041852830181333c22d12c4eb918a7017556d4f"
+    },
+    {
+      "path": "openrr-amd/shaders/d3d_enc0_attr_f_w_lt.spv",
+      "bytes": 92380,
+      "sha256": "e157176427c1ed56650c9d4ad57f22e65a94ea143fc004755dcc9d645d0732fc"
+    },
+    {
+      "path": "openrr-amd/shaders/d3d_ingest.spv",
+      "bytes": 18996,
+      "sha256": "6b08d9f1d85ddf675f1044c705979a55c39729025c7e8ad2642479fa53b3957e"
+    },
+    {
+      "path": "openrr-amd/shaders/d3d_pack.spv",
+      "bytes": 15108,
+      "sha256": "0f6710b0a481bd52c376d00be116bb5b2b16308a0eb95506aa62004f1ef1d4ec"
+    },
+    {
+      "path": "openrr-amd/shaders/dec_dfn_128_128_f.spv",
+      "bytes": 136012,
+      "sha256": "8b97e6dbb0eb1b85f7d4d0dea7f77a4fd1d50b2df8b55a5025549566eef12ee8"
+    },
+    {
+      "path": "openrr-amd/shaders/dec_dfn_128_128_f_lt.spv",
+      "bytes": 135752,
+      "sha256": "56b0b5b45e03f37ba484b3f6d2bee4edc894b0026ecd453d33b84cd9f5b4b1a9"
+    },
+    {
+      "path": "openrr-amd/shaders/dec_dfn_128_128_fl.spv",
+      "bytes": 143020,
+      "sha256": "5a2cb90814adcdd042b5464861f272d99750e7db9070a2b2593049d24f83d3af"
+    },
+    {
+      "path": "openrr-amd/shaders/dec_dfn_128_128_fl_lt.spv",
+      "bytes": 142760,
+      "sha256": "6e808b84520bd3da83832671347e75d0a1e7e300fe9ef94e9f4df1e5a939f383"
+    },
+    {
+      "path": "openrr-amd/shaders/dec_dfn_160_256_f.spv",
+      "bytes": 143496,
+      "sha256": "758097a384dc7b6863aba1c1b015022df7054b21b49be677c98eedaf4b795713"
+    },
+    {
+      "path": "openrr-amd/shaders/dec_dfn_160_256_f_lt.spv",
+      "bytes": 143236,
+      "sha256": "ea1ee50c0da0c97ba30d51cff3103cc2303b73a983e86fff3bce5439c33ba3ef"
+    },
+    {
+      "path": "openrr-amd/shaders/dec_dfn_160_256_fl.spv",
+      "bytes": 150488,
+      "sha256": "20a9e87625cc45beae1f182f489a407c253df17b46633d90031539d8804125cb"
+    },
+    {
+      "path": "openrr-amd/shaders/dec_dfn_160_256_fl_lt.spv",
+      "bytes": 150228,
+      "sha256": "c05ac690a5b4681ac63f53dfad855644487b16efcc83c70c55858afb65346e0c"
+    },
+    {
+      "path": "openrr-amd/shaders/dec_dfn_64_64_f.spv",
+      "bytes": 142488,
+      "sha256": "c3585d2c6835c216960dbd9fc0c7fae1bef2180a6367272f9b503d43f0bd7799"
+    },
+    {
+      "path": "openrr-amd/shaders/dec_dfn_64_64_f_lt.spv",
+      "bytes": 142164,
+      "sha256": "5441a0f44bcfe657b7768d3ed1b1efc806a600ba8612949e7bb3dc114254f6f2"
+    },
+    {
+      "path": "openrr-amd/shaders/dec_dfn_96_128_f.spv",
+      "bytes": 149980,
+      "sha256": "7d1fecb59beda4bf0ffafa76e30ce094404eb1028151224b183bdf1070b2a348"
+    },
+    {
+      "path": "openrr-amd/shaders/dec_dfn_96_128_f_lt.spv",
+      "bytes": 149656,
+      "sha256": "f462c25893982e7e601aa8dd39a26b996c3e53f85eaa4c8500a6cb57a11baa0e"
+    },
+    {
+      "path": "openrr-amd/shaders/dec_dfn_96_128_fl.spv",
+      "bytes": 157040,
+      "sha256": "50891c88b9bc3b5c6b303a86a665086efe11dd6199e2769392629ebe35dc2194"
+    },
+    {
+      "path": "openrr-amd/shaders/dec_dfn_96_128_fl_lt.spv",
+      "bytes": 151820,
+      "sha256": "99313d2d30c5a062e9943b69a4c04a4c318535202ff2587a38412347fb324066"
+    },
+    {
+      "path": "openrr-amd/shaders/dec_head_32_64_f.spv",
+      "bytes": 179960,
+      "sha256": "3fd5f882ceabfed2a8630d484a3870e46fb8988387c916d2ca33f556679ce421"
+    },
+    {
+      "path": "openrr-amd/shaders/dec_head_32_64_f_lt.spv",
+      "bytes": 177732,
+      "sha256": "f4f4d1ba88f6efff1563e10807dc0e28a841a1357cccdee682f35eba0bdcd22f"
+    },
+    {
+      "path": "openrr-amd/shaders/dec_up_128_128_160_f.spv",
+      "bytes": 130880,
+      "sha256": "e5277a721cc8deafb30a2eb45740c64f7f44b0a819d87655809bad0322cf1bdf"
+    },
+    {
+      "path": "openrr-amd/shaders/dec_up_128_128_160_f_lt.spv",
+      "bytes": 130620,
+      "sha256": "45a408306c637bd17552dfd35ce459a558b9f55baddd6a4590de5ce3b23a7675"
+    },
+    {
+      "path": "openrr-amd/shaders/dec_up_128_128_160_fl.spv",
+      "bytes": 137996,
+      "sha256": "120909c473a896ef595564344cfe7cc8a8fa3cc6f346bc0cb7ac8349f85dd0f8"
+    },
+    {
+      "path": "openrr-amd/shaders/dec_up_128_128_160_fl_lt.spv",
+      "bytes": 137736,
+      "sha256": "fd38322128083e23ccb883564214a21446790fe264286fc15ab10f6cac658858"
+    },
+    {
+      "path": "openrr-amd/shaders/dec_up_160_256_160_f.spv",
+      "bytes": 134048,
+      "sha256": "f95bb68592c84872de71b17342744a8b5447a5ce29a2592bdb46765609b9a32e"
+    },
+    {
+      "path": "openrr-amd/shaders/dec_up_160_256_160_f_lt.spv",
+      "bytes": 133788,
+      "sha256": "dace16cdbaa901c2b3dc7d6894b6f16835f0857f9a38864aaeb763c675f5bc5d"
+    },
+    {
+      "path": "openrr-amd/shaders/dec_up_160_256_160_fl.spv",
+      "bytes": 141148,
+      "sha256": "c9903fe0fab8fbd586eb0466a8b4ae3671d7204be7156f03fbce656e9e45dd44"
+    },
+    {
+      "path": "openrr-amd/shaders/dec_up_160_256_160_fl_lt.spv",
+      "bytes": 140888,
+      "sha256": "1a4ca904fa1b56083af0dd4db051db4e2e885bde742b3f87d587259e9fe6a51c"
+    },
+    {
+      "path": "openrr-amd/shaders/dec_up_32_64_64_f.spv",
+      "bytes": 180820,
+      "sha256": "41351eeb7e089c0bb18cdd661c1d102fb653a60f794aef1a490cbe3d74b8fd47"
+    },
+    {
+      "path": "openrr-amd/shaders/dec_up_32_64_64_f_lt.spv",
+      "bytes": 179956,
+      "sha256": "fad1037210fc3d86dd0e76b9aa16bc165d6073f71228e5a2ec8e65eecf172665"
+    },
+    {
+      "path": "openrr-amd/shaders/dec_up_64_64_96_f.spv",
+      "bytes": 162300,
+      "sha256": "b93f98bcfe1135dc0c1683f9c2e1812d1192bdf88faee29a7cb13df3fe6beae7"
+    },
+    {
+      "path": "openrr-amd/shaders/dec_up_64_64_96_f_lt.spv",
+      "bytes": 161976,
+      "sha256": "b741d10ee6bc28499a316537f5f97ed1a171b5e9f4f9b9bda2a422704eb95d3b"
+    },
+    {
+      "path": "openrr-amd/shaders/dec_up_96_128_128_f.spv",
+      "bytes": 108164,
+      "sha256": "38f034d842ee930aea3c5eaf3a703cd1d4403dd48a79b761a43922fa06f5b59f"
+    },
+    {
+      "path": "openrr-amd/shaders/dec_up_96_128_128_f_lt.spv",
+      "bytes": 107904,
+      "sha256": "fa530359b5ab4cb3a463d45eaf4970a0220133ac4ad5638f9e135ed5c26cb805"
+    },
+    {
+      "path": "openrr-amd/shaders/dec_up_96_128_128_fl.spv",
+      "bytes": 115264,
+      "sha256": "34ce5b828df84dea02dceafd4e2336af095f4bbcb29e016051c9cea2bedee9bd"
+    },
+    {
+      "path": "openrr-amd/shaders/dec_up_96_128_128_fl_lt.spv",
+      "bytes": 115004,
+      "sha256": "43a396c0df2856d4b9d216b2c4e9381691a87926b94fa2bfcf2a979dd062af2c"
+    },
+    {
+      "path": "openrr-amd/shaders/dfn_export.spv",
+      "bytes": 14428,
+      "sha256": "b54ce42f3a13767030889519ec101d08dacb3e14437ea12e8a85d4bf4e2cc7e1"
+    },
+    {
+      "path": "openrr-amd/shaders/dfn_export_lt.spv",
+      "bytes": 14472,
+      "sha256": "8c365a2a22a6276c3852c06fbedae980989cf03077448c9822c58e1aa0e7987d"
+    },
+    {
+      "path": "openrr-amd/shaders/dfn_import.spv",
+      "bytes": 17216,
+      "sha256": "bb86a9700c1d4c2b8d3a5dabd2cc17be1d10e853700b59c40e22b4e34b703b8c"
+    },
+    {
+      "path": "openrr-amd/shaders/dfn_import_lt.spv",
+      "bytes": 17332,
+      "sha256": "24bd7ab7fc833024d7bd4ff6935ed88e145da939eddbd5d6be210770437f47bf"
+    },
+    {
+      "path": "openrr-amd/shaders/downsample.spv",
+      "bytes": 15152,
+      "sha256": "a7f46201dcff6c6a9a6b0b1357071635c827d4539a6df904de29070ec14b1eb7"
+    },
+    {
+      "path": "openrr-amd/shaders/downsample_lt.spv",
+      "bytes": 15312,
+      "sha256": "5e8cfe4f8b029c95f727d0b554bfe7e13f049c6289f76272d5ff69607d4a9a11"
+    },
+    {
+      "path": "openrr-amd/shaders/downsample_tl.spv",
+      "bytes": 36968,
+      "sha256": "a8207644a047101498fabf06434b60c2c3e74a64a61c4ee40d225684c5c65597"
+    },
+    {
+      "path": "openrr-amd/shaders/downsample_tl_lt.spv",
+      "bytes": 36936,
+      "sha256": "953d9778f4fecef6a9964f2adcaccc406abdc29b35f2ff05b6b0c4946ca4f644"
+    },
+    {
+      "path": "openrr-amd/shaders/enc0_attr_f.spv",
+      "bytes": 86540,
+      "sha256": "e592640f221e38e1650c9befefe06650d0c188790614272b9afd5d6a211c69cf"
+    },
+    {
+      "path": "openrr-amd/shaders/enc0_attr_f_lt.spv",
+      "bytes": 83956,
+      "sha256": "23011f9b852b1c88764e4d67b105e781f92dd6d19088cf1102bd5114e5a53f7c"
+    },
+    {
+      "path": "openrr-amd/shaders/enc0_attr_f_w.spv",
+      "bytes": 86416,
+      "sha256": "15371da00252feea3a2cb5e61bde91c0a70152e7e0f115f72710f8c0d6c88c07"
+    },
+    {
+      "path": "openrr-amd/shaders/enc0_attr_f_w_lt.spv",
+      "bytes": 83832,
+      "sha256": "0b4bc048bef1f4a29ba9575a2bc83f2690e100474d05e8a1edc4a76110ce310b"
+    },
+    {
+      "path": "openrr-amd/shaders/enc0_stage_32_64_f.spv",
+      "bytes": 224460,
+      "sha256": "280fc838f501d22b7ee0c11324572016f16802d9ba09c1f6903bb7c8120da591"
+    },
+    {
+      "path": "openrr-amd/shaders/enc0_stage_32_64_f_lt.spv",
+      "bytes": 223588,
+      "sha256": "f6f929157070dbd07e1f016311fd09b4a61d5c86a106955549f73c8fc3125174"
+    },
+    {
+      "path": "openrr-amd/shaders/enc0_stage_32_64_f_w.spv",
+      "bytes": 221260,
+      "sha256": "f71fb76ec841be7a5f31270c664b05344857f1cdb6243f3af756197c94ff1514"
+    },
+    {
+      "path": "openrr-amd/shaders/enc0_stage_32_64_f_w_lt.spv",
+      "bytes": 220388,
+      "sha256": "9628d8f0fb2b718bb68ae9e313934ff0804417faf631b5f82a6eedf45c605ce8"
+    },
+    {
+      "path": "openrr-amd/shaders/enc_stage_128_128_160_f.spv",
+      "bytes": 146048,
+      "sha256": "d3d6deca8b76d02ecead9f1475f62781fc2e1976dd3127d4fe9b9546bcfb8261"
+    },
+    {
+      "path": "openrr-amd/shaders/enc_stage_128_128_160_f_lt.spv",
+      "bytes": 146232,
+      "sha256": "b3a00af5a52c7262a38d2ca0107d91361ee3ee3c00e5e9b4622795cbd43c690f"
+    },
+    {
+      "path": "openrr-amd/shaders/enc_stage_128_128_160_fl.spv",
+      "bytes": 153104,
+      "sha256": "032361b470b2311a228f0a5ac05190e889cce4120eb3a6154288d67788b9e457"
+    },
+    {
+      "path": "openrr-amd/shaders/enc_stage_128_128_160_fl_lt.spv",
+      "bytes": 153288,
+      "sha256": "7d5f1c6d23126abf0a4325029b3de013581213fad743c5c19932be803ad5995c"
+    },
+    {
+      "path": "openrr-amd/shaders/enc_stage_160_256_0_f.spv",
+      "bytes": 141180,
+      "sha256": "b137bb1dc3c1413afe41a5e14b29cdb7264dedebf86af408145128ec1e9859d3"
+    },
+    {
+      "path": "openrr-amd/shaders/enc_stage_160_256_0_f_lt.spv",
+      "bytes": 141364,
+      "sha256": "583ba30fe64279c3bdce0734f44becf3838c3dfb2a71d3840822531f9550be0e"
+    },
+    {
+      "path": "openrr-amd/shaders/enc_stage_160_256_0_fl.spv",
+      "bytes": 148236,
+      "sha256": "3ce147a4e7730e0840d1c5a446d499f0e9edd2a428f438bc62220718f5d6dee7"
+    },
+    {
+      "path": "openrr-amd/shaders/enc_stage_160_256_0_fl_lt.spv",
+      "bytes": 148420,
+      "sha256": "8c921af17e1395acc48d4a65140a001903a172f117b9e1d71ba878a03227723e"
+    },
+    {
+      "path": "openrr-amd/shaders/enc_stage_160_256_160_f.spv",
+      "bytes": 154244,
+      "sha256": "b3012b16c288f7380558e8fde76523097d857898382e28ca318b101f0e276c5e"
+    },
+    {
+      "path": "openrr-amd/shaders/enc_stage_160_256_160_f_lt.spv",
+      "bytes": 154428,
+      "sha256": "7b9584c04d3c43f65616a6ddea768b53f30d85cbe2c98a08442276ee121fd6ac"
+    },
+    {
+      "path": "openrr-amd/shaders/enc_stage_160_256_160_fl.spv",
+      "bytes": 161284,
+      "sha256": "93fcb09a980cf56a78def1c333d8e638ea133096b7c5fd080181354ed383edbc"
+    },
+    {
+      "path": "openrr-amd/shaders/enc_stage_160_256_160_fl_lt.spv",
+      "bytes": 161468,
+      "sha256": "d34df252cf78254098bc9c2ae46dddad9bd62be64433387c6fb6a9dfa82f6131"
+    },
+    {
+      "path": "openrr-amd/shaders/enc_stage_64_64_96_f.spv",
+      "bytes": 160844,
+      "sha256": "35bc21c3ed713cd80296aef01cac937dc6d89d3af75a14ac20c7298fa3334073"
+    },
+    {
+      "path": "openrr-amd/shaders/enc_stage_64_64_96_f_lt.spv",
+      "bytes": 160532,
+      "sha256": "261fa202ca06fdfddc12035f101193d62cdbcad7a6acef6379bea8e0da36d3bd"
+    },
+    {
+      "path": "openrr-amd/shaders/enc_stage_96_128_128_f.spv",
+      "bytes": 170388,
+      "sha256": "1d9bdb5d42535f7249d0b8c304b28710c27e5faf0b54a4b2b9105e258a9d9e7e"
+    },
+    {
+      "path": "openrr-amd/shaders/enc_stage_96_128_128_f_lt.spv",
+      "bytes": 170076,
+      "sha256": "ffda7cc144e7e9867eb9ae0960525cba12c696851b325f96b301cc5f60139702"
+    },
+    {
+      "path": "openrr-amd/shaders/enc_stage_96_128_128_fl.spv",
+      "bytes": 173308,
+      "sha256": "cb3df96a5822d5e514c96c29ab40998acd76688e6b1aabcb9da37db675e4b4d2"
+    },
+    {
+      "path": "openrr-amd/shaders/enc_stage_96_128_128_fl_lt.spv",
+      "bytes": 124340,
+      "sha256": "375f68a5b9b379d61d5bdd7d37123b651de38480b78c267f206ebf71a76f5717"
+    },
+    {
+      "path": "openrr-amd/shaders/ingest.spv",
+      "bytes": 18332,
+      "sha256": "39103b6722bc1057fee396dbe08ec5116db7793c78f32749ac92d085f88f7656"
+    },
+    {
+      "path": "openrr-amd/shaders/pack.spv",
+      "bytes": 14496,
+      "sha256": "fb58566c1580e13c5cbd8a3b5edd1ece0717cb41e6dfeecb10298bdb960a26fc"
+    },
+    {
+      "path": "openrr-amd/shaders/pooled_history2.spv",
+      "bytes": 8888,
+      "sha256": "ca3130b952d9248c43f5854cddd1339ed461e92f2d9e3058e31a7e52702f5ff1"
+    },
+    {
+      "path": "openrr-amd/shaders/pooled_history2_lt.spv",
+      "bytes": 4232,
+      "sha256": "e4e5fa719f38eb59ab98415c5230f6e6a36d98e7c4831420c5010130b08e3fce"
+    },
+    {
+      "path": "openrr-amd/shaders/post_dlt_f.spv",
+      "bytes": 73800,
+      "sha256": "d2edd3dc5d42f85b3da8e906565e5090a59583e479ba073dba2323936eeb327a"
+    },
+    {
+      "path": "openrr-amd/shaders/post_dlt_f_lt.spv",
+      "bytes": 78912,
+      "sha256": "8fa72a3d3780fde35e015569448dca9caaa54a7edb6d60c5d9e8fdbd7c6f5b0e"
+    },
+    {
+      "path": "openrr-amd/shaders/post_f.spv",
+      "bytes": 63496,
+      "sha256": "8747aed441acd9c3b6f84613a12093f5ed1ed9d1aed23d9c8c7bcaaa8381d4fd"
+    },
+    {
+      "path": "openrr-amd/shaders/post_f_lt.spv",
+      "bytes": 66220,
+      "sha256": "a2869172666a960559a79dbdae35010eb695512cf7e51ff38c44ad0ae6805cff"
+    },
+    {
+      "path": "openrr-amd/shaders/post_tile.spv",
+      "bytes": 7440,
+      "sha256": "c9514c86dff8f25ffb8cfc6a1485288ae7f99b2c4e5611a50d676c8bdb69ff9b"
+    },
+    {
+      "path": "openrr-amd/shaders/selftest.spv",
+      "bytes": 1960,
+      "sha256": "d35838d2d0303901f2db5601bfb3aafd364bfa491bce29e0b0523872e1bd6e00"
+    },
+    {
+      "path": "openrr-amd/shaders/selftest_tex.spv",
+      "bytes": 2428,
+      "sha256": "a3c15a053c259f823f4aeb61757bb522533887a5eafd794e424d9db43a76a42d"
+    },
+    {
+      "path": "openrr-ngx-host.dll",
+      "bytes": 585819,
+      "sha256": "f09d65f147ac7e83b2bbea86eddd0229811822290adf36aa2b48ef07820106d2"
+    },
+    {
+      "path": "plugins/openrr-amd.asi",
+      "bytes": 3335956,
+      "sha256": "0a9515f7e50e162458811615e4e1bdbdd85dacc054255e572cc0b9a85bd42a19"
+    }
+  ],
+  "scope": "CPU package audit; no GPU dispatch or performance measurement"
+}

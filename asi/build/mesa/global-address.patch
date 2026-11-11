@@ -1,6 +1,6 @@
 --- a/src/amd/vulkan/nir/radv_nir_lower_cooperative_matrix.c
 +++ b/src/amd/vulkan/nir/radv_nir_lower_cooperative_matrix.c
-@@ -402,6 +402,33 @@
+@@ -404,6 +404,33 @@
                                          radv_nir_cmat_bits(desc) / 8);
        iter_deref = nir_build_deref_ptr_as_array(b, iter_deref, row_offset);
  

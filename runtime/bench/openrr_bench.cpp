@@ -499,15 +499,18 @@ BenchResult RunRuntimeBench(const std::string& label, const fs::path& dllPath, c
         f.output = { output.res.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, 0, 0 };
         if (optionalGuides)
         {
-            f.transparency_layer = { color.res.Get(), kReadState, 0, 0 };
-            f.transparency_opacity = { color.res.Get(), kReadState, 0, 0 };
-            f.transparency_motion = { mv.res.Get(), kReadState, 0, 0 };
-            f.disocclusion_mask = { hit.res.Get(), kReadState, 0, 0 };
-            f.sss_guide = { hit.res.Get(), kReadState, 0, 0 };
-            f.responsivity_mask = { hit.res.Get(), kReadState, 0, 0 };
-            f.color_before_transparency = { color.res.Get(), kReadState, 0, 0 };
-            f.depth_of_field_guide = { hit.res.Get(), kReadState, 0, 0 };
-            f.specular_motion = { mv.res.Get(), kReadState, 0, 0 };
+            // Diagnostic isolation: absent means the original all-guides fixture.
+            const char* only = std::getenv("OPENRR_BENCH_GUIDE");
+            auto enabled = [&](const char* name) { return !only || !*only || ("," + std::string(only) + ",").find("," + std::string(name) + ",") != std::string::npos; };
+            if (enabled("transparency_layer")) f.transparency_layer = { color.res.Get(), kReadState, 0, 0 };
+            if (enabled("transparency_opacity")) f.transparency_opacity = { color.res.Get(), kReadState, 0, 0 };
+            if (enabled("transparency_motion")) f.transparency_motion = { mv.res.Get(), kReadState, 0, 0 };
+            if (enabled("disocclusion_mask")) f.disocclusion_mask = { hit.res.Get(), kReadState, 0, 0 };
+            if (enabled("sss_guide")) f.sss_guide = { hit.res.Get(), kReadState, 0, 0 };
+            if (enabled("responsivity_mask")) f.responsivity_mask = { hit.res.Get(), kReadState, 0, 0 };
+            if (enabled("color_before_transparency")) f.color_before_transparency = { color.res.Get(), kReadState, 0, 0 };
+            if (enabled("depth_of_field_guide")) f.depth_of_field_guide = { hit.res.Get(), kReadState, 0, 0 };
+            if (enabled("specular_motion")) f.specular_motion = { mv.res.Get(), kReadState, 0, 0 };
         }
 
         Check(ca->Reset(), "Reset allocator");

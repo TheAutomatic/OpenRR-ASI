@@ -43,7 +43,9 @@ for($round=0;$round -lt $rounds;$round++){
  '--baseline-data-dir',$first,'--data-dir',$second,'--baseline-compiler',$firstCompiler,'--candidate-compiler',$secondCompiler,
  '--rw',"$RenderWidth",'--rh',"$RenderHeight",'--ow',"$OutputWidth",'--oh',"$OutputHeight",'--warmup',"$warmup",'--frames',"$frames",'--drs-frames',"$drs",
  '--fast-mode','1','--optional-guides','0','--parity-all-frames',"$all",'--align-engine-phase','1','--trace-frame',"$TraceFrame",'--out',$dest)
- & (Join-Path $tool 'openrr_bench.exe') @argsBench 2>&1 | Out-File -LiteralPath (Join-Path $dest 'console.log') -Encoding utf8
+ $eap_saved=$ErrorActionPreference; $ErrorActionPreference='Continue'
+ & (Join-Path $tool 'openrr_bench.exe') @argsBench 1>(Join-Path $dest 'console.log') 2>(Join-Path $dest 'console-stderr.log')
+ $ErrorActionPreference=$eap_saved
  if($LASTEXITCODE -ne 0){throw "Candidate failed $Stage $round"}
  $summary=Get-Content -LiteralPath (Join-Path $dest 'summary.json') -Raw | ConvertFrom-Json
  if(-not $summary.parity_passed){throw 'Quality gate failed'}

@@ -77,7 +77,7 @@ def main():
     assert plugin[:2] == b'MZ'
     pe = struct.unpack_from('<I', plugin, 60)[0]
     assert plugin[pe:pe+4] == b'PE\0\0' and struct.unpack_from('<H', plugin, pe+4)[0] == 0x8664
-    expected = {'plugins/openrr-amd.asi','openrr-amd.ini','LICENSE','THIRD_PARTY.md'}
+    expected = {'plugins/openrr-amd.asi','openrr-ngx-host.dll','openrr-amd.ini','LICENSE','THIRD_PARTY.md'}
     for name in ('LICENSE','THIRD_PARTY.md'):
         assert (stage/name).read_bytes() == Path(name).read_bytes()
     expected |= {p.relative_to(stage).as_posix() for p in files}

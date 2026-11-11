@@ -573,15 +573,16 @@ uint64_t D3dDevice::bind(ID3D12GraphicsCommandList* cl, uint32_t slot) {
         const uint64_t base_desc = uint64_t(desc_slot_) * kSlotStride * 32;
         desc_lo_ = uint32_t(heap_gpu_ + base_desc);
         table_lo_ = desc_lo_ + kSlotViews * 32;
-        if (srd_ok_) {
-memcpy(reinterpret_cast<uint8_t*>(heap_cpu_ + base_desc + kSlotViews * 32), tex_table_, sizeof(tex_table_));
         aco_table_lo_ = table_lo_ + kTableViews * 32;
-        auto* aco_table = reinterpret_cast<uint8_t*>(heap_cpu_ + base_desc + (kSlotViews + kTableViews) * 32);
-        memset(aco_table, 0, kAcoTableViews * 32);
-        for (unsigned i = 0; i < 8; ++i) {
-            memcpy(aco_table + i * 64, tex_table_[i], 32);
-            memcpy(aco_table + i * 64 + 48, tex_table_[i] + 32, 16);
-        }
+        // CPU descriptor handles can be opaque under third-party hooks.
+        if (srd_ok_) {
+            memcpy(reinterpret_cast<uint8_t*>(heap_cpu_ + base_desc + kSlotViews * 32), tex_table_, sizeof(tex_table_));
+            auto* aco_table = reinterpret_cast<uint8_t*>(heap_cpu_ + base_desc + (kSlotViews + kTableViews) * 32);
+            memset(aco_table, 0, kAcoTableViews * 32);
+            for (unsigned i = 0; i < 8; ++i) {
+                memcpy(aco_table + i * 64, tex_table_[i], 32);
+                memcpy(aco_table + i * 64 + 48, tex_table_[i] + 32, 16);
+            }
         }
     } else {
         desc_lo_ = table_lo_ = aco_table_lo_ = 0;
@@ -910,8 +911,13 @@ Kernel D3dDevice::load(const std::string& spv_path, uint32_t subgroup) {
             number("schema", 1); number("wave_size", 32); number("layout_push_bytes", 256);
             const auto patch_version = index.at("patch_version").number();
             pal::require(patch_version == 3 || patch_version == 4, "unsupported ACO capture patch version");
+            // Production: the single 26.3.0-drirc toolchain. The manifest is
+            // pinned to the mesa-26.3.0 release tag commit; all user SGPRs
+            // must be claimed (AC_UD_CS_STATE is suppressed at capture time
+            // via radv_enable_custom_border_on_compute_queue=true).
             pal::require(index.at("target").s == "gfx1201" && index.at("layout_version").s == "openrr-d3d12-v1" &&
-                         index.at("mesa_commit").s == "96cb43121031992b85767f9c1be8f3f48e22b1d2", "ACO manifest provenance mismatch");
+                         index.at("mesa_commit").s == "0a6fa60abb737d26ac8a316a4aad7c9ddf64f9e4",
+                         "ACO manifest provenance mismatch");
             const auto json = pal::load(path_to_u8(root / "manifest.json"));
             pal::require(pal::hash(json.data(), json.size()) == index.at("manifest_hash").number(), "ACO manifest checksum mismatch");
             const auto& entry = index.at("records").at(key);

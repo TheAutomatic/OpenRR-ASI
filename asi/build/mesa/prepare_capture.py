@@ -109,27 +109,7 @@ new = old.replace(anchor, r'''   const char *onr_prefix = getenv("ONR_ACO_CAPTUR
 ''' + anchor)
 changes.append((p, old, new))
 
-p = ROOT / "src/amd/vulkan/nir/radv_nir_lower_descriptors.c"
-old = p.read_text()
-anchor = "      data[num_loads++] = ac_nir_load_smem(b, size, addr, nir_iadd_imm_nuw(b, offset, start * 4), 4, 0);"
-assert old.count(anchor) == 1
-new = old.replace(anchor, '''      /* Push contents are uniform, but a dynamic byte offset can diverge per lane.
-       * SMEM forcibly scalarizes that offset with readfirstlane. Keep dynamic loads
-       * in the global-memory path so instruction selection preserves lane indices.
-       */
-      nir_def *byte_offset = nir_iadd_imm_nuw(b, offset, start * 4);
-      if (intrin->src[0].ssa->divergent) {
-         nir_def *pointer = nir_iadd(b, addr, nir_u2u64(b, byte_offset));
-         data[num_loads++] = nir_load_global(b, size, 32, pointer,
-            .access = ACCESS_NON_WRITEABLE | ACCESS_CAN_REORDER, .align_mul = 4);
-      } else {
-         data[num_loads++] = ac_nir_load_smem(b, size, addr, byte_offset, 4, 0);
-      }''')
-anchor = '   progress |= nir_shader_instructions_pass(shader, lower_descriptors_instr, nir_metadata_control_flow, &state);'
-assert new.count(anchor) == 1
-new = new.replace(anchor, '   nir_divergence_analysis(shader);\n' + anchor)
-changes.append((p, old, new))
-
+# Mesa 26.3 implements divergent push loads upstream.
 p = ROOT / "src/amd/vulkan/nir/radv_nir_lower_cooperative_matrix.c"
 old = p.read_text()
 anchor = '''      if (is_load) {
