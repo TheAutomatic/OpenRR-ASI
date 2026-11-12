@@ -39,7 +39,8 @@ if [[ "${OPENRR_TRACE_BASE:-build/asi}" == "build/asi-015-aco" ]]; then
   cp -f "$out/openrr-trace.asi" build/aco-v015/openrr-trace.asi
   cp -f "$out/openrr_bench.exe" build/aco-v015/openrr_bench.exe
   cp -f "$out/openrr_contrast_eval.exe" build/aco-v015/openrr_contrast_eval.exe 2>/dev/null || true
+  # The stage package (shaders + aco records) must move in lockstep too: a stale
+  # build/aco-v015/stage would shadow the fresh one and silently measure old code.
+  rm -rf build/aco-v015/stage && cp -a "$base/stage" build/aco-v015/stage
   # The units gate is build_asi.sh's own test_asi_units.exe (same sources, native
-  # stage/occ_* tree resolution); a trace-side copy is redundant and was removed.
-  echo "synced build/aco-v015 runtime"
 fi

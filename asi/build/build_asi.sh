@@ -108,17 +108,24 @@ cp asi/openrr-amd.ini "$stage/openrr-amd.ini"
 "$cxx" -std=c++17 -O2 -shared -static -Iasi/src asi/src/optifg_ngx_proxy.cpp -o "$stage/openrr-ngx-host.dll"
 cp LICENSE THIRD_PARTY.md "$stage/"
 mkdir -p -- "$out/occ_nopad" "$out/occ_pad16k"
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_FAR=2 -DLT_FAR1=2 -DLT_Q16=1 -DLT_VO=1 -DLT_SYM=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -Igpu/shaders/include gpu/shaders/enc0_stage_32_64.comp -o "$out/occ_nopad/enc0_stage_32_64_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_POST_PAIR=1 -DLT_POST_HW=1 -DLT_POST_LDS=1 -DLT_POST_EXPO=1 -Igpu/shaders/include gpu/shaders/post.comp -o "$out/occ_nopad/post_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_FAR=3 -DLT_FAR1=3 -DLT_Q16=1 -DLT_VO=1 -DLT_SYM=1 -DLT_UP8=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -Igpu/shaders/include gpu/shaders/dec_up_32_64_64.comp -o "$out/occ_nopad/dec_up_32_64_64_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_FAR=3 -DLT_FAR1=3 -DLT_Q16=1 -DLT_VO=1 -DLT_SYM=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -Igpu/shaders/include gpu/shaders/dec_head_32_64.comp -o "$out/occ_nopad/dec_head_32_64_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_MI8=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -Igpu/shaders/include gpu/shaders/enc_stage_64_64_96.comp -o "$out/occ_nopad/enc_stage_64_64_96_f_lt.spv" > /dev/null
-
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_FAR=2 -DLT_FAR1=2 -DLT_Q16=1 -DLT_VO=1 -DLT_SYM=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -DLDS_OCC_PAD=8192 -Igpu/shaders/include gpu/shaders/enc0_stage_32_64.comp -o "$out/occ_pad16k/enc0_stage_32_64_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_POST_PAIR=1 -DLT_POST_HW=1 -DLT_POST_LDS=1 -DLT_POST_EXPO=1 -DPOST_OCC_PAD=4096 -Igpu/shaders/include gpu/shaders/post.comp -o "$out/occ_pad16k/post_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_FAR=3 -DLT_FAR1=3 -DLT_Q16=1 -DLT_VO=1 -DLT_SYM=1 -DLT_UP8=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -DLDS_OCC_PAD=8192 -Igpu/shaders/include gpu/shaders/dec_up_32_64_64.comp -o "$out/occ_pad16k/dec_up_32_64_64_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_FAR=3 -DLT_FAR1=3 -DLT_Q16=1 -DLT_VO=1 -DLT_SYM=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -DLDS_OCC_PAD=8192 -Igpu/shaders/include gpu/shaders/dec_head_32_64.comp -o "$out/occ_pad16k/dec_head_32_64_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_MI8=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -DLDS_OCC_PAD=8192 -Igpu/shaders/include gpu/shaders/enc_stage_64_64_96.comp -o "$out/occ_pad16k/enc_stage_64_64_96_f_lt.spv" > /dev/null
+# occ_* probe variants MUST mirror the shipped LT_DEFS_<stem> verbatim (the units K2 gate
+# asserts ship == occ_nopad byte-identical), so derive them from gpu/fastmode.cmake instead
+# of hand-copying the flag lists here (a stale copy failed K2 silently before).
+occ_defs() {
+  local toks
+  toks=$(sed -n "s/^set(LT_DEFS_$1[[:space:]][[:space:]]*\\(.*\\))[[:space:]]*$/\\1/p" gpu/fastmode.cmake)
+  local d="" t
+  for t in $toks; do d="$d -D$t"; done
+  [ -n "$d" ] || { echo "LT_DEFS_$1 not found in gpu/fastmode.cmake" >&2; exit 1; }
+  echo "$d"
+}
+for stem in enc0_stage_32_64 post dec_up_32_64_64 dec_head_32_64 enc_stage_64_64_96; do
+  d=$(occ_defs "$stem")
+  pad=-DLDS_OCC_PAD=8192
+  [ "$stem" = post ] && pad=-DPOST_OCC_PAD=4096
+  "$glslang" -V --target-env vulkan1.3 -DENC_F32=1 $d -Igpu/shaders/include "gpu/shaders/$stem.comp" -o "$out/occ_nopad/${stem}_f_lt.spv" > /dev/null
+  "$glslang" -V --target-env vulkan1.3 -DENC_F32=1 $d $pad -Igpu/shaders/include "gpu/shaders/$stem.comp" -o "$out/occ_pad16k/${stem}_f_lt.spv" > /dev/null
+done
 
 mkdir -p -- "$out/b2_base" "$out/b2_post_exp" "$out/b2_post_log" "$out/b2_attr_rcp" "$out/b2_attr_same" "$out/b2_c64_far3"
 "$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_POST_PAIR=1 -Igpu/shaders/include gpu/shaders/post.comp -o "$out/b2_base/post_f_lt.spv" > /dev/null
