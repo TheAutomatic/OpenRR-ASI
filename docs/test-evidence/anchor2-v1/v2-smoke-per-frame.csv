@@ -8,7 +8,6 @@ P04b_guide_cbt_only,15,steady,1280,720,0,self,,999,999,0,0,0,100,0,0
 P05_guide_spec_mvec,15,steady,1280,720,0,self,,999,999,0,0,0,100,0,0
 P09_no_hit_with_spec_mv,15,steady,1280,720,0,self,,999,999,0,0,0,100,0,0
 P10_no_hit_plain,15,steady,1280,720,0,self,,999,999,0,0,0,100,0,0
-P13a_exposure_no_auto,15,steady,1280,720,0,self,,999,999,0,0,0,100,0,0
 P14_input_subrect_base_32_24,15,steady,1280,720,0,self,,999,999,0,0,0,100,0,0
 P15_mv_scale_neg0p5,15,steady,1280,720,0,self,,999,999,0,0,0,100,0,0
 P16a_mv_jittered_raw,15,steady,1280,720,0,self,,999,999,0,0,0,100,0,0

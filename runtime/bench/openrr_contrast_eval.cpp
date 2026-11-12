@@ -219,6 +219,7 @@ static SuiteCase CaseFromJson(const JsonValue& j)
     c.manual_exposure_tex_step = j.GetBool("manual_exposure_tex_step", (c.guide_mask & (1u << 11)) != 0u);
     if (c.manual_exposure_step)
     {
+        c.abi_not_exposed_yet = true;
         c.abi_note = "Pre.Exposure / Exposure.Scale scalars have no OnrRrFrame field";
     }
     if (c.manual_exposure_tex_step)
@@ -568,7 +569,6 @@ int RunMain(const Args& args)
     size_t written = 0;
     std::map<std::string, FrameMetrics> probeF015;             // OpenRR self f015 metrics vs P00 / pair
     std::map<std::string, std::vector<uint16_t>> probeF015Px;  // own pixels for pair comparisons
-    const std::string probePairRef = "P03_guide_transp_tlmv"; // rr_contrast pair_ref convention (see probes_summary)
     std::string p00F015Sha;
 
     for (const SuiteCase& c : cases)
@@ -861,24 +861,36 @@ int RunMain(const Args& args)
         summary << "      \"hash_gates\": " << c.expected_input_sha256.size() << "\n    }";
     }
 
-    // Probe self columns (second pass over saved pixels).
+    // Probe self columns (second pass over saved pixels). Pair mapping aligned with
+    // ngx_rr_bench's pair_ref convention (plus P08->P07): a probe compares against its
+    // designated neighbour so a shared-cause delta reads as 999 dB, an isolated cause as low.
     if (probeF015Px.count("P00_baseline_s1_g0"))
     {
+        auto pairOf = [](const std::string& id) -> std::string {
+            if (id == "P03_guide_transp_tlmv") return "P02_guide_transp_rgba";
+            if (id == "P08_guide_dof_presetE") return "P07_guide_dof_presetF";
+            if (id == "P09_no_hit_with_spec_mv") return "P05_guide_spec_mvec";
+            if (id == "P13b_exposure_tex_1x1") return "P13a_exposure_no_auto";
+            if (id == "P16b_mv_jittered_prev_minus_curr" || id == "P16c_mv_jittered_curr_minus_prev")
+                return "P16a_mv_jittered_raw";
+            return {};
+        };
         const auto& p00 = probeF015Px["P00_baseline_s1_g0"];
         std::ofstream pcsv(args.outDir / "probes_self.csv", std::ios::binary);
-        pcsv << "case_id,f015_vs_p00_psnr01_db,f015_vs_p00_max_ulp,f015_vs_p00_diff_halfs";
-        if (probeF015Px.count(probePairRef)) pcsv << ",f015_vs_pair_psnr01_db";
-        pcsv << '\n';
+        pcsv << "case_id,f015_vs_p00_psnr01_db,f015_vs_p00_max_ulp,f015_vs_p00_diff_halfs"
+             << ",pair_ref_id,f015_vs_pair_psnr01_db,f015_vs_pair_diff_halfs\n";
         for (const auto& [id, px] : probeF015Px)
         {
-            if (id == "P00_baseline_s1_g0" || px.empty()) continue;
+            if (id == "P00_baseline_s1_g0" || px.empty()) continue;   // skipped cases keep no row
             FrameMetrics m = CompareRgba16f(p00, px);
             pcsv << id << ',' << m.psnr01_db << ',' << m.max_ulp << ',' << m.diff_halfs;
-            if (probeF015Px.count(probePairRef) && id != probePairRef && !probeF015Px[probePairRef].empty())
+            const std::string pair = pairOf(id);
+            if (!pair.empty() && probeF015Px.count(pair) && !probeF015Px[pair].empty())
             {
-                FrameMetrics mp = CompareRgba16f(probeF015Px[probePairRef], px);
-                pcsv << ',' << mp.psnr01_db;
+                FrameMetrics mp = CompareRgba16f(probeF015Px[pair], px);
+                pcsv << ',' << pair << ',' << mp.psnr01_db << ',' << mp.diff_halfs;
             }
+            else pcsv << ",,,";   // fixed column count
             pcsv << '\n';
         }
     }

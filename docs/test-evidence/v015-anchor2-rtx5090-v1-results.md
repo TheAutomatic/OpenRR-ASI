@@ -65,9 +65,9 @@
 | P05 spec mvec / P09 / P10 | 49.90/49.90/41.80 | ✓ |
 | **P13a/P13b exposure** | — | `abi_not_exposed_yet`：`OnrRrFrame` 无 Pre.Exposure/Exposure.Scale/1×1 ExposureTexture 字段，工具诚实跳过 GPU（自等价表中的 999 为空像素占位，非结果） |
 | **P14 subrect base (32,24)** | **999（逐位）** | 洋红哨兵边框未被读入 → **OpenRR 正确尊重 Input Subrect.Base** ✓ |
-| **P15 mv_scale=−0.5** | **999（逐位）** | ⚠ **发现：OpenRR 未对主运动向量施加 MV.Scale**。源码核查：`engine.cpp:115` 的 `C(0x320/0x324) = mv_scale·(ix/rx)` 只乘 SpecularMvec（`enc0_attr.comp:492`）；主 mv_near/mv_c/mv_far 原始消费（`:513-519` 只乘内部尺度 0x2f8）；TransparencyLayerMvecs 有 `tlmv_scale`（`engine.cpp:852`）。与 NGX 语义（MV.Scale 乘全部 mvec）存在缺口——真实游戏若传非 1 的 MV.Scale 会得到错误重投影。建议列入引擎待办（今晚未改生产代码）。 |
-| P16a（flag=0x4f，MV 内容=P00） | 999 | MV_JITTERED 标志置位但内容未变 → OpenRR 输出不变：要么忽略该标志，要么其默认约定已按 jittered 处理（与 jsign=0 的内容一致）；**待 v2 5090 参考到货裁决**（NGX 侧 P16a 应有响应） |
-| P16b / P16c（±jitter delta） | 32.95 / 32.25 | MV 内容变化被正确放大传播 ✓ |
+| **P15 mv_scale=−0.5** | **999（逐位，0 ULP）** | ✅ **正向验证主运动向量 MV.Scale 缩放链路逐位正确**。P15 是等价性探针（`expect_equiv_p00=true`）：输入 MV 纹理预先乘 `mv_tex_scale_num=−2`，同时 API 传入 `mv_scale=−0.5`——若引擎不施加 MV.Scale，会消费 −2× 反向倍速 MV 跌至 ~30 dB；打出 999 恰证明 `−2×−0.5=+1` 被逐位还原。源码路径：`enc0_attr.comp:212-217` 的 `mv_at()` 对主路径 `mv_c/mv_far/mv_near` 统一施加 `(m + C(0x328/0x32c)) × C(0x320/0x324)`（`C(0x320/0x324)=mv_scale·(ix/rx)`），`:514` 的 `s8=C(0x2f8)=rx/ix` 还原回渲染像素位移。 |
+| P16a（flag=0x4f，MV 内容=P00） | 999 | `MV_JITTERED` 置位但输出不变的源码原因已定位：`engine.cpp:116` 硬编码 `F(0x328,0), F(0x32c,0)`——该标志尚未接入 `Enc0BlockInput` 的去抖动偏移槽位。**已知待办**：等 5090 `v2_motion` 的 P16a/b/c 回传锁死 `±(jitter−prev_jitter)` 符号约定后，再把偏移接入 `0x328/0x32c`（本次不改生产代码）。 |
+| P16b / P16c（±jitter delta） | 32.95 / 32.25 | vs 配对参考 P16a 同为 **32.9499 / 32.2504 dB**（`diff_halfs` 完全一致 5,597,118 / 5,600,703）——P16a≡P00（999），故 vs-P00 与 vs-P16a 两列同值，两探针的 MV 内容变化被正确放大传播 ✓ |
 | P17 unpacked roughness | 999 | normals.w=0 + 独立 R16F 下输出与 P00 逐位一致：要么 roughness 独立纹理路径正确且 roughness 内容在该帧无差异…实际上 P17 的 rough 内容与 P00 的 normals.w 相同数值，仅布局不同——**逐位一致 = 布局迁移路径正确** ✓ |
 
 ## 7. 结论
@@ -75,7 +75,7 @@
 1. **对账管线已闭环**：同源合成（76+44 哈希全过）→ 三档驱动 → 内存指标 → 与 5090 归档逐帧对账，全部无落盘大文件；v2 参考到货后一行复跑（见 §8）。
 2. **跨厂商基线**：S0 g0 稳态地板 ~29 dB、reset/短历史帧 47–49 dB、S1/S2 ~39–44 dB、病态路径（P02）反冲 56 dB——这是 OpenRR 实现正确性之外、由"独立实现"决定的可重复数字基线。
 3. **三档相对 5090 无编译器级额外偏离**（ACO ≈ LLPC ≤0.5 dB）。
-4. **新发现（记录不改码）**：主运动向量缺 MV.Scale 施加（P15 逐位暴露，源码定位 `engine.cpp:115` 消费面不完整）；MV_JITTERED 语义待 v2 参考裁决；ABI 缺口 P13a/b（曝光标量/纹理）。
+4. **v2 预演判读（订正版）**：P15 逐位一致**正向验证**主运动向量 `MV.Scale` 缩放链路（`mv_at()` ×`C(0x320/0x324)`）逐位正确；P14/P17 同为逐位通过（subrect 与 unpacked-roughness 路径正确）。已知待办两项：`ONR_RR_FRAME_MV_JITTERED` 尚未接入 `0x328/0x32c` 去抖动偏移（`engine.cpp:116` 硬编码 0，等 5090 v2 锁符号约定）；ABI 缺口 P13a/b（曝光标量/纹理，`OnrRrFrame` 无字段，工具诚实跳过 GPU）。
 
 ## 8. 复现命令
 
