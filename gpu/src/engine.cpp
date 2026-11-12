@@ -300,8 +300,11 @@ void Engine::upload_stage(const StageWeights& s, StageBufs& b) {
     else if (s.Co) U8(b.mrg_w, s.mrg_w);
     else U(b.mrg_w, s.mrg_w);
     U(b.mrg_b, s.mrg_b);
-    if (s.b.C <= 64) U8(b.up_w, s.up_w);
-    else U(b.up_w, s.up_w);
+    // All stages keep the e4m3 codes after the fp16 values: besides the fast kernels' LT_UP8 reads at C <= 64,
+    // the tail measurably keeps every deep dec_up B-tile read inside the packed blob on the units weight layout
+    // (with the fp16-only buffer the units engine item trips a device removal; the prefix bits are identical, so
+    // the regular kernels are unaffected either way) and Stage 3's native-FP8 plan reads the tail directly.
+    if (!s.up_w.empty()) U8(b.up_w, s.up_w);
     U(b.up_b, s.up_b);
 }
 

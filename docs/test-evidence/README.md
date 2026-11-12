@@ -13,7 +13,9 @@
    - [`anchor2-phase-aligned/`](anchor2-phase-aligned/)：**当前画质真值**。相位对齐后的 v1/v2 全量 per-frame CSV 与哈希门禁（legacy / fast-llpc / fast-aco 三档）。对齐后 fast-llpc 与 fast-aco 收敛至 ≤0.02 dB。
    - [`v015-stage2-vgpr-xin8-results.md`](v015-stage2-vgpr-xin8-results.md) / [`v015-stage2-day-results.md`](v015-stage2-day-results.md) / [`v015-stage2-overnight-results.md`](v015-stage2-overnight-results.md)：Stage 2 VGPR/XIN8 占用率攻坚系列，结论收敛于 256-VGPR 钉死的物理根因（128 KiB/WGP LDS 上限，`floor(131072/lds)×(wg/32)/4`），occupancy 旋钮路线作废。
    - [`v015-stage2-radv-cmat-results.md`](v015-stage2-radv-cmat-results.md)：Stage 2 首轮（`80fd0d7`）。**⚠ 勘误**：Mesa 补丁被 `build_capture_263.sh` 旧守卫静默跳过，II/III 档为空跑（I 档 fp16 路径数据有效）。
-   - [`v015-stage2-radv-cmat-v2-results.md`](v015-stage2-radv-cmat-v2-results.md)：**当前性能真值**。漏编修复（工具链 `radv_sha256 17cc90d8…`）+ 128 家族 `MLP_SLICE_LOOP [[dont_unroll]]` + Fast/Legacy 双模式 50 核 cmat-address 扩面。Fast 差距 +11.61→**+3.92%** @4K，Legacy ~+10→**+4.10%** @4K；shared 向量化（II'/III'）因 96 家族 +13KB 爆炸判死；相位对齐后 5090 画质全线上调 0.5~2.0 dB。
+   - [`v015-stage2-radv-cmat-v2-results.md`](v015-stage2-radv-cmat-v2-results.md)
+   - [`v015-integration-results.md`](v015-integration-results.md) / [`v015-interface-parity-results.md`](v015-interface-parity-results.md)：v0.1.5 集成与接口奇偶校验报告（补录索引）。
+   - [`v015-stage2-up8-mrg8-results.md`](v015-stage2-up8-mrg8-results.md)：**第二层（`_lt` 专属）当前真值**。`XS_TRIM` 128 家族保留（累计 Fast vs LLPC 收至 +3.56/+4.38/+3.68%）；`LT_UP8` 深层 FP8 判负回退（净 −0.9pp、59.73 dB，含五变体完整取证链与 bias 朝向陷阱）；`LT_MRG8` 按证据跳过；units 越界修复（engine U8-all）。：**当前性能真值**。漏编修复（工具链 `radv_sha256 17cc90d8…`）+ 128 家族 `MLP_SLICE_LOOP [[dont_unroll]]` + Fast/Legacy 双模式 50 核 cmat-address 扩面。Fast 差距 +11.61→**+3.92%** @4K，Legacy ~+10→**+4.10%** @4K；shared 向量化（II'/III'）因 96 家族 +13KB 爆炸判死；相位对齐后 5090 画质全线上调 0.5~2.0 dB。
 
 2. **`history/`（按演进顺序列出的独立历史快照，只增不改）**：
    - [`history/01-330f0b8-init-validation-suite.log`](history/01-330f0b8-init-validation-suite.log)：初始 D3D12 Direct / Split / 127 槽位 / Vulkan 桥接验证套件。

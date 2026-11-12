@@ -305,6 +305,7 @@ ACC bias_acc_t(F16Buf b, uint n0) {
 #define QV8_OFF (2u * ENC_X * ENC_C)
 #endif
 layout(buffer_reference, scalar, buffer_reference_align = 1) buffer E4View { floate4m3_t v[]; };
+// (no e4m3 view of the body LDS: the LT_UP8 TR experiment was reverted - see the #error below)
 // four sm_86 codes -> OCP codes: where (b & 0x78) == 0, mantissa k = 4 + (m >> 1) + (m & 3 == 3)
 uint ocp4(uint w) {
     uint z = ~((w & 0x78787878u) + 0x78787878u) & 0x80808080u;
@@ -542,6 +543,9 @@ void main() {
     }
     WG_SYNC();
 #ifndef PROF_NOUP
+#ifdef LT_UP8
+#error "LT_UP8 in the TR DEC_UP body measured slower than fp16 - removed; see docs/test-evidence/v015-stage2-up8-mrg8-results.md"
+#else
     UP_UNROLL for (uint tile = s; tile < 4u * NT; tile += NSG) {
         uint pos = tile / NT, nt = tile % NT;
         ACC acc = bias_acc(pc.up_b, pos * ENC_C + nt * 16u);
@@ -552,6 +556,7 @@ void main() {
         }
         coopMatStore(MH(acc), lds, UPU + pos * 16u * ENC_C + nt * 16u, ENC_C, ROW);
     }
+#endif
 #endif
     WG_SYNC();
 #if TR

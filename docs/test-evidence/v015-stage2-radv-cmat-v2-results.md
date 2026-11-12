@@ -19,6 +19,8 @@
 ### I'（`elem_bytes=1` FP8 通道 + 21 核清单）——**0/94 记录变化**
 真工具链下 FP8QV 生产路径**根本不走 `cooperativeMatrixLoad`**：`onr_block_fast.glsl:689` 的 `XIN8` 用普通 u32 装载 + `uintBitsToFloate4m3EXT` 位解包；WSTEP 权重是 ROW-major；唯一命中 guard（COL/length8/mul1/global/stride∈{1,2}）的只有 fp16 负载。`elem_bytes` 通用化是**面向未来着色器的正确性基建**，对现有 94 核为无操作。**结论：`80fd0d7` 报告的 I 档 −2.80%/−1.63% 数据有效**（其 fp16 路径与真 I' 逐位相同）。
 
+> 注记（补）：`elem_bytes == 1` 零变化的准确编译器机理——生产 FP8QV 激活走 `XIN8` 的普通 u32 装载 + `ocp4` 位重编码（`onr_block_fast.glsl:689`），根本不产生 `ptr_stride == 1` 的 coopmat `QA8` 全局装载；即便未来产生，`ptr_stride == 1` 时列偏移乘法退化为无 64-bit `ishl` 的字节加法，且 Mesa 26.3.0 的 `nir_opt_algebraic` 已将此类字节偏移折叠为单 `u32`，新守卫对其无额外代码生成影响。
+
 ### II'（+ `ONR_ACO_SHARED_CMAT=load`）——**爆，判死**
 真生效（3 核 `code_hash` 变化），但全部是灾难：
 
