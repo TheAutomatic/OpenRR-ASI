@@ -83,8 +83,21 @@
 ## 5. 结论与后续路线
 
 1. 本轮净增：IEEE 加固（安全）+ 展开钩子基础设施（未来实验用）+ 2.0B 机制修正（快杠杆证伪、主攻方向改 LDS/地址）。
-2. 深层核追平 LLPC 的下一步（优先序）：
+2. 深层核追平 LLPC 的下一步（原推论，已被下方 §6 勘误修正）：
    a. **cmat-address 有界寻址扩展**：现仅 2 核启用（dec_dfn_96_128_fl_lt、enc_stage_128_128_160_fl_lt，构建时 `--cmat-address-shaders` 列表），扩到全部深层核并按核 A/B（针对 ds_load_b64/v_perm 寄生）；
    b. 2B/2A-2 的 lane↔tile 映射手术（需专门时段，本报告 §3 的三条路径评估可直接复用）；
    c. ACO 上游对比（26.3.0 vs 更新的 ACO 调度器是否已修这些形状）。
 3. 复现命令沿用 `build/v015-runs/stage2/` 脚本（speed/final_speed/stamps_run/single/attr_edge_check/isa_hist）。
+
+## 6. 源码复核勘误与路线修正（Post-Review Errata）
+
+合入 `codex/mesa-263-comparison` 后，对照 Mesa 补丁与 shader 源码逐行复核，修正上文 §2.4 / §3 / §5.2 中的三处机制误判（§1–§4 的实测数据与门禁结论全部维持不变）：
+
+1. **修正 §2 结论 4 / §5.2a（`cmat-address` 适用条件误判）**：
+   `asi/build/mesa/global-address.patch`（`ONR_ACO_CMAT_ADDRESS`）仅匹配 `nir_var_mem_global` + **`GL_CooperativeMatrixLayoutColumnMajor`** + FP16，完全不触碰 LDS（`ds_load_b64`）或 `ROW_MAJOR`。而 `TR=1` 深层核（`dec_dfn_128` 等，`gpu/shaders/include/onr_block_fast.glsl` `WSTEP`/`W8STEP`）权重采用 **`ROW_MAJOR`**，因此单纯把深层核加入 `--cmat-address-shaders` 对 `dec_dfn_128` 几乎无效。真正需要排查的是 RADV `radv_nir_lower_cooperative_matrix.c` 对 `ROW_MAJOR` global load 与 `shared` LDS `coopMatLoad` 的向量化/标量化路径。
+2. **补齐 §2（`C=128` 顽固顶满 `256 VGPR` → 5 waves 占用率的源码根因）**：
+   `gpu/shaders/include/onr_block_fast.glsl`（约 L696–L731）在进入 `for (uint hd = 0u; hd < NH; ++hd)` 注意力循环**之前**就声明并驻留了 `ACC c0..c7`（8 个 `float32` coopmat 累加器 = **64 VGPR**）+ `MH x0..x7`（32 VGPR）+ `QB8 y0..y7`（16 VGPR）= **112 VGPR 保底常驻**，叠加循环内 `s_`/`v_` 必然顶穿 256 VGPR 上限。下一步应参考 `gpu/shaders/include/onr_block_w2.glsl` 的 `W2_DEFER=1` 思路，将 `TR=1` 的 `out` 投影累加器 `c0..c7` 推迟到 `hd` 循环之后（注意力阶段仅把 `y_h` 暂存回空闲 LDS 后再分段/统一累加 `out`），直接释放注意力热点期的 64 VGPR。
+3. **修正 §3（`2B ENC_MERGE` 与 `2A-2 C≥96 DEC_UP` 的伪“LDS 翻倍 + sm_86 编码”阻断）**：
+   - **零字节 LDS 膨胀**：`gpu/shaders/include/onr_block.glsl`（L386–L399）启用了 `GL_EXT_shared_memory_block`，所有无实例名 `shared Block { ... }` 均在偏移 `0` 共址重叠（总 LDS 取 `max` 而非求和）；新增 `shared LdsE { floate4m3_t lds8[2u * LDS_A]; };` 恰好是 `2 * LDS_A` 字节，与 `lds2` 等长，**LDS 增量为 0 字节**。
+   - **权重已是标准 OCP E4M3**：`gpu/src/engine.cpp` 的 `qv_bytes()` 上传到 `b.mrg_w` 尾部的本就是标准 **OCP E4M3**（仅运行期 arena 动态激活 `e4m3x4` 是 `sm_86` 编码，已由 `OCP4()` 精确转码）。因此无需逆向 arena `lane↔tile` 寄存器映射：只需把转码后的 8 个 OCP E4M3 激活打包写入 `lds2`，再经 `coopMatLoad(a8_, lds8, ..., gl_CooperativeMatrixLayoutRowMajor)` 装填 A-tile，即可同时打通 **`2B`（`ENC_MERGE` FP8 WMMA）** 与 **`2A-2`（`C≥96 DEC_UP` FP8 WMMA）**。
+
