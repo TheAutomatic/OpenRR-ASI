@@ -300,10 +300,10 @@ void Engine::upload_stage(const StageWeights& s, StageBufs& b) {
     else if (s.Co) U8(b.mrg_w, s.mrg_w);
     else U(b.mrg_w, s.mrg_w);
     U(b.mrg_b, s.mrg_b);
-    // All stages keep the e4m3 codes after the fp16 values: besides the fast kernels' LT_UP8 reads at C <= 64,
-    // the tail measurably keeps every deep dec_up B-tile read inside the packed blob on the units weight layout
-    // (with the fp16-only buffer the units engine item trips a device removal; the prefix bits are identical, so
-    // the regular kernels are unaffected either way) and Stage 3's native-FP8 plan reads the tail directly.
+    // Every stage keeps the exact e4m3 codes of up_w after its fp16 values: Stage 3's native-FP8 products read
+    // the tail directly, and with the fp16-only buffer a deep dec_up B-tile read walks past the packed wb blob's
+    // end on the units weight layout (test_asi_units tripped a device removal; the bench layout happened not to).
+    // The fp16 prefix is byte-identical, so the regular kernels are unaffected either way.
     if (!s.up_w.empty()) U8(b.up_w, s.up_w);
     U(b.up_b, s.up_b);
 }

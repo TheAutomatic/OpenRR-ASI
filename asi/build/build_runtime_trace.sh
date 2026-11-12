@@ -6,7 +6,7 @@ base=${OPENRR_TRACE_BASE:-build/asi}
 out=${OPENRR_TRACE_OUT:-build/aco-runtime-trace}
 mkdir -p "$out"
 cxx=x86_64-w64-mingw32-g++
-flags=(-std=c++20 -mf16c -O2 -fno-strict-aliasing -DNDEBUG -DONR_RR_STATIC -DONR_RR_BUILDING
+flags=(-std=c++20 -mf16c -O2 -fno-strict-aliasing -DNDEBUG -DONR_RR_STATIC -DONR_RR_BUILDING -DOPENRR_EXPERIMENTAL_OPTIFG_HOST
   -Iasi/third_party/vulkan/include -Igpu/include -Igpu/src -Iruntime/include -Iruntime/src
   -Iasi/src -Iasi/third_party/minhook/include -I"$base")
 # A D3dDevice member was added, so rebuild every object which instantiates it.
@@ -33,8 +33,13 @@ if [[ -f "$rr_inc/rr_ref_scenes.hpp" ]]; then
     -ld3d12 -ldxgi -lole32 -lshell32 -static -static-libgcc -static-libstdc++ -o "$out/openrr_contrast_eval.exe"
   echo "built $out/openrr_contrast_eval.exe"
 fi
-"$cxx" "${flags[@]}" asi/tests/test_asi_units.cpp \
-  "$base/rr_pe_config.o" "$base/rr_pe_d3d12split.o" "$base/rr_pe_vkdevice.o" "$base/rr_pe_log.o" "$base/rr_pe_crash.o" \
-  "$out/rt_runtime.o" "$base/rt_vk_host.o" "$out"/gpu_*.o "$base/vulkan_lazy_s.o" "$base/vulkan_lazy_c.o" \
-  "$base"/mh_*.o -ld3d12 -ld3d11 -ldxgi -lole32 -lbcrypt -lversion -static -static-libgcc -static-libstdc++ \
-  -o "$out/test_aco_units.exe"
+# The speed gates load the runtime from build/aco-v015; keep it in lockstep with this build.
+if [[ "${OPENRR_TRACE_BASE:-build/asi}" == "build/asi-015-aco" ]]; then
+  mkdir -p build/aco-v015
+  cp -f "$out/openrr-trace.asi" build/aco-v015/openrr-trace.asi
+  cp -f "$out/openrr_bench.exe" build/aco-v015/openrr_bench.exe
+  cp -f "$out/openrr_contrast_eval.exe" build/aco-v015/openrr_contrast_eval.exe 2>/dev/null || true
+  # The units gate is build_asi.sh's own test_asi_units.exe (same sources, native
+  # stage/occ_* tree resolution); a trace-side copy is redundant and was removed.
+  echo "synced build/aco-v015 runtime"
+fi
