@@ -56,3 +56,24 @@ python -c "import json; m=json.load(open('build/asi-015-aco/stage/openrr-amd/aco
 # 诊断变体：glslang -DENC_F32=1 [-DFLOW=1 -DFLOW_SLOT=7 -DFLOW_WAIT=1] -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -DPROF_NOGW … + build_aco_records.py
 # 速度/数值门禁：build/v015-runs/stage2/speed.ps1 / openrr_bench parity 轮（正文 §2-3 口径）
 ```
+
+## 7. 勘误（`f02597d` 后交叉核验）——256 VGPR 纹丝不动的真正根因是 WGP LDS 物理上限
+
+§5.1 的"ACO occupancy 旋钮"路线**无效**，特此勘误。RDNA4 每 WGP 共享 **128 KiB（131,072 B）LDS**（4×SIMD32），workgroup 级占用率上限为：
+
+```
+waves/SIMD = floor(131072 / shared_bytes) × (workgroup_size / 32) / 4
+```
+
+（manifest 交叉核验，`_fl_lt` 变体）：
+
+| 内核 | wg | LDS(B) | **LDS 物理上限** | VGPR 档 | 实际 |
+|---|---:|---:|---:|---:|---:|
+| dec_up_128_128_160 | 128 | 32768 | **4 waves** | 256（5w） | 4 |
+| dec_dfn_128_128 | 128 | 26112 | **5 waves** | 256（5w） | 5 |
+| enc_stage_96_128_128 | 128 | 19456 | **6 waves** | 240（6w） | 6 |
+| enc_stage_128_128_160 | 128 | 21504 | **6 waves** | 240（6w） | 6 |
+| dec_dfn_96_128 | 64 | 9728 | **6 waves** | 256（5w） | 5（VGPR 卡） |
+| 160 家族 | 256 | 30208 | **8 waves** | 192（8w） | 8 |
+
+ACO 先按 LDS 上限钳制 `num_waves`，再把 `max_reg_demand` 放宽到该档最大 VGPR（5w→256）——**寄存器没有降到台阶以下的动力，因为占用率已被 LDS 封顶**。除非同时削 LDS（改 tile 布局，动数值语义），VGPR 手术不可能改变这些核的占用率。160 家族已满 8 waves 仍慢 1.4–1.6×，进一步证实差距主体是**访存指令 mix**而非占用率。重心正式转向 RADV coopmat 访存降低（见 `v015-stage2-radv-cmat-results.md`）。
