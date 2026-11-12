@@ -99,6 +99,8 @@ def main():
     ap.add_argument('--capture-dir', type=Path, help='Build-only capture diagnostics (outside the package stage)')
     ap.add_argument('--cmat-address-shaders', nargs='*', default=[],
                     help='Exact shader stems using bounded cmat lane offsets; all others stay off')
+    ap.add_argument('--shared-cmat', choices=('off', 'load', 'loadstore'), default='off',
+                    help='Vectorize same-lane contiguous shared-memory coopmat runs: loads only (load) or loads+stores (loadstore)')
     ns = ap.parse_args()
     cfg = json.loads(ns.toolchain.read_text())
     root = ns.out / 'gfx1201' / LAYOUT
@@ -126,6 +128,8 @@ def main():
     records = {}
     failures = []
     policy = dict(precision=ns.precision, matrix_loads=ns.matrix_loads, address_adaptation='assembler-dual-sentinel-v1')
+    if ns.shared_cmat != 'off':
+        policy['shared_cmat'] = ns.shared_cmat
     if ns.cmat_address_shaders:
         policy['cmat_address_shaders'] = sorted(set(ns.cmat_address_shaders))
     fingerprint = hashlib.sha256(ns.capture.read_bytes() + ns.toolchain.read_bytes() + Path(__file__).read_bytes() + json.dumps(policy,sort_keys=True).encode()).hexdigest()
@@ -149,6 +153,7 @@ def main():
             if spv.stem in ns.cmat_address_shaders:
                 env['ONR_ACO_CMAT_ADDRESS'] = '1'
             if ns.matrix_loads == 'vector8': env['ONR_ACO_VECTOR_LOADS'] = '1'
+            if ns.shared_cmat != 'off': env['ONR_ACO_SHARED_CMAT'] = ns.shared_cmat
             captures=[]
             for suffix,sentinel in (('a', '0x13579bdf'), ('b', '0x2468ace1')):
                 pair_prefix=raw/(key+'-'+suffix)

@@ -152,9 +152,9 @@ if [[ "${OPENRR_BUILD_ACO:-1}" == "1" ]]; then
         --toolchain "$tools/toolchain.json" --capture "$tools/aco_capture" \
         --out "$stage/openrr-amd/aco" \
         --capture-dir "$out/aco-capture" \
-        --precision "${OPENRR_ACO_PRECISION:-global}" --matrix-loads "${OPENRR_ACO_MATRIX_LOADS:-vector8}" \
+        --precision "${OPENRR_ACO_PRECISION:-global}" --matrix-loads "${OPENRR_ACO_MATRIX_LOADS:-vector8}" --shared-cmat "${OPENRR_ACO_SHARED_CMAT:-off}" \
         "$stage/openrr-amd/shaders" "$out/occ_nopad" "$out/occ_pad16k" "$out"/b2_* \
-        --cmat-address-shaders dec_dfn_96_128_fl_lt enc_stage_128_128_160_fl_lt
+        --cmat-address-shaders enc0_stage_32_64_f_lt enc0_stage_32_64_f_w_lt dec_head_32_64_f_lt dec_up_32_64_64_f_lt dec_dfn_64_64_f_lt enc_stage_64_64_96_f_lt enc_stage_96_128_128_f_lt enc_stage_96_128_128_fl_lt dec_up_96_128_128_f_lt dec_up_96_128_128_fl_lt dec_dfn_96_128_f_lt dec_dfn_96_128_fl_lt enc_stage_128_128_160_fl_lt enc_stage_160_256_160_f_lt enc_stage_160_256_160_fl_lt enc_stage_160_256_0_f_lt enc_stage_160_256_0_fl_lt dec_up_160_256_160_f_lt dec_up_160_256_160_fl_lt dec_dfn_160_256_f_lt dec_dfn_160_256_fl_lt
 fi
 echo "Built $stage/plugins/openrr-amd.asi ($(stat -c %s "$stage/plugins/openrr-amd.asi") bytes, $count Vulkan entry points resolved lazily)"
 echo "Exports: $("$objdump" -p "$stage/plugins/openrr-amd.asi" | grep -c 'InitializeASI')  Imports: $("$objdump" -p "$stage/plugins/openrr-amd.asi" | grep 'DLL Name' | awk '{print $3}' | tr '\n' ' ')"
