@@ -8,6 +8,13 @@
    - [`rx9070xt-d3d12-validation-2026-11-08.log`](rx9070xt-d3d12-validation-2026-11-08.log)：当前分支最新通过门禁的完整实机测试与 3 轮同进程 A/B 对照报告。
    - [`game-baseline-2026-11-09.md`](game-baseline-2026-11-09.md)：三款实机游戏（《赛博朋克 2077》、《影之刃零 PBZ》、《红色沙漠 Crimson Desert》）初始基线运行报告、显存占用与帧耗时表格（原始游戏日志本地归档于 `game-logs/2026-11-09-initial-baseline/`，通过 `.gitignore` 忽略不入库）。
 
+1b. **v0.1.5 测试证据与勘误总索引（2026-11-12 更新，按时间顺序）**：
+   - [`v015-anchor2-rtx5090-v1-results.md`](v015-anchor2-rtx5090-v1-results.md) / [`v015-anchor2-rtx5090-v2-results.md`](v015-anchor2-rtx5090-v2-results.md)：锚点 #2 OpenRR vs RTX 5090 `nvngx_dlssd.dll 310.9.1.0` 首轮对账（v1 全量 + v2_motion 全 21 用例）。**⚠ 数值已被相位对齐勘误整体更新**（蓝噪声 `frame_%8` 与窗口 `frame_&1` 错拍系统性压低 PSNR 0.5~2.0 dB），真值见 `anchor2-phase-aligned/`。
+   - [`anchor2-phase-aligned/`](anchor2-phase-aligned/)：**当前画质真值**。相位对齐后的 v1/v2 全量 per-frame CSV 与哈希门禁（legacy / fast-llpc / fast-aco 三档）。对齐后 fast-llpc 与 fast-aco 收敛至 ≤0.02 dB。
+   - [`v015-stage2-vgpr-xin8-results.md`](v015-stage2-vgpr-xin8-results.md) / [`v015-stage2-day-results.md`](v015-stage2-day-results.md) / [`v015-stage2-overnight-results.md`](v015-stage2-overnight-results.md)：Stage 2 VGPR/XIN8 占用率攻坚系列，结论收敛于 256-VGPR 钉死的物理根因（128 KiB/WGP LDS 上限，`floor(131072/lds)×(wg/32)/4`），occupancy 旋钮路线作废。
+   - [`v015-stage2-radv-cmat-results.md`](v015-stage2-radv-cmat-results.md)：Stage 2 首轮（`80fd0d7`）。**⚠ 勘误**：Mesa 补丁被 `build_capture_263.sh` 旧守卫静默跳过，II/III 档为空跑（I 档 fp16 路径数据有效）。
+   - [`v015-stage2-radv-cmat-v2-results.md`](v015-stage2-radv-cmat-v2-results.md)：**当前性能真值**。漏编修复（工具链 `radv_sha256 17cc90d8…`）+ 128 家族 `MLP_SLICE_LOOP [[dont_unroll]]` + Fast/Legacy 双模式 50 核 cmat-address 扩面。Fast 差距 +11.61→**+3.92%** @4K，Legacy ~+10→**+4.10%** @4K；shared 向量化（II'/III'）因 96 家族 +13KB 爆炸判死；相位对齐后 5090 画质全线上调 0.5~2.0 dB。
+
 2. **`history/`（按演进顺序列出的独立历史快照，只增不改）**：
    - [`history/01-330f0b8-init-validation-suite.log`](history/01-330f0b8-init-validation-suite.log)：初始 D3D12 Direct / Split / 127 槽位 / Vulkan 桥接验证套件。
    - [`history/02-c8db22b-direct-release-and-matrix.log`](history/02-c8db22b-direct-release-and-matrix.log)：Direct Release 钩子与状态恢复验证。

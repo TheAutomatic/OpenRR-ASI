@@ -8,4 +8,11 @@
 #define ENC_K8 1
 #define DEC_UP 1
 #define ENC_CP 160
+// Keep the MLP slice loop rolled for every ENC_F32 build (_f/_fl/_f_lt/_fl_lt).
+// The bounded cmat address lowering and shared-run vectorization otherwise
+// cross Mesa's full-unroll cost limit (+55% code on these deep kernels);
+// the faithful path (ENC_F32 == 0) is untouched.
+#if defined(ENC_F32) && ENC_F32
+#define MLP_SLICE_LOOP [[dont_unroll]]
+#endif
 #include "onr_block.glsl"

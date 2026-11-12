@@ -111,19 +111,29 @@
     return VK_SUCCESS;
 --- a/src/amd/vulkan/nir/radv_nir_lower_cooperative_matrix.c
 +++ b/src/amd/vulkan/nir/radv_nir_lower_cooperative_matrix.c
-@@ -411,7 +411,25 @@
+@@ -410,8 +410,46 @@
+                                                           radv_nir_cmat_bits(desc) / 8, align_mul, align_offset);
        }
  
++      /* OpenRR: same-lane run vectorization for cooperative-matrix fragments. In a
++       * column-major fragment with mul == 1 the count elements a lane owns are strictly
++       * contiguous in memory, global or shared alike; Mesa touches them one element at a
++       * time. ONR_ACO_VECTOR_LOADS covers global loads; ONR_ACO_SHARED_CMAT extends the
++       * same transformation to shared-memory loads ("load") and stores ("loadstore").
++       * The cast keeps Mesa's own alignment annotations verbatim - never claims more
++       * alignment than the per-element path, never crosses lanes, never changes layout.
++       */
++      const char *onr_shared_cmat = getenv("ONR_ACO_SHARED_CMAT");
++      unsigned count = params->gfx_level >= GFX11_7 &&
++                       layout == GLSL_MATRIX_LAYOUT_COLUMN_MAJOR && mul == 1 &&
++                       ((getenv("ONR_ACO_VECTOR_LOADS") && is_load &&
++                         nir_deref_mode_is(deref, nir_var_mem_global)) ||
++                        (onr_shared_cmat &&
++                         (is_load || strstr(onr_shared_cmat, "loadstore")) &&
++                         nir_deref_mode_is(deref, nir_var_mem_shared))) ?
++                       MIN2(8, length - i) : 1;
        if (is_load) {
 -         vars[i * mul] = nir_load_deref(b, iter_deref);
-+         /* Consecutive elements of a column-major fragment are contiguous.
-+          * Load them together before explicit-IO lowering obscures the shared
-+          * address expression. Keep the existing per-element alignment bound.
-+          */
-+         unsigned count = getenv("ONR_ACO_VECTOR_LOADS") && params->gfx_level >= GFX11_7 &&
-+                          layout == GLSL_MATRIX_LAYOUT_COLUMN_MAJOR && mul == 1 &&
-+                          nir_deref_mode_is(deref, nir_var_mem_global) ?
-+                          MIN2(8, length - i) : 1;
 +         if (count > 1) {
 +            const struct glsl_type *vec_type = glsl_vector_type(desc.element_type, count);
 +            nir_deref_instr *vec = nir_build_deref_cast_with_alignment(
@@ -135,6 +145,17 @@
 +         } else {
 +            vars[i * mul] = nir_load_deref(b, iter_deref);
 +         }
++      } else if (count > 1 && onr_shared_cmat &&
++                 strstr(onr_shared_cmat, "loadstore") &&
++                 nir_deref_mode_is(deref, nir_var_mem_shared)) {
++         /* Store path: pack the run and store it once with the same real alignment. */
++         const struct glsl_type *vec_type = glsl_vector_type(desc.element_type, count);
++         nir_deref_instr *vec = nir_build_deref_cast_with_alignment(
++            b, &iter_deref->def, iter_deref->modes, vec_type,
++            radv_nir_cmat_bits(desc) / 8, align_mul, row_iter * radv_nir_cmat_bits(desc) / 8 % align_mul);
++         nir_def *packed = nir_vec(b, &vars[i * mul], count);
++         nir_store_deref(b, vec, packed, BITFIELD_MASK(count));
++         i += count - 1;
        } else {
           nir_store_deref(b, iter_deref, vars[i * mul], 1);
        }

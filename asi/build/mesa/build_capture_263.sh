@@ -24,14 +24,23 @@ pinned_commit=0a6fa60abb737d26ac8a316a4aad7c9ddf64f9e4
 [[ -d $source ]] || { echo "missing Mesa 26.3.0 source at $source" >&2; exit 1; }
 [[ -f $tarball ]] || { echo "missing Mesa 26.3.0 tarball at $tarball" >&2; exit 1; }
 
-# Capture patch: apply once; refuse silently inconsistent state.
-if ! grep -q onr_capture "$source/src/amd/vulkan/radv_shader.c"; then
-    python3 asi/build/mesa/prepare_capture.py "$source"
-fi
-# Bounded cmat address experiment: apply once, regenerate global-address.patch.
-if ! grep -q ONR_ACO_CMAT_ADDRESS "$source/src/amd/vulkan/nir/radv_nir_lower_cooperative_matrix.c"; then
-    python3 asi/build/mesa/prepare_global_address.py "$source"
-fi
+# Patched files are always restored pristine from the tarball, then both patch
+# scripts re-run. Guard-by-marker "apply once" logic silently skipped the
+# scripts when the source already carried older markers (80fd0d7 bug: markers
+# existed, elem_bytes / ONR_ACO_SHARED_CMAT never landed).
+patched=(src/amd/vulkan/radv_shader.c
+         src/amd/vulkan/radv_descriptor_set.c
+         src/amd/vulkan/nir/radv_nir_lower_cooperative_matrix.c
+         src/amd/compiler/aco_assembler.cpp
+         src/amd/vulkan/radv_device.c)
+for f in "${patched[@]}"; do
+    tar -xJf "$tarball" -C "$source" --strip-components=1 "mesa-26.3.0/$f"
+done
+python3 asi/build/mesa/prepare_capture.py "$source"
+python3 asi/build/mesa/prepare_global_address.py "$source"
+cmat_src=$source/src/amd/vulkan/nir/radv_nir_lower_cooperative_matrix.c
+grep -q ONR_ACO_SHARED_CMAT "$cmat_src" || { echo "FATAL: ONR_ACO_SHARED_CMAT missing after patching" >&2; exit 1; }
+grep -q elem_bytes "$cmat_src" || { echo "FATAL: elem_bytes missing after patching" >&2; exit 1; }
 
 # drirc: suppress the compute-queue custom-border-color state SGPR.
 drirc_dir=$repo/build/mesa-comparison/mesa-263-drirc/drirc

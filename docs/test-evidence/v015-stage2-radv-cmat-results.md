@@ -1,4 +1,5 @@
-# Stage 2 RADV coopmat 访存降低：cmat-address 全核扩面 + shared 向量化三档（档位 I 胜出）
+> **⚠ 勘误（2026-11-12）**：本报告的 Mesa 补丁因 `build_capture_263.sh` 的"标记存在即跳过"守卫被静默跳过——本文三档实际运行在不含 `ONR_ACO_SHARED_CMAT`/`elem_bytes` 的旧 `libvulkan_radeon.so` 上（II/III 是纯空跑，I 档因 fp16 路径未变而数据有效）。工具链哈希与全部修正数据见 **[`v015-stage2-radv-cmat-v2-results.md`](v015-stage2-radv-cmat-v2-results.md)**。
+
 
 分支 `codex/mesa-263-comparison`（`ebda333` §7 勘误之上）。被测 = 档位 I 产物（cmat-address 扩至 21 核，shared-cmat 关闭）。
 

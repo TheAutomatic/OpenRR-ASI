@@ -776,6 +776,27 @@ int RunMain(const Args& args)
             }
             Require(ready, "runtime did not reach READY (+fast built) for " + c.id);
 
+            // Phase alignment: Engine::frame_ drives the 8-slice blue-noise dither
+            // LUT (frame_ % 8, enc0_embed) and the Swin window shift parity
+            // (frame_ & 1, {2,6} vs {6,2}); ONR_RR_FRAME_RESET does not reset it.
+            // The RTX 5090 references start at frame_ == 0, so keep submitting
+            // priming frames until the engine's frame count is 0 mod 8 (which
+            // also pins frame_ & 1 == 0) before the case's own f000 begins.
+            {
+                const ULONGLONG phaseDeadline = GetTickCount64() + 120000;
+                OnrRrInfo info {};
+                info.size = sizeof(info);
+                for (;;)
+                {
+                    Require(api.v3.v2.v1.GetInfo(ctx, &info) == ONR_RR_OK, "GetInfo");
+                    if ((info.frames % 8u) == 0u) break;
+                    Require(GetTickCount64() < phaseDeadline,
+                            "phase alignment (frame % 8 == 0) timed out for " + c.id);
+                    submitFrame(priming);
+                    Sleep(10);
+                }
+            }
+
             const bool staticScene = c.scene == rr_ref::SceneId::S0_BenchParity;
             const uint32_t totalFrames = c.steady_frames + c.drs_frames;
             for (uint32_t f = 0; f < totalFrames; ++f)
