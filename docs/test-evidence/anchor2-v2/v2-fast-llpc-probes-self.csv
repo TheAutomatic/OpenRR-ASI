@@ -1,0 +1,15 @@
+case_id,f015_vs_p00_psnr01_db,f015_vs_p00_rgb_rmse,f015_vs_p00_max_ulp,f015_vs_p00_diff_halfs,pair_ref_id,f015_vs_pair_psnr01_db,f015_vs_pair_rgb_rmse,f015_vs_pair_diff_halfs
+P01_guide_disocc,56.8851,0.00347699,529,3920417,,,,
+P02_guide_transp_rgba,28.6811,0.0618666,1781,589353,,,,
+P03_guide_transp_tlmv,28.4894,0.0627447,1838,588360,P02_guide_transp_rgba,43.4738,0.0102474,586340
+P04a_guide_sss_only,50.0673,0.00578103,1055,4173979,,,,
+P04b_guide_cbt_only,50.2811,0.00717443,675,4787855,,,,
+P05_guide_spec_mvec,49.8622,0.00989837,773,5101027,,,,
+P09_no_hit_with_spec_mv,49.8622,0.00989837,773,5101027,P05_guide_spec_mvec,999,0,0
+P10_no_hit_plain,41.7988,0.018695,760,5533636,,,,
+P14_input_subrect_base_32_24,999,0,0,0,,,,
+P15_mv_scale_neg0p5,999,0,0,0,,,,
+P16a_mv_jittered_raw,999,0,0,0,,,,
+P16b_mv_jittered_prev_minus_curr,32.9528,0.0434474,2380,5598870,P16a_mv_jittered_raw,32.9528,0.0434474,5598870
+P16c_mv_jittered_curr_minus_prev,32.2582,0.0472461,1885,5600597,P16a_mv_jittered_raw,32.2582,0.0472461,5600597
+P17_roughness_unpacked_r16f,999,0,0,0,,,,

@@ -414,6 +414,7 @@ struct FrameMetrics
     double psnr01_db = 999.0;
     double psnr_reinhard_db = 999.0;
     double max_abs = 0.0, mean_abs = 0.0;
+    double rgb_rmse = 0.0;   // unclipped linear HDR RMSE (5090-report compatible)
     double exact_half_pct = 100.0;
     size_t non_finite = 0;
 };
@@ -426,7 +427,7 @@ static FrameMetrics CompareRgba16f(const std::vector<uint16_t>& ref, const std::
         m.psnr01_db = m.psnr_reinhard_db = -1.0;
         return m;
     }
-    double se01 = 0.0, seR = 0.0, sumAbs = 0.0;
+    double se01 = 0.0, seR = 0.0, seLinear = 0.0, sumAbs = 0.0;
     size_t rgb_n = 0;
     for (size_t i = 0; i < cur.size(); ++i)
     {
@@ -445,6 +446,7 @@ static FrameMetrics CompareRgba16f(const std::vector<uint16_t>& ref, const std::
             const double ra = da / (1.0 + std::abs(da)), rb = db / (1.0 + std::abs(db));
             seR += (ra - rb) * (ra - rb);
             const double ad = std::abs(da - db);
+            seLinear += ad * ad;
             m.max_abs = std::max(m.max_abs, ad);
             sumAbs += ad;
             ++rgb_n;
@@ -455,6 +457,7 @@ static FrameMetrics CompareRgba16f(const std::vector<uint16_t>& ref, const std::
         if (se01 > 0.0) m.psnr01_db = 10.0 * std::log10(1.0 / (se01 / double(rgb_n)));
         if (seR > 0.0) m.psnr_reinhard_db = 10.0 * std::log10(1.0 / (seR / double(rgb_n)));
         m.mean_abs = sumAbs / double(rgb_n);
+        m.rgb_rmse = std::sqrt(seLinear / double(rgb_n));
     }
     m.exact_half_pct = 100.0 * double(cur.size() - m.diff_halfs) / double(cur.size());
     return m;
@@ -540,7 +543,7 @@ int RunMain(const Args& args)
 
     fs::create_directories(args.outDir);
     std::ofstream csv(args.outDir / "per_frame.csv", std::ios::binary);
-    csv << "case_id,frame,phase,rw,rh,reset,hash_gate,ref_file,psnr01_db,psnr_reinhard_db,max_abs,mean_abs,max_ulp,exact_half_pct,non_finite,diff_halfs\n";
+    csv << "case_id,frame,phase,rw,rh,reset,hash_gate,ref_file,psnr01_db,psnr_reinhard_db,rgb_rmse,max_abs,mean_abs,max_ulp,exact_half_pct,non_finite,diff_halfs\n";
     std::ofstream gatesCsv(args.outDir / "hash_gates.csv", std::ios::binary);
     gatesCsv << "case_id,key,expected,computed,pass\n";
     std::ostringstream summary;
@@ -815,7 +818,7 @@ int RunMain(const Args& args)
                     const char* phase = f < c.steady_frames ? "steady" : "drs";
                     csv << c.id << ',' << f << ',' << phase << ',' << rw << ',' << rh << ',' << reset << ','
                         << (haveRef ? "ref" : "self") << ',' << (haveRef ? refFile.filename().string() : "") << ','
-                        << m.psnr01_db << ',' << m.psnr_reinhard_db << ',' << m.max_abs << ',' << m.mean_abs << ','
+                        << m.psnr01_db << ',' << m.psnr_reinhard_db << ',' << m.rgb_rmse << ',' << m.max_abs << ',' << m.mean_abs << ','
                         << m.max_ulp << ',' << m.exact_half_pct << ',' << m.non_finite << ',' << m.diff_halfs << '\n';
                     if (c.pass == "probes" && f == 15)
                     {
@@ -846,8 +849,8 @@ int RunMain(const Args& args)
                 << "      \"status\": \"" << status << "\",\n";
         if (!frameMetrics.empty())
         {
-            double worst = 999.0;
-            for (auto& [f, m] : frameMetrics) worst = std::min(worst, m.psnr01_db);
+            double worst = 999.0, worstRmse = 0.0;
+            for (auto& [f, m] : frameMetrics) { worst = std::min(worst, m.psnr01_db); worstRmse = std::max(worstRmse, m.rgb_rmse); }
             auto at = [&](uint32_t f) { auto it = frameMetrics.find(f); return it == frameMetrics.end() ? -1.0 : it->second.psnr01_db; };
             summary << "      \"min_psnr01_db\": " << worst << ",\n"
                     << "      \"f000_psnr01_db\": " << at(0) << ",\n"
@@ -856,6 +859,7 @@ int RunMain(const Args& args)
                     << "      \"drs_f075_psnr01_db\": " << at(75) << ",\n"
                     << "      \"f015_vs_5090_psnr01_db\": " << f015Vs5090.psnr01_db << ",\n"
                     << "      \"f015_vs_5090_max_ulp\": " << f015Vs5090.max_ulp << ",\n"
+                    << "      \"f015_vs_5090_rgb_rmse\": " << f015Vs5090.rgb_rmse << ",\n"
                     << "      \"f015_vs_5090_diff_halfs\": " << f015Vs5090.diff_halfs << ",\n";
         }
         summary << "      \"hash_gates\": " << c.expected_input_sha256.size() << "\n    }";
@@ -877,20 +881,20 @@ int RunMain(const Args& args)
         };
         const auto& p00 = probeF015Px["P00_baseline_s1_g0"];
         std::ofstream pcsv(args.outDir / "probes_self.csv", std::ios::binary);
-        pcsv << "case_id,f015_vs_p00_psnr01_db,f015_vs_p00_max_ulp,f015_vs_p00_diff_halfs"
-             << ",pair_ref_id,f015_vs_pair_psnr01_db,f015_vs_pair_diff_halfs\n";
+        pcsv << "case_id,f015_vs_p00_psnr01_db,f015_vs_p00_rgb_rmse,f015_vs_p00_max_ulp,f015_vs_p00_diff_halfs"
+             << ",pair_ref_id,f015_vs_pair_psnr01_db,f015_vs_pair_rgb_rmse,f015_vs_pair_diff_halfs\n";
         for (const auto& [id, px] : probeF015Px)
         {
             if (id == "P00_baseline_s1_g0" || px.empty()) continue;   // skipped cases keep no row
             FrameMetrics m = CompareRgba16f(p00, px);
-            pcsv << id << ',' << m.psnr01_db << ',' << m.max_ulp << ',' << m.diff_halfs;
+            pcsv << id << ',' << m.psnr01_db << ',' << m.rgb_rmse << ',' << m.max_ulp << ',' << m.diff_halfs;
             const std::string pair = pairOf(id);
             if (!pair.empty() && probeF015Px.count(pair) && !probeF015Px[pair].empty())
             {
                 FrameMetrics mp = CompareRgba16f(probeF015Px[pair], px);
-                pcsv << ',' << pair << ',' << mp.psnr01_db << ',' << mp.diff_halfs;
+                pcsv << ',' << pair << ',' << mp.psnr01_db << ',' << mp.rgb_rmse << ',' << mp.diff_halfs;
             }
-            else pcsv << ",,,";   // fixed column count
+            else pcsv << ",,,,";   // fixed column count
             pcsv << '\n';
         }
     }
