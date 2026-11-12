@@ -261,6 +261,28 @@ static H16 vo_values(const H16& in_b, const H16& out, int C, int X) {
     return m;
 }
 
+// fp16 bits -> OCP e4m3 code, round-to-nearest-even with satfinite semantics: |x| >= 448 (and inf/NaN)
+// maps to the largest finite code +-448. The NaN codes 0x7f/0xff are never emitted.
+inline uint8_t e4m3_rne(uint16_t h) {
+    _Float16 v;
+    std::memcpy(&v, &h, sizeof v);
+    const float x = float(v);
+    const uint32_t s = uint32_t(x < 0.0f) << 7;
+    const float a = std::fabs(x);
+    if (std::isnan(a) || a >= 448.0f) return uint8_t(s | 0x7e);
+    const float sc = std::ldexp(a, 9);                  // in units of the e4m3 subnormal step 2^-9
+    if (sc < 8.0f) {                                    // e4m3 subnormal / zero (ties-to-even at .5)
+        const float r = std::nearbyint(sc);
+        return uint8_t(s | (r >= 7.5f ? 8u : uint32_t(r)));
+    }
+    int ex;
+    const float m = std::frexp(a, &ex);                // a = m * 2^ex, m in [0.5, 1)
+    float r = std::nearbyint(m * 16.0f);               // 4-bit significand, [8, 16)
+    int E = ex - 1;
+    if (r >= 16.0f) { r -= 8.0f; E += 1; }              // carry into the exponent
+    const uint32_t code = (uint32_t(E + 7) << 3) | (uint32_t(r) - 8u);
+    return uint8_t(s | (code > 0x7e ? 0x7e : code));
+}
 Buffer Engine::upload_qv(const H16& v, const H16& lr) {
     if (v.empty()) return {};
     auto d = qv_bytes(v.data(), v.size());
@@ -282,9 +304,21 @@ void Engine::upload_stage(const StageWeights& s, StageBufs& b) {
     UQ(b.in_b, s.b.in_b, s.b.C == 32 ? vo_values(s.b.in_b, s.b.out, s.b.C, s.b.X) : H16{});
     U(b.out, with_tiles(s.b.out, s.b.X));
     U(b.out_b, s.b.out_b);
-    U(b.fc1, with_tiles(s.b.fc1, s.b.C));
+    // LT_MLP8: fc1/fc2 get an RNE-saturated e4m3 code copy of the ORIGINAL (untiled) matrix appended after
+    // the fp16 values + tiles, natural [row][K] order - the fast kernels load it straight as 1-byte A tiles
+    // (zero conversions); Legacy reads only the fp16 prefix. The weights sit far inside +-448 and above the
+    // e4m3 subnormal floor, so no per-tensor scaling is applied (a power-of-two scale cannot change the
+    // relative quantization error of a floating-point format anyway).
+    auto UT8 = [&](Buffer& dst, const H16& tiled, const H16& orig) {
+        if (orig.empty()) { dst = {}; return; }
+        std::vector<uint8_t> d(tiled.size() * 2 + orig.size());
+        std::memcpy(d.data(), tiled.data(), tiled.size() * 2);
+        for (size_t i = 0; i < orig.size(); ++i) d[tiled.size() * 2 + i] = e4m3_rne(orig[i]);
+        pack_bytes(dev_, fixed_, d.data(), d.size(), &dst);
+    };
+    UT8(b.fc1, with_tiles(s.b.fc1, s.b.C), s.b.fc1);
     U(b.fc1_b, s.b.fc1_b);
-    U(b.fc2, with_tiles(s.b.fc2, 4 * s.b.C));
+    UT8(b.fc2, with_tiles(s.b.fc2, 4 * s.b.C), s.b.fc2);
     U(b.fc2_b, s.b.fc2_b);
     U(b.bias, s.b.bias);
     U(b.dfn_w, s.dfn_w);

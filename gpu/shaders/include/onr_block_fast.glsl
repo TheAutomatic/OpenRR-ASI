@@ -296,7 +296,7 @@ ACC bias_acc_t(F16Buf b, uint n0) {
 // LT_UP8 (decoder _0, W1 and W2) and LT_MI8 (enc1): the up and the input merge products on e4m3 x e4m3 -> fp32 as well. Their B
 // operands are the e4m3 bytes of the planes they read and their weights are exact e4m3 (Engine::upload_stage keeps the codes
 // after the fp16 values); one rounding to fp16 per output instead of one per 16 K
-#if FP8QV || defined(LT_UP8) || defined(LT_MI8)
+#if FP8QV || defined(LT_UP8) || defined(LT_MI8) || defined(LT_MLP8)
 #extension GL_EXT_float_e4m3 : require
 #define QA8 coopmat<floate4m3_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseA>
 #define QB8 coopmat<floate4m3_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseB>
@@ -322,6 +322,10 @@ uint ocp4(uint w) {
 #define OCP4(w) ocp4(w)
 #endif
 #define W8STEP(acc, addr, off, b) { QA8 a_; coopMatLoad(a_, E4View(addr).v, off, ENC_C, ROW); acc = coopMatMulAdd(a_, b, acc); }
+// LT_MLP8 activation quantizer: an fp16 clamp then the e4m3 constructor (Mochi NR_QUANT mode-1
+// semantics - satfinite via the clamp, no MODE register; NaN would propagate, which no real
+// activation produces). Used only OUTSIDE the product loops, once per reuse scope.
+floate4m3_t qe4(float16_t v) { return floate4m3_t(clamp(v, float16_t(-448.0), float16_t(448.0))); }
 #endif
 
 // GPU fragment position of arena channel a (inverse of arena_channel within a plane)
@@ -932,6 +936,64 @@ void main() {
 #define X1_T(cn, xn, n) RESID_T(cn, xn, ls1)
     FOR_NX(X1_T)
     CUT(4)
+// MLP slice width: 64 hidden neurons where the register budget allows, else 32 (both MLP paths)
+#if MLP64
+#define SLICE 64u
+#else
+#define SLICE 32u
+#endif
+#ifdef LT_MLP8
+    // Native-FP8 MLP (fc1/fc2): the weights' RNE e4m3 codes follow the fp16 values + tiles in the fc1/fc2
+    // buffers in natural [row][K] order (Engine::upload_stage) and load straight as 1-byte A tiles - zero
+    // conversions inside the product loops. Activations quantize ONCE outside their reuse scope with an fp16
+    // clamp (Mochi NR_QUANT mode-1 semantics, no MODE register): the x1 tiles before the slice loop (reused
+    // by every fc1 tile of every slice), each GELU pair once per slice (reused by all NT fc2 tiles). The fp8
+    // WMMA accumulates f32, so the slice accumulators are QC8 and fc2 keeps local QC8 tiles folding back
+    // into the block's fp16 output accumulators once after the loop.
+#define FC1_W8 E4View(uint64_t(pc.fc1) + uint64_t(4u * HID * ENC_C)).v
+#define FC2_W8 E4View(uint64_t(pc.fc2) + uint64_t(4u * HID * ENC_C)).v
+#define XQ8_T(cn, xn, n) QB8 x8##n; { for (int i = 0; i < x8##n.length(); ++i) x8##n[i] = qe4(xn[i]); }
+    FOR_NX(XQ8_T)
+#define MQ8_T(cn, xn, n) QC8 m##n = QC8(bias_acc_t(pc.fc2_b, (n) * 16u));
+    FOR_NX(MQ8_T)
+    MLP_SLICE_LOOP for (uint j = 0u; j < LT_HID; j += SLICE) {
+        QC8 h0 = QC8(bias_acc_t(pc.fc1_b, j)), h1 = QC8(bias_acc_t(pc.fc1_b, j + 16u));
+#if MLP64
+        QC8 h2 = QC8(bias_acc_t(pc.fc1_b, j + 32u)), h3 = QC8(bias_acc_t(pc.fc1_b, j + 48u));
+#define FC1_T(cn, xn, n) { QA8 a8_; \
+            coopMatLoad(a8_, FC1_W8, j * ENC_C + (n) * 16u, ENC_C, ROW); h0 = coopMatMulAdd(a8_, x8##n, h0); \
+            coopMatLoad(a8_, FC1_W8, (j + 16u) * ENC_C + (n) * 16u, ENC_C, ROW); h1 = coopMatMulAdd(a8_, x8##n, h1); \
+            coopMatLoad(a8_, FC1_W8, (j + 32u) * ENC_C + (n) * 16u, ENC_C, ROW); h2 = coopMatMulAdd(a8_, x8##n, h2); \
+            coopMatLoad(a8_, FC1_W8, (j + 48u) * ENC_C + (n) * 16u, ENC_C, ROW); h3 = coopMatMulAdd(a8_, x8##n, h3); }
+#else
+#define FC1_T(cn, xn, n) { QA8 a8_; \
+            coopMatLoad(a8_, FC1_W8, j * ENC_C + (n) * 16u, ENC_C, ROW); h0 = coopMatMulAdd(a8_, x8##n, h0); \
+            coopMatLoad(a8_, FC1_W8, (j + 16u) * ENC_C + (n) * 16u, ENC_C, ROW); h1 = coopMatMulAdd(a8_, x8##n, h1); }
+#endif
+        FOR_NX(FC1_T)
+#define GELU_TT(h, g) MH g = MH(h); for (int i = 0; i < g.length(); i += 2) { f16vec2 q = gelu2(f16vec2(g[i], g[i + 1])); g[i] = q.x, g[i + 1] = q.y; }
+        GELU_TT(h0, g0) GELU_TT(h1, g1)
+        QB8 g80, g81;
+        for (int i = 0; i < g80.length(); ++i) { g80[i] = qe4(g0[i]); g81[i] = qe4(g1[i]); }
+#if MLP64
+        GELU_TT(h2, g2) GELU_TT(h3, g3)
+        QB8 g82, g83;
+        for (int i = 0; i < g82.length(); ++i) { g82[i] = qe4(g2[i]); g83[i] = qe4(g3[i]); }
+#define FC2_T(cn, xn, n) { QA8 a8_; \
+            coopMatLoad(a8_, FC2_W8, (n) * 16u * HID + j, HID, ROW); m##n = coopMatMulAdd(a8_, g80, m##n); \
+            coopMatLoad(a8_, FC2_W8, (n) * 16u * HID + j + 16u, HID, ROW); m##n = coopMatMulAdd(a8_, g81, m##n); \
+            coopMatLoad(a8_, FC2_W8, (n) * 16u * HID + j + 32u, HID, ROW); m##n = coopMatMulAdd(a8_, g82, m##n); \
+            coopMatLoad(a8_, FC2_W8, (n) * 16u * HID + j + 48u, HID, ROW); m##n = coopMatMulAdd(a8_, g83, m##n); }
+#else
+#define FC2_T(cn, xn, n) { QA8 a8_; \
+            coopMatLoad(a8_, FC2_W8, (n) * 16u * HID + j, HID, ROW); m##n = coopMatMulAdd(a8_, g80, m##n); \
+            coopMatLoad(a8_, FC2_W8, (n) * 16u * HID + j + 16u, HID, ROW); m##n = coopMatMulAdd(a8_, g81, m##n); }
+#endif
+        FOR_NX(FC2_T)
+    }
+#define X2M_T(cn, xn, n) cn = MH(m##n);
+    FOR_NX(X2M_T)
+#else  // fp16 MLP
 #define FC2B_T(cn, xn, n) cn = bias_acc_t(pc.fc2_b, (n) * 16u);
     FOR_NX(FC2B_T)
 #if MLP64
@@ -967,6 +1029,7 @@ void main() {
 #endif
         FOR_NX(FC2_T)
     }
+#endif  // LT_MLP8
 #define X2_T(cn, xn, n) RESID_T(cn, xn, ls2)
     FOR_NX(X2_T)
 #endif
