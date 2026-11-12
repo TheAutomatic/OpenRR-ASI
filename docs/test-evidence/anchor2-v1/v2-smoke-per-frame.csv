@@ -1,0 +1,17 @@
+case_id,frame,phase,rw,rh,reset,hash_gate,ref_file,psnr01_db,psnr_reinhard_db,max_abs,mean_abs,max_ulp,exact_half_pct,non_finite,diff_halfs
+P00_baseline_s1_g0,15,steady,1280,720,0,self,,999,999,0,0,0,100,0,0
+P01_guide_disocc,15,steady,1280,720,0,self,,999,999,0,0,0,100,0,0
+P02_guide_transp_rgba,15,steady,1280,720,0,self,,999,999,0,0,0,100,0,0
+P03_guide_transp_tlmv,15,steady,1280,720,0,self,,999,999,0,0,0,100,0,0
+P04a_guide_sss_only,15,steady,1280,720,0,self,,999,999,0,0,0,100,0,0
+P04b_guide_cbt_only,15,steady,1280,720,0,self,,999,999,0,0,0,100,0,0
+P05_guide_spec_mvec,15,steady,1280,720,0,self,,999,999,0,0,0,100,0,0
+P09_no_hit_with_spec_mv,15,steady,1280,720,0,self,,999,999,0,0,0,100,0,0
+P10_no_hit_plain,15,steady,1280,720,0,self,,999,999,0,0,0,100,0,0
+P13a_exposure_no_auto,15,steady,1280,720,0,self,,999,999,0,0,0,100,0,0
+P14_input_subrect_base_32_24,15,steady,1280,720,0,self,,999,999,0,0,0,100,0,0
+P15_mv_scale_neg0p5,15,steady,1280,720,0,self,,999,999,0,0,0,100,0,0
+P16a_mv_jittered_raw,15,steady,1280,720,0,self,,999,999,0,0,0,100,0,0
+P16b_mv_jittered_prev_minus_curr,15,steady,1280,720,0,self,,999,999,0,0,0,100,0,0
+P16c_mv_jittered_curr_minus_prev,15,steady,1280,720,0,self,,999,999,0,0,0,100,0,0
+P17_roughness_unpacked_r16f,15,steady,1280,720,0,self,,999,999,0,0,0,100,0,0

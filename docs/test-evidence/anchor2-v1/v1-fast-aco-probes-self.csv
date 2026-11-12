@@ -1,0 +1,13 @@
+case_id,f015_vs_p00_psnr01_db,f015_vs_p00_max_ulp,f015_vs_p00_diff_halfs,f015_vs_pair_psnr01_db
+P01_guide_disocc,50.85,428,4293121,6.1754
+P02_guide_transp_rgba,6.17526,16870,6220790,999
+P03_guide_transp_tlmv,6.17526,16870,6220790
+P04_guide_sss_cbt,41.6444,753,4524486,6.20323
+P05_guide_spec_mvec,50.824,476,4284221,6.17525
+P06_guide_resp_r16f,50.8597,477,4291019,6.1756
+P07_guide_dof_presetF,29.5903,1865,6101667,6.42433
+P08_guide_dof_presetE,29.5903,1865,6101667,6.42433
+P09_no_hit_with_spec_mv,50.824,476,4284221,6.17525
+P10_no_hit_plain,50.9218,458,4282971,6.17533
+P11_odd_subrect_1281x721,28.6007,3697,5233247,6.17499
+P12_preset_default_hint0,999,0,0,6.17526
