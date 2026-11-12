@@ -877,6 +877,7 @@ int RunMain(const Args& args)
             if (id == "P13b_exposure_tex_1x1") return "P13a_exposure_no_auto";
             if (id == "P16b_mv_jittered_prev_minus_curr" || id == "P16c_mv_jittered_curr_minus_prev")
                 return "P16a_mv_jittered_raw";
+            if (id == "PX_combo_jitter_negscale") return "P16b_mv_jittered_prev_minus_curr";
             return {};
         };
         const auto& p00 = probeF015Px["P00_baseline_s1_g0"];

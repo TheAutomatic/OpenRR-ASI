@@ -711,6 +711,7 @@ EngineFrame engine_frame(const Ctx* c, const Job& j) {
     memcpy(ef.view_to_clip, f.view_to_clip, sizeof ef.view_to_clip);
     ef.depth_sign = sign;
     ef.reset = (f.flags & ONR_RR_FRAME_RESET) != 0;
+    ef.mv_jittered = (f.flags & ONR_RR_FRAME_MV_JITTERED) != 0;
     if (j.in[G_TL].present) ef.transparency = c->guides[G_TL].addr;
     if (j.in[G_DM].present) ef.disocclusion = c->guides[G_DM].addr;
     if (j.in[G_SSS].present) ef.sss = c->guides[G_SSS].addr;

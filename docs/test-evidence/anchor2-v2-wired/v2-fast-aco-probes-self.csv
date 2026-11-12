@@ -1,0 +1,5 @@
+case_id,f015_vs_p00_psnr01_db,f015_vs_p00_rgb_rmse,f015_vs_p00_max_ulp,f015_vs_p00_diff_halfs,pair_ref_id,f015_vs_pair_psnr01_db,f015_vs_pair_rgb_rmse,f015_vs_pair_diff_halfs
+P15_mv_scale_neg0p5,999,0,0,0,,,,
+P16a_mv_jittered_raw,32.2577,0.0472474,2089,5599381,,,,
+P16b_mv_jittered_prev_minus_curr,56.8498,0.00347264,516,3941754,P16a_mv_jittered_raw,32.257,0.0472563,5600893
+P16c_mv_jittered_curr_minus_prev,31.3415,0.0547462,2453,5940578,P16a_mv_jittered_raw,36.5454,0.029825,5840560

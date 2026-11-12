@@ -1502,6 +1502,47 @@ static int test_d3d12_gpu_and_engine() {
         }
     }
 
+    // QV weight encoding: exhaustive FP16 sweep. Exactly 254 bit patterns are exact OCP
+    // e4m3 values (zeros, normals, subnormals of both signs); every accepted code must be
+    // finite (0x7f/0xff are OCP NaN), decode back bit-exactly to the FP16 value, and the
+    // former false-accepts +-480.0 (0x5f80/0xdf80 -> codes 0x7f/0xff) must now throw.
+    {
+        auto e4m3_value = [](uint32_t c) -> double {
+            const double sign = (c & 0x80) ? -1.0 : 1.0;
+            const uint32_t e = (c >> 3) & 15, m = c & 7;
+            if (e == 0) return sign * (double(m) / 8.0) * (1.0 / 64.0);
+            return sign * (1.0 + double(m) / 8.0) * std::ldexp(1.0, int(e) - 7);
+        };
+        auto fp16_value = [](uint32_t h) -> double {
+            const double sign = (h & 0x8000) ? -1.0 : 1.0;
+            const uint32_t e = (h >> 10) & 31, m = h & 1023;
+            if (e == 0) return sign * (double(m) / 1024.0) * (1.0 / 16384.0);
+            return sign * (1.0 + double(m) / 1024.0) * std::ldexp(1.0, int(e) - 15);
+        };
+        uint32_t accepted = 0;
+        for (uint32_t h = 0; h <= 0xFFFF; ++h) {
+            const uint16_t hw = uint16_t(h);
+            bool threw = false;
+            std::vector<uint8_t> d;
+            try { d = onr::qv_bytes(&hw, 1); } catch (const std::exception&) { threw = true; }
+            if (h == 0x5f80 || h == 0xdf80) {
+                if (!threw) { std::fprintf(stderr, "FAIL: qv 0x%04x (+-480) must throw\n", h); return 1; }
+                continue;
+            }
+            if (threw) continue;
+            ++accepted;
+            const uint32_t c = d[2];
+            if ((c & 0x7f) == 0x7f) { std::fprintf(stderr, "FAIL: qv 0x%04x -> NaN code 0x%02x\n", h, c); return 1; }
+            if (e4m3_value(c) != fp16_value(h)) {
+                std::fprintf(stderr, "FAIL: qv 0x%04x -> 0x%02x value mismatch %.9g vs %.9g\n", h, c, e4m3_value(c), fp16_value(h));
+                return 1;
+            }
+        }
+        if (accepted != 254) { std::fprintf(stderr, "FAIL: qv accepted %u patterns, expected 254\n", accepted); return 1; }
+        std::printf("[PASS] Item QV (qv_bytes 65536-pattern exhaustive sweep: 254 exact OCP e4m3 codes, "
+                    "+-480 rejected, round-trip bit-exact)\n");
+    }
+
     dev->Release();
     return 0;
 }

@@ -19,6 +19,7 @@ struct EngineFrame {
     float view_to_clip[16] = {};
     float depth_sign = 1;       // the depth guide holds view z * depth_sign (linear, positive ahead)
     bool reset = false;
+    bool mv_jittered = false;  // ONR_RR_FRAME_MV_JITTERED: the motion vectors include the jitter difference
     uint64_t transparency = 0;   // the transparency layer, rgba16f at the render size; 0 = none
     // DLSS.DisocclusionMask and the SSS guide (or ColorBeforeFog), r32f at the render size; 0 = none (rr2_enc0 slots 336 / 288)
     uint64_t disocclusion = 0, sss = 0;
@@ -68,6 +69,7 @@ struct Enc0BlockInput {
     const float* prev_v2c;
     const float* scalars;   // Weights::enc0_scalars
     float depth_sign = 1;
+    bool mv_jittered = false;   // subtract (curr - prev) jitter / mv_scale from the motion vectors (0x328/0x32c)
 };
 std::array<uint32_t, 272> enc0_block(const Enc0BlockInput& in);
 

@@ -1837,21 +1837,28 @@ bool fill_d3d12_frame(RrContext& ctx, const NVSDK_NGX_Parameter& params, OnrRrFr
                                   "DLSS.DisocclusionMask.Subrect.Base.Y", nullptr, read_state);
     frame.sss_guide = tex(NVSDK_NGX_Parameter_DLSSD_ColorBeforeFog, NVSDK_NGX_Parameter_DLSSD_ScreenSpaceSubsurfaceScatteringGuide,
                           nullptr, nullptr, nullptr, nullptr, read_state);
-    frame.sss_guide.x = frame.color.x;
-    frame.sss_guide.y = frame.color.y;
+    // its own subrect; ColorBeforeFog is read at the colour's, then the colour's as the last resort
+    if (!get_param_2(params, "DLSSD.ColorBeforeFog.Subrect.Base.X", "DLSSD.ScreenSpaceSubsurfaceScatteringGuide.Subrect.Base.X", frame.sss_guide.x))
+        frame.sss_guide.x = frame.color.x;
+    if (!get_param_2(params, "DLSSD.ColorBeforeFog.Subrect.Base.Y", "DLSSD.ScreenSpaceSubsurfaceScatteringGuide.Subrect.Base.Y", frame.sss_guide.y))
+        frame.sss_guide.y = frame.color.y;
 
     frame.responsivity_mask = tex("DLSSD.ResponsivityMask", nullptr,
                                   "DLSSD.ResponsivityMask.Subrect.Base.X", nullptr,
                                   "DLSSD.ResponsivityMask.Subrect.Base.Y", nullptr, read_state);
     frame.color_before_transparency = tex(NVSDK_NGX_Parameter_DLSSD_ColorBeforeTransparency, nullptr,
                                           nullptr, nullptr, nullptr, nullptr, read_state);
-    frame.color_before_transparency.x = frame.color.x;
-    frame.color_before_transparency.y = frame.color.y;
+    if (!get_param_2(params, "DLSSD.ColorBeforeTransparency.Subrect.Base.X", nullptr, frame.color_before_transparency.x))
+        frame.color_before_transparency.x = frame.color.x;
+    if (!get_param_2(params, "DLSSD.ColorBeforeTransparency.Subrect.Base.Y", nullptr, frame.color_before_transparency.y))
+        frame.color_before_transparency.y = frame.color.y;
 
     frame.depth_of_field_guide = tex(NVSDK_NGX_Parameter_DLSSD_DepthOfFieldGuide, nullptr,
                                      nullptr, nullptr, nullptr, nullptr, read_state);
-    frame.depth_of_field_guide.x = frame.color.x;
-    frame.depth_of_field_guide.y = frame.color.y;
+    if (!get_param_2(params, "DLSSD.DepthOfFieldGuide.Subrect.Base.X", nullptr, frame.depth_of_field_guide.x))
+        frame.depth_of_field_guide.x = frame.color.x;
+    if (!get_param_2(params, "DLSSD.DepthOfFieldGuide.Subrect.Base.Y", nullptr, frame.depth_of_field_guide.y))
+        frame.depth_of_field_guide.y = frame.color.y;
 
     frame.specular_motion = tex(NVSDK_NGX_Parameter_GBuffer_SpecularMvec, "MotionVectorsReflection",
                                 nullptr, nullptr, nullptr, nullptr, read_state);
@@ -2013,21 +2020,27 @@ bool fill_vk_frame(RrContext& ctx, const NVSDK_NGX_Parameter& params, OnrRrFrame
                                   "DLSS.DisocclusionMask.Subrect.Base.Y", nullptr, read_layout);
     frame.sss_guide = tex(NVSDK_NGX_Parameter_DLSSD_ColorBeforeFog, NVSDK_NGX_Parameter_DLSSD_ScreenSpaceSubsurfaceScatteringGuide,
                           nullptr, nullptr, nullptr, nullptr, read_layout);
-    frame.sss_guide.x = frame.color.x;
-    frame.sss_guide.y = frame.color.y;
+    if (!get_param_2(params, "DLSSD.ColorBeforeFog.Subrect.Base.X", "DLSSD.ScreenSpaceSubsurfaceScatteringGuide.Subrect.Base.X", frame.sss_guide.x))
+        frame.sss_guide.x = frame.color.x;
+    if (!get_param_2(params, "DLSSD.ColorBeforeFog.Subrect.Base.Y", "DLSSD.ScreenSpaceSubsurfaceScatteringGuide.Subrect.Base.Y", frame.sss_guide.y))
+        frame.sss_guide.y = frame.color.y;
 
     frame.responsivity_mask = tex("DLSSD.ResponsivityMask", nullptr,
                                   "DLSSD.ResponsivityMask.Subrect.Base.X", nullptr,
                                   "DLSSD.ResponsivityMask.Subrect.Base.Y", nullptr, read_layout);
     frame.color_before_transparency = tex(NVSDK_NGX_Parameter_DLSSD_ColorBeforeTransparency, nullptr,
                                           nullptr, nullptr, nullptr, nullptr, read_layout);
-    frame.color_before_transparency.x = frame.color.x;
-    frame.color_before_transparency.y = frame.color.y;
+    if (!get_param_2(params, "DLSSD.ColorBeforeTransparency.Subrect.Base.X", nullptr, frame.color_before_transparency.x))
+        frame.color_before_transparency.x = frame.color.x;
+    if (!get_param_2(params, "DLSSD.ColorBeforeTransparency.Subrect.Base.Y", nullptr, frame.color_before_transparency.y))
+        frame.color_before_transparency.y = frame.color.y;
 
     frame.depth_of_field_guide = tex(NVSDK_NGX_Parameter_DLSSD_DepthOfFieldGuide, nullptr,
                                      nullptr, nullptr, nullptr, nullptr, read_layout);
-    frame.depth_of_field_guide.x = frame.color.x;
-    frame.depth_of_field_guide.y = frame.color.y;
+    if (!get_param_2(params, "DLSSD.DepthOfFieldGuide.Subrect.Base.X", nullptr, frame.depth_of_field_guide.x))
+        frame.depth_of_field_guide.x = frame.color.x;
+    if (!get_param_2(params, "DLSSD.DepthOfFieldGuide.Subrect.Base.Y", nullptr, frame.depth_of_field_guide.y))
+        frame.depth_of_field_guide.y = frame.color.y;
 
     frame.specular_motion = tex(NVSDK_NGX_Parameter_GBuffer_SpecularMvec, "MotionVectorsReflection",
                                 nullptr, nullptr, nullptr, nullptr, read_layout);

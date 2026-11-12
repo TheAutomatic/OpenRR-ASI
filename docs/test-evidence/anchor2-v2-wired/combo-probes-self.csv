@@ -1,0 +1,3 @@
+case_id,f015_vs_p00_psnr01_db,f015_vs_p00_rgb_rmse,f015_vs_p00_max_ulp,f015_vs_p00_diff_halfs,pair_ref_id,f015_vs_pair_psnr01_db,f015_vs_pair_rgb_rmse,f015_vs_pair_diff_halfs
+P16b_mv_jittered_prev_minus_curr,56.8498,0.00347264,516,3941754,,,,
+PX_combo_jitter_negscale,56.8498,0.00347264,516,3941754,P16b_mv_jittered_prev_minus_curr,999,0,0

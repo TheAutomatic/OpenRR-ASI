@@ -113,7 +113,12 @@ std::array<uint32_t, 272> enc0_block(const Enc0BlockInput& in) {
     F(0x310, 1.0f / ix), F(0x314, 1.0f / iy);
     F(0x318, in.prev_jitter[0] / rx), F(0x31c, in.prev_jitter[1] / ry);
     F(0x320, in.mv_scale[0] * (ix / rx)), F(0x324, in.mv_scale[1] * (iy / ry));
-    F(0x328, 0), F(0x32c, 0);
+    // MV_JITTERED: the shaders compute (m + C(0x328/0x32c)) * C(0x320/0x324) with C(0x320/0x324) =
+    // mv_scale * (ix / rx), so adding the jitter delta divided by mv_scale keeps the dejittering in
+    // render-pixel space for any mv_scale (negative, UV-scale): m*mv_scale + (curr_jitter - prev_jitter).
+    const float djx = (in.mv_jittered && in.mv_scale[0] != 0.0f) ? (in.jitter[0] - in.prev_jitter[0]) / in.mv_scale[0] : 0.0f;
+    const float djy = (in.mv_jittered && in.mv_scale[1] != 0.0f) ? (in.jitter[1] - in.prev_jitter[1]) / in.mv_scale[1] : 0.0f;
+    F(0x328, djx), F(0x32c, djy);
     I(0x350, in.ds.x), I(0x354, in.ds.y);
     F(0x358, 1.0f / ix), F(0x35c, 1.0f / iy);
     F(0x360, 1.0f / float(in.ds.x)), F(0x364, 1.0f / float(in.ds.y));
@@ -184,6 +189,9 @@ std::vector<uint8_t> qv_bytes(const uint16_t* v, size_t n) {
         if (e >= 9) {
             if ((m & 127) || e > 23) throw std::runtime_error("Q/V weight is not an e4m3 value");
             c = ((e - 8) << 3) | (m >> 7);
+            // OCP e4m3 codes 0x7f/0xff are NaN (largest finite is 448 = 0x7e); FP16 +-480.0
+            // (0x5f80/0xdf80) would otherwise land exactly there
+            if ((c & 0x7f) == 0x7f) throw std::runtime_error("Q/V weight is not an e4m3 value");
         } else if (e || m) {
             uint32_t k = 1024 + m, sh = 16 - e;   // value k 2^(e - 25) = (k >> sh) 2^-9
             if (!e || (k & ((1u << sh) - 1))) throw std::runtime_error("Q/V weight is not an e4m3 value");
@@ -563,7 +571,8 @@ void Engine::record_net(const EngineFrame& f, const Guides& g, uint64_t dfn_out,
     const float* v2c = zero_matrix(f.view_to_clip) ? persp : f.view_to_clip;
     const float* pv2c = zero_matrix(prev_v2c_) ? persp : prev_v2c_;
     Enc0BlockInput bi{f.render, internal_, ds_, {f.jitter[0], f.jitter[1]}, {prev_jitter_[0], prev_jitter_[1]},
-                      {f.mv_scale[0], f.mv_scale[1]}, w2v, v2c, pw2v, pv2c, W.enc0_scalars, f.depth_sign};
+                      {f.mv_scale[0], f.mv_scale[1]}, w2v, v2c, pw2v, pv2c, W.enc0_scalars, f.depth_sign,
+                      f.mv_jittered && !reset};
     auto blk = enc0_block(bi);
     if (fresh_) d.fill(expo_[old], 0, 4, 0);
     d.update(prm_, 0, kBlockBytes, blk.data());
