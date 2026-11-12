@@ -54,12 +54,12 @@ OpenRR vs 5090 同名 f015（PSNR01 / rgb_rmse / max_abs）：
 | 对照 | OpenRR Legacy | Fast-LLPC | Fast-ACO | 5090 自身签名 |
 |---|---:|---:|---:|---|
 | OpenRR-P16a vs 5090-P16a | **32.03/0.0511** | **31.94/0.0514** | **31.94/0.0514** | P16a vs P00 = 32.132 |
-| OpenRR-P16b vs 5090-P16b | 32.99/0.0446 | 32.90/0.0448 | 32.90/0.0448 | P16b vs P00 = **51.341**（≈与 P16a 同侧）、vs P16a = 32.134 |
+| OpenRR-P16b vs 5090-P16b | 32.99/0.0446 | 32.90/0.0448 | 32.90/0.0448 | P16b vs P00 = **51.341**（去抖动后收敛回 P00）、vs P16a = 32.134 |
 | OpenRR-P16c vs 5090-P16c | 36.24/0.0331 | 36.62/0.0323 | 36.64/0.0323 | P16c vs P00 = 32.035、vs P16a = 35.52 |
 | OpenRR 自身 P16a vs P00 | 999 | 999 | 999 | —（标志被消费） |
 | OpenRR 自身 P16b/c vs P00 | 33.22/32.19 | 32.95/32.26 | 32.95/32.25 | — |
 
-结构性差异清晰：5090 消费 `MV_JITTERED`（P16b 的 `+(prev−curr)` 被补偿回与 P16a 几乎同输出，51.3 dB；P16c 的反号不补偿，32.0 dB），OpenRR 未接线（P16a≡P00、P16b/c 双双 ~32–33 dB）。**接线验收判据**：接通 render-pixel 空间 `±(jitter − prev_jitter)` 进 `0x328/0x32c` 后，OpenRR 自身应变为 P16b≈P16a（>>50 dB）而 P16c 仍 ~32 dB，且 OpenRR-P16a vs 5090-P16a 跨卡距离应显著高于 31.94 dB 基线。
+结构性差异清晰：5090 消费 `MV_JITTERED`（P16b 预加的 `+(prev−curr)` 被去抖动抵消，收敛回 **P00**，51.3 dB；P16c 的反号不补偿，32.0 dB），OpenRR 未接线（P16a≡P00、P16b/c 双双 ~32–33 dB）。**接线验收判据**：接通 render-pixel 空间 `±(jitter − prev_jitter)` 进 `0x328/0x32c` 后，OpenRR 自身应变为 **P16b ≈ P00（>>50 dB）**、`P16a vs P00 ≈ 32 dB`、`P16c vs P00 ≈ 32 dB`，且跨卡 **OpenRR-P16a vs 5090-P16a** 与 **OpenRR-P16b vs 5090-P16b** 均应从 ~32 dB 跃升至 ~45–47 dB（与 P00 跨卡基线同档）。
 
 ## 4. 问题 D：P14 现象（只读差分特征，未改任何代码）
 
