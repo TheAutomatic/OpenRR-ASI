@@ -904,6 +904,45 @@ void main() {
 #define X1_X(cn, xn, n) RESID_X(cn, xn, n, ls1)
     FOR_NX(X1_X)
     CUT(4)
+#ifdef LT_MLP8
+    // Native-FP8 MLP, SPLIT2 flavour: fc1/fc2 as 1-byte e4m3 A tiles from the UT8 tail
+    // (zero conversions in the product loops). The half's x1 tiles quantize once below
+    // and feed every slice's single fc1 tile; the GELU exchange keeps its fp16 LDS
+    // format untouched and each consumer quantizes the two loaded tiles locally (qe4 is
+    // deterministic, so both halves see identical bytes). fc2 keeps QC8 (f32 WMMA)
+    // accumulators and folds into the fp16 exchange stores after the loop.
+#define S2_FC1_W8 E4View(uint64_t(pc.fc1) + uint64_t(4u * HID * ENC_C)).v
+#define S2_FC2_W8 E4View(uint64_t(pc.fc2) + uint64_t(4u * HID * ENC_C)).v
+    QC8 mc[5];
+#define FC2B8_T(cn, i) mc[i] = QC8(bias_acc_t(pc.fc2_b, TO(i) * 16u));
+    FOR_NO(FC2B8_T)
+#define XQ8_T2(cn, xn, n) QB8 x8##n; { for (int i = 0; i < x8##n.length(); ++i) x8##n[i] = qe4(xn[i]); }
+    FOR_NX(XQ8_T2)
+    J2_UNROLL for (uint j = 0u; j < LT_HID; j += 32u) {
+        uint jt = j + 16u * hf;
+        QC8 h0 = QC8(bias_acc_t(pc.fc1_b, jt));
+#define FC1_T8(cn, xn, n) { QA8 a8_; coopMatLoad(a8_, S2_FC1_W8, jt * ENC_C + (n) * 16u, ENC_C, ROW); h0 = coopMatMulAdd(a8_, x8##n, h0); }
+        FOR_NX(FC1_T8)
+        MH g = MH(h0);
+        for (int i = 0; i < g.length(); i += 2) { f16vec2 q = gelu2(f16vec2(g[i], g[i + 1])); g[i] = q.x, g[i + 1] = q.y; }
+        uint hb = QV + ((j >> 5) & 1u) * 2048u + rt * 512u;
+        coopMatStore(g, lds, hb + hf * 256u, 16u, ROW);
+        WG_SYNC();
+        QB8 g8a, g8b;
+        {
+            MH ga, gb;
+            coopMatLoad(ga, lds, hb, 16u, ROW);
+            coopMatLoad(gb, lds, hb + 256u, 16u, ROW);
+            for (int i = 0; i < g8a.length(); ++i) { g8a[i] = qe4(ga[i]); g8b[i] = qe4(gb[i]); }
+        }
+#define FC2_T8(cn, i) { QA8 a8_; \
+            coopMatLoad(a8_, S2_FC2_W8, TO(i) * 16u * HID + j, HID, ROW); mc[i] = coopMatMulAdd(a8_, g8a, mc[i]); \
+            coopMatLoad(a8_, S2_FC2_W8, TO(i) * 16u * HID + j + 16u, HID, ROW); mc[i] = coopMatMulAdd(a8_, g8b, mc[i]); }
+        FOR_NO(FC2_T8)
+    }
+#define EX_ST8(cn, i) coopMatStore(MH(mc[i]), lds, EXB(TO(i)), 16u, ROW);
+    FOR_NO(EX_ST8)
+#else
 #define FC2B_T(cn, i) cn = bias_acc_t(pc.fc2_b, TO(i) * 16u);
     FOR_NO(FC2B_T)
     // 32-neuron slices: half hf computes hidden tile j + 16 hf, the two GELU tiles meet in a double buffer over
@@ -929,6 +968,7 @@ void main() {
         FOR_NO(FC2_T2)
     }
     FOR_NO(EX_ST)
+#endif
     WG_SYNC();
 #define X2_X(cn, xn, n) RESID_X(cn, xn, n, ls2)
     FOR_NX(X2_X)
