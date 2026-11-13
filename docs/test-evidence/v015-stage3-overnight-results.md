@@ -148,3 +148,43 @@ Mesa 26.3.0 GFX12 `ONR_ACO_SAMPLE_WAIT0` 使 s_wait_samplecnt 16→**4（全 0x0
 （+0.322 ms / +2.70%，组内 2.78/2.70/2.62 自洽）。跨会话绝对值有 ±1% 漂移（外部负载），
 单变量收益以组内 ABBA 与 @idx 微归因为准：**(bf57f97→c75740e) 已兑现 2c −0.61%@4K +
 E1 −0.36%@4K**。
+
+
+## 9. Stage4 R2：双地址 LDS 与编译期 CU_MODE（两项均判负，机制均验证成功）
+
+### 9.1 R2-E1 `post_f_lt` 双地址 64-bit LDS 读取（`ONR_ACO_SHARED2_LOAD64`）
+
+预检完全命中：32×`ds_load_b64` → **16×`ds_load_2addr_b64`**（DS 总载入 48→32），
+`s_wait_dscnt` 31 不变；`code_hash` 95b8b8e1→**8b21f82b**，`record_sha256` 同步变，
+manifest 中仅 post_f_lt 变化、其余记录与 GREEN_HEAD 逐位一致；units 全绿；0-ULP 四相位
+100.000000%/ulp 0；实跑日志同 spv（d57398b3）异 code 且 d3d_enc0_attr 双侧全等（真 A/B）。
+
+测速无收益：3×ABBA 1080p −0.372%（组 −0.41/−0.37/+0.22）、4K +0.031%（组不同向，噪声态）；
+**@40 单核 600 帧 1.3263 vs 1.3285 ms = −2.2 μs（噪声级）**。结论：post 不受 LDS 吞吐限制
+（31 次 dscnt 等待未减），合并不省时间。归档 `build/v015-runs/s4-r2-item1-post-lds2/`。
+
+### 9.2 R2-E2 `d3d_enc0_attr_f_lt` 编译期 CU_MODE（`ONR_ACO_CU_MODE`）
+
+LLPC 复核（当前 spv 5e2103a7 的 PAL ELF）：**wgp_mode=false（CU_MODE）**、vgpr 81、
+LDS 0、18 装载/109 等待——对齐目标成立。
+
+机制实现成功（根治 B1.1 假切换）：Mesa 编译期开关叠加在既有 capture EXPORT 条目上
+（首次独立条目曾覆盖 EXPORT 致 117 个捕获静默失败，已修复为组合式）；仅
+`d3d_enc0_attr_f_lt` 白名单：rsrc1 537657355(0x200c000b)→**786443(0x000c000b)**、
+code_hash 不变（纯拓扑翻转）、record_sha256 变；其余记录逐位一致；**实跑日志铁证
+基线 2×rsrc1=200c000b / 候选 2×000c000b**；0-ULP 四相位全过。
+
+测速：**@6 单核 600 帧 0.9357→0.9232 ms = −12.5 μs（核内 −1.34%）**——真实改善，
+回收剩余 @6 缺口的约 20%；ABBA 两轮均被外部负载污染（calls ±9~12% 离群，中位
+−0.244/−0.960 与 −1.128/−5.026 方向为负但不可判级）；整帧推算核占帧 8% × −1.34%
+≈ **−0.11%**，低于晋级线。按协议判负归档 `build/v015-runs/s4-r2-item2-attr-cumode/`，
+标注为已证实核内微增益（未来与其它 enc0_attr 改动打包复验）。
+
+**两份补丁均已 100% 还原**：Mesa 源零残留（cu=0、hook=2）、记录与 green 快照零差异
+（`build/v015-runs/green-c75740e-stage/`）、树净 @ `a2b04ed`。
+
+### 9.3 终盘整帧 ACO vs LLPC
+
+待重启后干净环境补测（本轮 ABBA 全程受外部负载污染，不作为判级依据）。R1 收尾同口径
+基线：1080p +0.061 ms/+1.58%（ACO 3.327 vs LLPC 3.266）；4K +0.322 ms/+2.70%
+（11.981 vs 11.658，组内 2.78/2.70/2.62）。
