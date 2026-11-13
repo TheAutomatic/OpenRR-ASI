@@ -14,6 +14,7 @@
 #include "rr_pe_watchdog.hpp"
 #include "camera_and_sl.hpp"
 #include "opennr_rr_api.h"
+#include "opennr_rr/vk.hpp"
 
 #include <windows.h>
 #include <d3d11.h>
@@ -1177,12 +1178,6 @@ bool check_dlssd_version_310_9_1(const std::wstring& path, std::string& why) {
 
 } // namespace
 
-namespace onr {
-VkPhysicalDevice pick_vk_physical_device(const std::vector<VkPhysicalDevice>& devs, const uint8_t* luid,
-                                         std::string* out_name = nullptr, uint32_t* out_api_version = nullptr,
-                                         bool* out_is_amd = nullptr);
-} // namespace onr
-
 namespace {
 
 bool check_gpu_cheap_vulkan(const LUID* luid, std::string& out_gpu_name, std::string& why) {
@@ -1232,26 +1227,34 @@ bool check_gpu_cheap_vulkan(const LUID* luid, std::string& out_gpu_name, std::st
             return std::strcmp(x.extensionName, name) == 0;
         });
     };
-    if (!has_ext(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME)) {
-        why = picked_name + (picked_is_amd ? ": no cooperative matrices (needs an RDNA4 GPU)" : ": not an AMD GPU");
+    const bool has_cm = has_ext(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME);
+    if (!has_cm) {
+        why = picked_name + (picked_is_amd ? ": no cooperative matrices (needs an RDNA4 or RDNA3 GPU)" : ": not an AMD GPU");
         return false;
     }
-    if (!has_ext(VK_EXT_SHADER_FLOAT8_EXTENSION_NAME)) {
-        why = picked_name + (picked_is_amd ? ": not an RDNA4 GPU (RX 7000 and RX 6000 support comes later)" : ": not an AMD GPU");
-        return false;
-    }
+    const bool has_f8 = has_ext(VK_EXT_SHADER_FLOAT8_EXTENSION_NAME);
 
     VkPhysicalDeviceShaderFloat8FeaturesEXT f8{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT8_FEATURES_EXT};
-    VkPhysicalDeviceCooperativeMatrixFeaturesKHR cm{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR, &f8};
+    VkPhysicalDeviceCooperativeMatrixFeaturesKHR cm{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR,
+                                                    has_f8 ? &f8 : nullptr};
     VkPhysicalDeviceFeatures2 f2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &cm};
     vkGetPhysicalDeviceFeatures2(picked, &f2);
     if (!cm.cooperativeMatrix) {
-        why = picked_name + ": no cooperative matrices (needs an RDNA4 GPU)";
+        why = picked_name + ": no cooperative matrices (needs an RDNA4 or RDNA3 GPU)";
         return false;
     }
-    if (!f8.shaderFloat8 || !f8.shaderFloat8CooperativeMatrix) {
-        why = picked_name + ": not an RDNA4 GPU (RX 7000 and RX 6000 support comes later)";
-        return false;
+    const bool fp8_coopmat = has_f8 && f8.shaderFloat8 && f8.shaderFloat8CooperativeMatrix;
+    if (!fp8_coopmat) {
+        if (!picked_is_amd) {
+            why = picked_name + ": not an AMD GPU";
+            return false;
+        }
+        std::error_code ec;
+        const std::filesystem::path gfx11_dir = std::filesystem::path(resolve_data_dir()) / L"shaders-gfx11";
+        if (!std::filesystem::is_directory(gfx11_dir, ec)) {
+            why = picked_name + ": not an RDNA4 GPU, and no RDNA3 kernels (openrr-amd\\shaders-gfx11)";
+            return false;
+        }
     }
     return true;
 }

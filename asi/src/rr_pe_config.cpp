@@ -125,7 +125,7 @@ Config g_cfg{};
 
 const char kDefaultIni[] =
     "[OpenRR]\n"
-    "; Enable or disable OpenRR (DLSS Ray Reconstruction on AMD RX 9000 / RDNA4 GPUs).\n"
+    "; Enable or disable OpenRR (DLSS Ray Reconstruction on AMD RX 9000 / RDNA4 and experimental RX 7000 / RDNA3 GPUs).\n"
     "Enabled = true\n\n"
     "; Execution backend for D3D12 games:\n"
     ";   auto   = D3D12 Direct ELF into the game's command list (falls back to Vulkan interop bridge if unavailable)\n"

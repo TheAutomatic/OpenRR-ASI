@@ -12,6 +12,7 @@
 #include "opennr_rr_api.h"
 #include "opennr_rr/d3d12.hpp"
 #include "opennr_rr/engine.hpp"
+#include "opennr_rr/vk.hpp"
 
 #include <windows.h>
 #include <d3d12.h>
@@ -1407,10 +1408,51 @@ static int test_d3d12_gpu_and_engine() {
     return 0;
 }
 
+static int test_vk_unspoof_and_rdna3_pick() {
+    openrr::pe::vulkan_entry_points();
+    VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
+    app.apiVersion = VK_API_VERSION_1_3;
+    VkInstanceCreateInfo ici{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
+    ici.pApplicationInfo = &app;
+    VkInstance inst = VK_NULL_HANDLE;
+    if (vkCreateInstance(&ici, nullptr, &inst) != VK_SUCCESS || !inst) {
+        std::fprintf(stderr, "FAIL: test_vk_unspoof_and_rdna3_pick vkCreateInstance failed\n");
+        return 1;
+    }
+    uint32_t count = 0;
+    vkEnumeratePhysicalDevices(inst, &count, nullptr);
+    std::vector<VkPhysicalDevice> devs(count);
+    if (count) vkEnumeratePhysicalDevices(inst, &count, devs.data());
+    std::string picked_name;
+    uint32_t api_ver = 0;
+    bool is_amd = false;
+    const VkPhysicalDevice picked = onr::pick_vk_physical_device(devs, nullptr, &picked_name, &api_ver, &is_amd);
+    if (!picked || !is_amd) {
+        vkDestroyInstance(inst, nullptr);
+        std::fprintf(stderr, "FAIL: pick_vk_physical_device picked=%p is_amd=%d name='%s'\n",
+                     static_cast<void*>(picked), int(is_amd), picked_name.c_str());
+        return 1;
+    }
+    VkPhysicalDeviceProperties props{};
+    VkPhysicalDeviceDriverProperties drv{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
+    onr::query_real_vk_props(picked, props, drv);
+    vkDestroyInstance(inst, nullptr);
+    if (props.vendorID != 0x1002 || props.deviceName[0] == '\0' ||
+        std::strstr(props.deviceName, "NVIDIA") != nullptr) {
+        std::fprintf(stderr, "FAIL: query_real_vk_props vendor=0x%04x name='%s' drv='%s'\n",
+                     props.vendorID, props.deviceName, drv.driverInfo);
+        return 1;
+    }
+    std::printf("[PASS] Vulkan unspoof & RDNA3/RDNA4 device pick: vendor=0x%04x name='%s' driver='%s'\n",
+                props.vendorID, props.deviceName, drv.driverInfo);
+    return 0;
+}
+
 int main() {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     std::setvbuf(stderr, nullptr, _IONBF, 0);
     if (test_key_parsing() != 0) return 1;
+    if (test_vk_unspoof_and_rdna3_pick() != 0) return 1;
     if (test_split_hardening_and_eligibility() != 0) return 1;
     if (test_d3d12_gpu_and_engine() != 0) return 1;
     std::printf("ALL ASI UNIT TESTS PASSED\n");

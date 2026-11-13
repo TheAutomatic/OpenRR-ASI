@@ -3,6 +3,7 @@
 #include "rr_pe_vkdevice.hpp"
 #include "rr_pe_log.hpp"
 #include "opennr_rr_api.h"
+#include "opennr_rr/vk.hpp"
 
 #include <windows.h>
 #include <algorithm>
@@ -32,11 +33,11 @@ std::string g_driver_name;
 void query_adapter_names(VkPhysicalDevice phys) {
     if (!phys) return;
     openrr::pe::vulkan_entry_points();
+    VkPhysicalDeviceProperties props{};
     VkPhysicalDeviceDriverProperties drv{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
-    VkPhysicalDeviceProperties2 p2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &drv};
-    vkGetPhysicalDeviceProperties2(phys, &p2);
+    onr::query_real_vk_props(phys, props, drv);
     std::lock_guard<std::mutex> lock(g_mutex);
-    if (p2.properties.deviceName[0]) g_gpu_name = p2.properties.deviceName;
+    if (props.deviceName[0]) g_gpu_name = props.deviceName;
     if (drv.driverInfo[0]) g_driver_name = drv.driverInfo;
     else if (drv.driverName[0]) g_driver_name = drv.driverName;
 }

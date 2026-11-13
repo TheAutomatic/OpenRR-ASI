@@ -270,6 +270,12 @@ void vk_note_command_pool_destroyed(VkDevice dev, VkCommandPool pool);
 void vk_note_device_destroyed(VkDevice dev);
 bool vk_device_is_destroyed(VkDevice dev);
 
+// Query physical device properties and driver properties, bypassing loader-level GPU spoofing
+// (e.g. OptiScaler [Spoofing] Vulkan=true rewriting vendorID/name/driverID to NVIDIA) by asking
+// loaded amdvlk*.dll ICDs directly via vk_icdGetInstanceProcAddr matched by device LUID.
+bool query_real_vk_props(VkPhysicalDevice pd, VkPhysicalDeviceProperties& out_props,
+                         VkPhysicalDeviceDriverProperties& out_drv,
+                         VkPhysicalDeviceIDProperties* out_id = nullptr);
 // Shared physical device selector used by both cheap capability checks and Device::init.
 VkPhysicalDevice pick_vk_physical_device(const std::vector<VkPhysicalDevice>& devs, const uint8_t* luid,
                                          std::string* out_name = nullptr, uint32_t* out_api_version = nullptr,

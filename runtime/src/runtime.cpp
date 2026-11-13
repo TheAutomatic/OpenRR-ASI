@@ -1356,7 +1356,8 @@ void destroy_ctx(Ctx* c) {
 // (ONR_GFX11) in shaders-gfx11 beside shaders
 bool rdna3(const Device& d, const std::wstring& shaders) {
     const auto& i = d.info();
-    return i.vendor == 0x1002 && i.coopmat && !i.fp8_coopmat && std::filesystem::is_directory(shaders + L"-gfx11");
+    std::error_code ec;
+    return i.vendor == 0x1002 && i.coopmat && !i.fp8_coopmat && std::filesystem::is_directory(shaders + L"-gfx11", ec);
 }
 
 std::string gpu_reason(const Device& d, const std::wstring& shaders) {
@@ -1377,6 +1378,9 @@ std::wstring default_data_dir(const std::wstring& dir) {
     const std::filesystem::path md(dir);
     if (std::filesystem::exists(md / L"openrr-amd" / L"shaders", ec)) return (md / L"openrr-amd").wstring();
     if (std::filesystem::exists(md.parent_path() / L"openrr-amd" / L"shaders", ec)) return (md.parent_path() / L"openrr-amd").wstring();
+    if (md.has_parent_path() && md.parent_path().has_parent_path() &&
+        std::filesystem::exists(md.parent_path().parent_path() / L"openrr-amd" / L"shaders", ec))
+        return (md.parent_path().parent_path() / L"openrr-amd").wstring();
     if (std::filesystem::exists(md / L"opennr-rr" / L"shaders", ec)) return (md / L"opennr-rr").wstring();
     return dir + L"\\openrr-amd";
 }
