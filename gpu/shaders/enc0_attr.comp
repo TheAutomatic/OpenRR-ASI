@@ -11,6 +11,17 @@
 #extension GL_EXT_control_flow_attributes : require
 layout(local_size_x = 64) in;
 
+
+#ifdef LT_ATTR_RO
+// LT_ATTR_RO: expo/prm/tab carry only uniform scalar data this kernel reads but never
+// writes; marking the buffer reference readonly (SPIR-V NonWritable) lets NIR/ACO flag
+// ACCESS_NON_WRITEABLE -> ACCESS_CAN_REORDER and hoist the scalar loads to s_load (SMEM).
+// No restrict: that would need cross-pointer aliasing guarantees we do not own.
+layout(buffer_reference, scalar, buffer_reference_align = 4) readonly buffer RoF32Buf { float v[]; };
+#define ATTR_RO_F32 RoF32Buf
+#else
+#define ATTR_RO_F32 F32Buf
+#endif
 #ifdef D3D_GUIDES
 #include "onr_guides.glsl"
 #endif
@@ -33,9 +44,9 @@ layout(push_constant, scalar) uniform P {
     F16Buf pm1;        // PrevMvec1 rgba16f (PrevMvec2 of the previous frame)
     U8Buf hidden;      // HiddenHistory snorm8x4
     U32Buf ds, ds2;    // DownsampledHistory and /2, R10G10B10A2
-    F32Buf expo;       // exposure block {exposure, previous, 1 / exposure, log}
-    F32Buf prm;        // raw rr2_enc0 parameter block
-    F32Buf tab;        // [0, 1024) unorm10, [1024, 1280) snorm8 by byte, [1280, 1536) unorm8 values (f32 as the reference)
+    ATTR_RO_F32 expo;       // exposure block {exposure, previous, 1 / exposure, log}
+    ATTR_RO_F32 prm;        // raw rr2_enc0 parameter block
+    ATTR_RO_F32 tab;        // [0, 1024) unorm10, [1024, 1280) snorm8 by byte, [1280, 1536) unorm8 values (f32 as the reference)
     F16Buf attr;       // out [size.y][size.x][48] fp16 attributes (43 used); fast: 48-byte records [pad.y][pad.x] (ATTR64)
     F16Buf pmv2;       // out PrevMvec2 rgba16f
     F16Buf ero, nond;  // out rg16f
@@ -224,7 +235,7 @@ vec4 tex_hid(ivec2 p) {
 #ifdef LT_ATTR_TAB
     return max(vec4(i8vec4(unpack8(AT32(U32Buf, pc.hidden, pix(p), 4u).v[0]))) * (1.0 / 127.0), vec4(-1.0));
 #endif
-    return vec4(AT32(F32Buf, pc.tab, 1024u + pc.hidden.v[i], 4u).v[0], AT32(F32Buf, pc.tab, 1024u + pc.hidden.v[i + 1u], 4u).v[0], AT32(F32Buf, pc.tab, 1024u + pc.hidden.v[i + 2u], 4u).v[0], AT32(F32Buf, pc.tab, 1024u + pc.hidden.v[i + 3u], 4u).v[0]);
+    return vec4(AT32(ATTR_RO_F32, pc.tab, 1024u + pc.hidden.v[i], 4u).v[0], AT32(ATTR_RO_F32, pc.tab, 1024u + pc.hidden.v[i + 1u], 4u).v[0], AT32(ATTR_RO_F32, pc.tab, 1024u + pc.hidden.v[i + 2u], 4u).v[0], AT32(ATTR_RO_F32, pc.tab, 1024u + pc.hidden.v[i + 3u], 4u).v[0]);
 }
 vec4 tex_10(U32Buf b, ivec2 sz, ivec2 p) {
     p = clampi(p, sz);
@@ -232,7 +243,7 @@ vec4 tex_10(U32Buf b, ivec2 sz, ivec2 p) {
 #ifdef LT_ATTR_TAB
     return vec4(float(w & 1023u), float((w >> 10) & 1023u), float((w >> 20) & 1023u), 0.0) * (1.0 / 1023.0);
 #endif
-    return vec4(AT32(F32Buf, pc.tab, w & 1023u, 4u).v[0], AT32(F32Buf, pc.tab, (w >> 10) & 1023u, 4u).v[0], AT32(F32Buf, pc.tab, (w >> 20) & 1023u, 4u).v[0], 0.0);
+    return vec4(AT32(ATTR_RO_F32, pc.tab, w & 1023u, 4u).v[0], AT32(ATTR_RO_F32, pc.tab, (w >> 10) & 1023u, 4u).v[0], AT32(ATTR_RO_F32, pc.tab, (w >> 20) & 1023u, 4u).v[0], 0.0);
 }
 
 // bilinear setup: texel origin and 8-bit fractions of the normalized coordinate (u, v) on a w x h texture
@@ -628,8 +639,8 @@ void main() {
 #ifdef LT_ATTR_TAB
     vec3 ad = vec3(ab) * (1.0 / 255.0), as = vec3(sb) * (1.0 / 255.0);
 #else
-    vec3 ad = vec3(AT32(F32Buf, pc.tab, 1280u + ab.x, 4u).v[0], AT32(F32Buf, pc.tab, 1280u + ab.y, 4u).v[0], AT32(F32Buf, pc.tab, 1280u + ab.z, 4u).v[0]);
-    vec3 as = vec3(AT32(F32Buf, pc.tab, 1280u + sb.x, 4u).v[0], AT32(F32Buf, pc.tab, 1280u + sb.y, 4u).v[0], AT32(F32Buf, pc.tab, 1280u + sb.z, 4u).v[0]);
+    vec3 ad = vec3(AT32(ATTR_RO_F32, pc.tab, 1280u + ab.x, 4u).v[0], AT32(ATTR_RO_F32, pc.tab, 1280u + ab.y, 4u).v[0], AT32(ATTR_RO_F32, pc.tab, 1280u + ab.z, 4u).v[0]);
+    vec3 as = vec3(AT32(ATTR_RO_F32, pc.tab, 1280u + sb.x, 4u).v[0], AT32(ATTR_RO_F32, pc.tab, 1280u + sb.y, 4u).v[0], AT32(ATTR_RO_F32, pc.tab, 1280u + sb.z, 4u).v[0]);
 #endif
     precise float zs = ((ad.y + as.y) + (ad.x + as.x)) + (ad.z + as.z);
     bool zero = zs == 0.0;
