@@ -101,3 +101,24 @@ DLAA 画质预算，重开面 = 160 族 FP8 的 dlaa 档守卫。
 **WGP（B1.1 判无效后暂缓）**：重做时应在 Mesa 编译时置 wgp_mode（让编译器一并生成对应的
 同步指令，符合 GFX12 内存模型对 WGP 模式的语义要求），再核验实际加载的记录哈希与 rsrc1。
 **160 族**：SPLIT=2 保持不变——4K 逐核差距合计仅约 0.002 ms（2c 已收割），本轮不动结构。
+
+
+## 7. post_f_lt 差距定案：ACO 采样等待策略（同 SPIR-V 双编译器 ISA 对照）
+
+取证方法：仓内现成的 `capture_llpc_hotspots.exe`（手编恢复）将同一份
+`post_f_lt.spv` 在驱动 Vulkan 设备编译为 PAL ELF，`llvm-objdump -d -j .text` 反汇编
+（`build/v015-runs/llpc-dump/`，含三核双编译器 ISA 全文 + POST_DIAGNOSIS.md）。
+
+**PAL 元数据**：LLPC vgpr=88（ACO 96）、lds=8704（ACO 8320）、**wgp_mode=false（同为
+CU_MODE，WGP 假设正式排除）**。
+
+**核心差异**：同一 bicubic 5-tap，两侧都 5 连发 `image_sample_lz`，但等待策略——
+ACO 4 次递减部分等待 `s_wait_samplecnt 0x3→0x2→0x1→0x0`（尝试逐样本流水消费），
+LLPC 1 次总等待 `0x0` 后批消费全部 5 个。全局 ACO 36 wait vs LLPC 24。LLPC 指令数
+多 16%（2405 vs 2074）却快 14.5%——等待减少的收益远大于指令膨胀。
+
+**定性**：Mesa/ACO 调度器的 wait-insertion 策略差异，不是着色器源码排布问题。
+三次源码侧修复（BATCH、WGP、attr 预取）判负的根因统一：源码无法控制 ACO 对已飞行
+采样的等待插入。**修复面在 Mesa/ACO 侧**：当多个 image_sample 的消费者在相邻窗口时
+合并为单次总等待。d3d_enc0_attr 侧（106 vs 109 wait，几乎持平）差距根源不同，暂未
+定位。160 族按指示维持 SPLIT=2（残余逐核差 ~0.002 ms）。
