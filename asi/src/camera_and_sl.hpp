@@ -18,6 +18,7 @@ namespace openrr {
 namespace sl {
 
 constexpr float INVALID_FLOAT = 3.402823466e+38F;
+constexpr size_t kStructVersion2 = 2;
 
 enum class Result : uint32_t {
     eOk = 0,
@@ -136,7 +137,12 @@ private:
         auto& self = Instance();
         {
             std::lock_guard<std::mutex> lock(self.snapMu_);
-            self.lastConstants_ = values;
+            self.lastConstants_ = sl::Constants{};
+            const size_t v1_bytes = static_cast<size_t>(
+                reinterpret_cast<const char*>(&self.lastConstants_.minRelativeLinearDepthObjectSeparation) -
+                reinterpret_cast<const char*>(&self.lastConstants_));
+            const size_t copy_bytes = (values.structVersion >= sl::kStructVersion2) ? sizeof(sl::Constants) : v1_bytes;
+            std::memcpy(&self.lastConstants_, &values, copy_bytes);
             self.hasConstants_.store(true, std::memory_order_release);
         }
         return self.o_slSetConstants_ ? self.o_slSetConstants_(values, frame, viewport) : sl::Result::eOk;

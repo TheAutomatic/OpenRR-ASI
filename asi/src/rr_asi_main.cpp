@@ -402,7 +402,13 @@ std::atomic<bool> g_alloc_hook_installed{false};
 std::atomic<bool> g_cmd_sig_hook_installed{false};
 std::atomic<bool> g_cmd_sig_hook_ok{false};
 thread_local int t_in_openrr_record = 0;
+thread_local int t_in_internal_vk = 0;
 thread_local ID3D12GraphicsCommandList* t_record_target = nullptr;
+
+struct InternalVkScope {
+    InternalVkScope() { ++t_in_internal_vk; }
+    ~InternalVkScope() { --t_in_internal_vk; }
+};
 
 const GUID kIID_List4 = {0x8754318e, 0xd3a9, 0x4541, {0x98, 0xcf, 0x64, 0x5b, 0x50, 0xdc, 0x48, 0x74}};
 const GUID kIID_Dev4  = {0xe865df17, 0xa9ee, 0x46f9, {0xa4, 0x63, 0x30, 0x98, 0x31, 0x5a, 0xa2, 0xe5}};
@@ -1181,6 +1187,7 @@ bool check_dlssd_version_310_9_1(const std::wstring& path, std::string& why) {
 namespace {
 
 bool check_gpu_cheap_vulkan(const LUID* luid, std::string& out_gpu_name, std::string& why) {
+    InternalVkScope vk_scope;
     openrr::pe::vulkan_entry_points();
     VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
     app.apiVersion = VK_API_VERSION_1_3;
@@ -1734,6 +1741,11 @@ struct RrContext {
     uint64_t frame_count = 0;
     uint32_t unknown_streak = 0;
     ULONGLONG last_eval_tick = 0;
+    bool guides_logged = false;
+    int logged_hw_depth = -1;
+    uint32_t ngx_log_count = 0;
+    uint64_t ngx_log_sig = ~0ull;
+    bool ready_logged = false;
     OnrRrVkImage vk_images[24]{};
     int num_vk_images = 0;
 };
@@ -1746,22 +1758,104 @@ bool g_ngx_depth_hw = true;
 bool g_ngx_roughness_seen = false;
 int g_ngx_roughness_packed = -1;
 
+void log_d3d12_ngx_inputs(RrContext& ctx, const NVSDK_NGX_Parameter& params, const OnrRrFrame& frame) {
+    if (ctx.ngx_log_count >= 16) return;
+
+    struct KeyInfo {
+        const char* name;
+        bool ignored;
+    };
+    static constexpr KeyInfo kKeys[] = {
+        {NVSDK_NGX_Parameter_Color, false},
+        {NVSDK_NGX_Parameter_Output, false},
+        {NVSDK_NGX_Parameter_Depth, false},
+        {NVSDK_NGX_Parameter_MotionVectors, false},
+        {NVSDK_NGX_Parameter_DiffuseAlbedo, false},
+        {NVSDK_NGX_Parameter_SpecularAlbedo, false},
+        {NVSDK_NGX_Parameter_GBuffer_Normals, false},
+        {NVSDK_NGX_Parameter_GBuffer_Roughness, false},
+        {NVSDK_NGX_Parameter_DLSSD_SpecularHitDistance, false},
+        {NVSDK_NGX_Parameter_DLSSD_SpecularRayDirectionHitDistance, false},
+        {NVSDK_NGX_Parameter_DLSSD_ColorBeforeParticles, false},
+        {"DLSS.TransparencyLayer", false},
+        {"DLSS.TransparencyLayerOpacity", false},
+        {"DLSS.TransparencyLayerMvecs", false},
+        {"DLSS.DisocclusionMask", false},
+        {NVSDK_NGX_Parameter_DLSSD_ColorBeforeFog, false},
+        {NVSDK_NGX_Parameter_DLSSD_ScreenSpaceSubsurfaceScatteringGuide, false},
+        {"DLSSD.ResponsivityMask", false},
+        {NVSDK_NGX_Parameter_DLSSD_ColorBeforeTransparency, false},
+        {NVSDK_NGX_Parameter_DLSSD_DepthOfFieldGuide, false},
+        {NVSDK_NGX_Parameter_GBuffer_SpecularMvec, false},
+        {"RayTracingHitDistance", true},
+        {"MotionVectorsReflection", true},
+    };
+
+    uint64_t sig = 14695981039346656037ull;
+    auto mix = [&](uint64_t v) {
+        for (int i = 0; i < 8; ++i) {
+            sig ^= (v >> (i * 8)) & 0xFFu;
+            sig *= 1099511628211ull;
+        }
+    };
+
+    std::string detail;
+    int present_count = 0;
+    for (size_t i = 0; i < std::size(kKeys); ++i) {
+        ID3D12Resource* res = get_d3d12_res(params, kKeys[i].name, nullptr);
+        if (!res) continue;
+        ++present_count;
+        const D3D12_RESOURCE_DESC d = res->GetDesc();
+        mix(uint64_t(i + 1));
+        mix(uint64_t(d.Width));
+        mix(uint64_t(d.Height));
+        mix(uint64_t(d.Format));
+        mix(uint64_t(d.Flags));
+        char buf[160];
+        std::snprintf(buf, sizeof(buf), "%s%s=%p(%llux%u fmt=%d flags=0x%X)%s",
+                      detail.empty() ? "" : ", ",
+                      kKeys[i].name,
+                      static_cast<void*>(res),
+                      static_cast<unsigned long long>(d.Width),
+                      static_cast<unsigned int>(d.Height),
+                      static_cast<int>(d.Format),
+                      static_cast<unsigned int>(d.Flags),
+                      kKeys[i].ignored ? "[ignored]" : "");
+        detail += buf;
+    }
+
+    if (sig == ctx.ngx_log_sig) return;
+    ctx.ngx_log_sig = sig;
+    ++ctx.ngx_log_count;
+    log("[openrr] NGX D3D12 inputs (#%u, count=%d, render=%ux%u, jitter=(%.4f,%.4f), mv_scale=(%.4f,%.4f), sub_col=(%u,%u), sub_out=(%u,%u), flags=0x%X): %s",
+        ctx.ngx_log_count, present_count,
+        frame.render_width, frame.render_height,
+        frame.jitter_x, frame.jitter_y,
+        frame.mv_scale_x, frame.mv_scale_y,
+        frame.color.x, frame.color.y,
+        frame.output.x, frame.output.y,
+        ctx.create_flags,
+        detail.c_str());
+    openrr::pe::flush_log();
+}
+
 bool fill_d3d12_frame(RrContext& ctx, const NVSDK_NGX_Parameter& params, OnrRrFrame& frame, bool host_owned) {
+    (void)host_owned;
     const openrr::pe::Config cfg = openrr::pe::current_config();
     frame = {};
     frame.size = sizeof(frame);
 
     read_eval_render_size(&params, ctx.max_render_w, ctx.max_render_h, frame.render_width, frame.render_height);
 
-    get_param_2(params, "DLSSD.Jitter.Offset.X", NVSDK_NGX_Parameter_Jitter_Offset_X, frame.jitter_x);
-    get_param_2(params, "DLSSD.Jitter.Offset.Y", NVSDK_NGX_Parameter_Jitter_Offset_Y, frame.jitter_y);
+    params.Get(NVSDK_NGX_Parameter_Jitter_Offset_X, &frame.jitter_x);
+    params.Get(NVSDK_NGX_Parameter_Jitter_Offset_Y, &frame.jitter_y);
     if (!std::isfinite(frame.jitter_x)) frame.jitter_x = 0.0f;
     if (!std::isfinite(frame.jitter_y)) frame.jitter_y = 0.0f;
 
-    if (!get_param_2(params, "DLSSD.MV.Scale.X", NVSDK_NGX_Parameter_MV_Scale_X, frame.mv_scale_x) ||
+    if (params.Get(NVSDK_NGX_Parameter_MV_Scale_X, &frame.mv_scale_x) != NVSDK_NGX_Result_Success ||
         !std::isfinite(frame.mv_scale_x) || frame.mv_scale_x == 0.0f)
         frame.mv_scale_x = 1.0f;
-    if (!get_param_2(params, "DLSSD.MV.Scale.Y", NVSDK_NGX_Parameter_MV_Scale_Y, frame.mv_scale_y) ||
+    if (params.Get(NVSDK_NGX_Parameter_MV_Scale_Y, &frame.mv_scale_y) != NVSDK_NGX_Result_Success ||
         !std::isfinite(frame.mv_scale_y) || frame.mv_scale_y == 0.0f)
         frame.mv_scale_y = 1.0f;
 
@@ -1779,91 +1873,85 @@ bool fill_d3d12_frame(RrContext& ctx, const NVSDK_NGX_Parameter& params, OnrRrFr
     const uint32_t depth_state = g_barrier_depth >= 0 ? uint32_t(g_barrier_depth) : read_state;
     const uint32_t output_state = g_barrier_output >= 0 ? uint32_t(g_barrier_output) : D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
 
-    auto tex = [&](const char* k1, const char* k2, const char* bx1, const char* bx2, const char* by1, const char* by2, uint32_t st) {
+    auto tex = [&](const char* key, const char* bx, const char* by, uint32_t st) {
         OnrRrTexture t{};
-        if (ID3D12Resource* r = get_d3d12_res(params, k1, k2)) {
+        if (ID3D12Resource* r = get_d3d12_res(params, key, nullptr)) {
             t.resource = r;
             t.state = st;
-            get_param_2(params, bx1, bx2, t.x);
-            get_param_2(params, by1, by2, t.y);
+            if (bx) params.Get(bx, &t.x);
+            if (by) params.Get(by, &t.y);
         }
         return t;
     };
 
-    frame.color = tex(NVSDK_NGX_Parameter_Color, "DLSSD.Color",
-                      NVSDK_NGX_Parameter_DLSS_Input_Color_Subrect_Base_X, "DLSSD.Input.Color.Subrect.Base.X",
-                      NVSDK_NGX_Parameter_DLSS_Input_Color_Subrect_Base_Y, "DLSSD.Input.Color.Subrect.Base.Y", color_state);
-    frame.diffuse_albedo = tex("DLSSD.DiffuseAlbedo", NVSDK_NGX_Parameter_DiffuseAlbedo,
-                               "DLSSD.Input.DiffuseAlbedo.Subrect.Base.X", NVSDK_NGX_Parameter_DLSS_Input_DiffuseAlbedo_Subrect_Base_X,
-                               "DLSSD.Input.DiffuseAlbedo.Subrect.Base.Y", NVSDK_NGX_Parameter_DLSS_Input_DiffuseAlbedo_Subrect_Base_Y, read_state);
-    if (!frame.diffuse_albedo.resource)
-        frame.diffuse_albedo = tex("GBuffer.DiffuseAlbedo", "GBuffer.Albedo", nullptr, nullptr, nullptr, nullptr, read_state);
+    // Exact NGX parameter keys & subrects matching OpenNrRrFeature_Dx12.cpp (nvngx_dlssd.dll 310.9.1).
+    frame.color = tex(NVSDK_NGX_Parameter_Color,
+                      NVSDK_NGX_Parameter_DLSS_Input_Color_Subrect_Base_X,
+                      NVSDK_NGX_Parameter_DLSS_Input_Color_Subrect_Base_Y, color_state);
+    frame.diffuse_albedo = tex(NVSDK_NGX_Parameter_DiffuseAlbedo,
+                               NVSDK_NGX_Parameter_DLSS_Input_DiffuseAlbedo_Subrect_Base_X,
+                               NVSDK_NGX_Parameter_DLSS_Input_DiffuseAlbedo_Subrect_Base_Y, read_state);
+    frame.specular_albedo = tex(NVSDK_NGX_Parameter_SpecularAlbedo,
+                                NVSDK_NGX_Parameter_DLSS_Input_SpecularAlbedo_Subrect_Base_X,
+                                NVSDK_NGX_Parameter_DLSS_Input_SpecularAlbedo_Subrect_Base_Y, read_state);
+    frame.normals = tex(NVSDK_NGX_Parameter_GBuffer_Normals,
+                        NVSDK_NGX_Parameter_DLSS_Input_Normals_Subrect_Base_X,
+                        NVSDK_NGX_Parameter_DLSS_Input_Normals_Subrect_Base_Y, read_state);
+    frame.roughness = tex(NVSDK_NGX_Parameter_GBuffer_Roughness,
+                          NVSDK_NGX_Parameter_DLSS_Input_Roughness_Subrect_Base_X,
+                          NVSDK_NGX_Parameter_DLSS_Input_Roughness_Subrect_Base_Y, read_state);
+    frame.depth = tex(NVSDK_NGX_Parameter_Depth,
+                      NVSDK_NGX_Parameter_DLSS_Input_Depth_Subrect_Base_X,
+                      NVSDK_NGX_Parameter_DLSS_Input_Depth_Subrect_Base_Y, depth_state);
+    frame.motion = tex(NVSDK_NGX_Parameter_MotionVectors,
+                       NVSDK_NGX_Parameter_DLSS_Input_MV_SubrectBase_X,
+                       NVSDK_NGX_Parameter_DLSS_Input_MV_SubrectBase_Y, mv_state);
+    frame.specular_hit_distance = tex(NVSDK_NGX_Parameter_DLSSD_SpecularHitDistance,
+                                      NVSDK_NGX_Parameter_DLSSD_SpecularHitDistance_Subrect_Base_X,
+                                      NVSDK_NGX_Parameter_DLSSD_SpecularHitDistance_Subrect_Base_Y, read_state);
+    frame.specular_ray_direction_hit_distance = tex(NVSDK_NGX_Parameter_DLSSD_SpecularRayDirectionHitDistance,
+                                                    NVSDK_NGX_Parameter_DLSSD_SpecularRayDirectionHitDistance_Subrect_Base_X,
+                                                    NVSDK_NGX_Parameter_DLSSD_SpecularRayDirectionHitDistance_Subrect_Base_Y, read_state);
+    // Output is written from its origin (0, 0), matching OpenNrRrFeature_Dx12.
+    frame.output = tex(NVSDK_NGX_Parameter_Output, nullptr, nullptr, output_state);
 
-    frame.specular_albedo = tex("DLSSD.SpecularAlbedo", NVSDK_NGX_Parameter_SpecularAlbedo,
-                                "DLSSD.Input.SpecularAlbedo.Subrect.Base.X", NVSDK_NGX_Parameter_DLSS_Input_SpecularAlbedo_Subrect_Base_X,
-                                "DLSSD.Input.SpecularAlbedo.Subrect.Base.Y", NVSDK_NGX_Parameter_DLSS_Input_SpecularAlbedo_Subrect_Base_Y, read_state);
-    if (!frame.specular_albedo.resource)
-        frame.specular_albedo = tex("GBuffer.SpecularAlbedo", "GBuffer.Specular", nullptr, nullptr, nullptr, nullptr, read_state);
-
-    frame.normals = tex("DLSSD.Normals", NVSDK_NGX_Parameter_GBuffer_Normals,
-                        "DLSSD.Input.Normals.Subrect.Base.X", NVSDK_NGX_Parameter_DLSS_Input_Normals_Subrect_Base_X,
-                        "DLSSD.Input.Normals.Subrect.Base.Y", NVSDK_NGX_Parameter_DLSS_Input_Normals_Subrect_Base_Y, read_state);
-    frame.roughness = tex("DLSSD.Roughness", NVSDK_NGX_Parameter_GBuffer_Roughness,
-                          "DLSSD.Input.Roughness.Subrect.Base.X", NVSDK_NGX_Parameter_DLSS_Input_Roughness_Subrect_Base_X,
-                          "DLSSD.Input.Roughness.Subrect.Base.Y", NVSDK_NGX_Parameter_DLSS_Input_Roughness_Subrect_Base_Y, read_state);
-    frame.depth = tex("DLSSD.Depth", NVSDK_NGX_Parameter_Depth,
-                      "DLSSD.Input.Depth.Subrect.Base.X", NVSDK_NGX_Parameter_DLSS_Input_Depth_Subrect_Base_X,
-                      "DLSSD.Input.Depth.Subrect.Base.Y", NVSDK_NGX_Parameter_DLSS_Input_Depth_Subrect_Base_Y, depth_state);
-    frame.motion = tex("DLSSD.MotionVectors", NVSDK_NGX_Parameter_MotionVectors,
-                       "DLSSD.Input.MV.Subrect.Base.X", NVSDK_NGX_Parameter_DLSS_Input_MV_SubrectBase_X,
-                       "DLSSD.Input.MV.Subrect.Base.Y", NVSDK_NGX_Parameter_DLSS_Input_MV_SubrectBase_Y, mv_state);
-    frame.specular_hit_distance = tex(NVSDK_NGX_Parameter_DLSSD_SpecularHitDistance, "RayTracingHitDistance",
-                                      NVSDK_NGX_Parameter_DLSSD_SpecularHitDistance_Subrect_Base_X, nullptr,
-                                      NVSDK_NGX_Parameter_DLSSD_SpecularHitDistance_Subrect_Base_Y, nullptr, read_state);
-    frame.specular_ray_direction_hit_distance = tex(NVSDK_NGX_Parameter_DLSSD_SpecularRayDirectionHitDistance, nullptr,
-                                                    NVSDK_NGX_Parameter_DLSSD_SpecularRayDirectionHitDistance_Subrect_Base_X, nullptr,
-                                                    NVSDK_NGX_Parameter_DLSSD_SpecularRayDirectionHitDistance_Subrect_Base_Y, nullptr, read_state);
-    // Preserve ordinary output priority; only the host prefers generic Output.
-    frame.output = tex(host_owned ? NVSDK_NGX_Parameter_Output : "DLSSD.Output",
-                       host_owned ? "DLSSD.Output" : NVSDK_NGX_Parameter_Output,
-                       "DLSS.Output.Subrect.Base.X", nullptr,
-                       "DLSS.Output.Subrect.Base.Y", nullptr, output_state);
-
-    frame.transparency_layer = tex(NVSDK_NGX_Parameter_DLSSD_ColorBeforeParticles, "DLSS.TransparencyLayer",
-                                   "DLSS.TransparencyLayer.Subrect.Base.X", nullptr,
-                                   "DLSS.TransparencyLayer.Subrect.Base.Y", nullptr, read_state);
-    frame.transparency_opacity = tex("DLSS.TransparencyLayerOpacity", nullptr,
-                                     "DLSS.TransparencyLayerOpacity.Subrect.Base.X", nullptr,
-                                     "DLSS.TransparencyLayerOpacity.Subrect.Base.Y", nullptr, read_state);
-    frame.disocclusion_mask = tex("DLSS.DisocclusionMask", "GBuffer.DisocclusionMask",
-                                  "DLSS.DisocclusionMask.Subrect.Base.X", nullptr,
-                                  "DLSS.DisocclusionMask.Subrect.Base.Y", nullptr, read_state);
-    frame.sss_guide = tex(NVSDK_NGX_Parameter_DLSSD_ColorBeforeFog, NVSDK_NGX_Parameter_DLSSD_ScreenSpaceSubsurfaceScatteringGuide,
-                          nullptr, nullptr, nullptr, nullptr, read_state);
+    frame.transparency_layer = tex(NVSDK_NGX_Parameter_DLSSD_ColorBeforeParticles,
+                                   "DLSS.TransparencyLayer.Subrect.Base.X",
+                                   "DLSS.TransparencyLayer.Subrect.Base.Y", read_state);
+    if (!frame.transparency_layer.resource)
+        frame.transparency_layer = tex("DLSS.TransparencyLayer",
+                                       "DLSS.TransparencyLayer.Subrect.Base.X",
+                                       "DLSS.TransparencyLayer.Subrect.Base.Y", read_state);
+    frame.transparency_opacity = tex("DLSS.TransparencyLayerOpacity",
+                                     "DLSS.TransparencyLayerOpacity.Subrect.Base.X",
+                                     "DLSS.TransparencyLayerOpacity.Subrect.Base.Y", read_state);
+    frame.disocclusion_mask = tex("DLSS.DisocclusionMask",
+                                  "DLSS.DisocclusionMask.Subrect.Base.X",
+                                  "DLSS.DisocclusionMask.Subrect.Base.Y", read_state);
+    frame.sss_guide = tex(NVSDK_NGX_Parameter_DLSSD_ColorBeforeFog, nullptr, nullptr, read_state);
+    if (!frame.sss_guide.resource)
+        frame.sss_guide = tex(NVSDK_NGX_Parameter_DLSSD_ScreenSpaceSubsurfaceScatteringGuide, nullptr, nullptr, read_state);
     frame.sss_guide.x = frame.color.x;
     frame.sss_guide.y = frame.color.y;
 
-    frame.responsivity_mask = tex("DLSSD.ResponsivityMask", nullptr,
-                                  "DLSSD.ResponsivityMask.Subrect.Base.X", nullptr,
-                                  "DLSSD.ResponsivityMask.Subrect.Base.Y", nullptr, read_state);
-    frame.color_before_transparency = tex(NVSDK_NGX_Parameter_DLSSD_ColorBeforeTransparency, nullptr,
-                                          nullptr, nullptr, nullptr, nullptr, read_state);
+    frame.responsivity_mask = tex("DLSSD.ResponsivityMask",
+                                  "DLSSD.ResponsivityMask.Subrect.Base.X",
+                                  "DLSSD.ResponsivityMask.Subrect.Base.Y", read_state);
+    frame.color_before_transparency = tex(NVSDK_NGX_Parameter_DLSSD_ColorBeforeTransparency, nullptr, nullptr, read_state);
     frame.color_before_transparency.x = frame.color.x;
     frame.color_before_transparency.y = frame.color.y;
 
-    frame.depth_of_field_guide = tex(NVSDK_NGX_Parameter_DLSSD_DepthOfFieldGuide, nullptr,
-                                     nullptr, nullptr, nullptr, nullptr, read_state);
+    frame.depth_of_field_guide = tex(NVSDK_NGX_Parameter_DLSSD_DepthOfFieldGuide, nullptr, nullptr, read_state);
     frame.depth_of_field_guide.x = frame.color.x;
     frame.depth_of_field_guide.y = frame.color.y;
 
-    frame.specular_motion = tex(NVSDK_NGX_Parameter_GBuffer_SpecularMvec, "MotionVectorsReflection",
-                                nullptr, nullptr, nullptr, nullptr, read_state);
+    frame.specular_motion = tex(NVSDK_NGX_Parameter_GBuffer_SpecularMvec, nullptr, nullptr, read_state);
     frame.specular_motion.x = frame.motion.x;
     frame.specular_motion.y = frame.motion.y;
 
-    frame.transparency_motion = tex("DLSS.TransparencyLayerMvecs", nullptr,
-                                    "DLSS.TransparencyLayerMvecs.Subrect.Base.X", nullptr,
-                                    "DLSS.TransparencyLayerMvecs.Subrect.Base.Y", nullptr, read_state);
+    frame.transparency_motion = tex("DLSS.TransparencyLayerMvecs",
+                                    "DLSS.TransparencyLayerMvecs.Subrect.Base.X",
+                                    "DLSS.TransparencyLayerMvecs.Subrect.Base.Y", read_state);
 
     frame.disocclusion_mask_scale = cfg.disocclusion_mask_scale > 0.0f ? cfg.disocclusion_mask_scale : 1.0f;
     if (!cfg.use_disocclusion_mask) frame.disocclusion_mask = {};
@@ -1874,10 +1962,25 @@ bool fill_d3d12_frame(RrContext& ctx, const NVSDK_NGX_Parameter& params, OnrRrFr
     if (!cfg.use_reflection_motion_vectors) frame.specular_motion = {};
     if (!cfg.use_layer_opacity_and_motion) frame.transparency_opacity = frame.transparency_motion = {};
 
+    log_d3d12_ngx_inputs(ctx, params, frame);
+
     if (!frame.color.resource || !frame.depth.resource || !frame.motion.resource || !frame.output.resource) {
         log("[openrr] D3D12 evaluate missing required resource (color=%p depth=%p motion=%p output=%p)",
             frame.color.resource, frame.depth.resource, frame.motion.resource, frame.output.resource);
         return false;
+    }
+
+    if (!ctx.guides_logged) {
+        ctx.guides_logged = true;
+        log("[openrr] guides diffuse_albedo=%d specular_albedo=%d normals=%d roughness=%d hit=%d dir_hit=%d(not read) tl=%d tl_op=%d tl_mv=%d dm=%d sss=%d resp=%d cbt=%d dof=%d smv=%d",
+            int(frame.diffuse_albedo.resource != nullptr), int(frame.specular_albedo.resource != nullptr),
+            int(frame.normals.resource != nullptr), int(frame.roughness.resource != nullptr),
+            int(frame.specular_hit_distance.resource != nullptr), int(frame.specular_ray_direction_hit_distance.resource != nullptr),
+            int(frame.transparency_layer.resource != nullptr), int(frame.transparency_opacity.resource != nullptr),
+            int(frame.transparency_motion.resource != nullptr), int(frame.disocclusion_mask.resource != nullptr),
+            int(frame.sss_guide.resource != nullptr), int(frame.responsivity_mask.resource != nullptr),
+            int(frame.color_before_transparency.resource != nullptr), int(frame.depth_of_field_guide.resource != nullptr),
+            int(frame.specular_motion.resource != nullptr));
     }
 
     int rough_mode = -1;
@@ -1899,6 +2002,14 @@ bool fill_d3d12_frame(RrContext& ctx, const NVSDK_NGX_Parameter& params, OnrRrFr
     else if (dkind == DepthKind::Hardware) hw_depth = true;
     else if (ctx.has_ngx_depth_type) hw_depth = ctx.ngx_hw_depth;
     else hw_depth = (dkind != DepthKind::GameWritten);
+
+    if (int(hw_depth) != ctx.logged_hw_depth) {
+        ctx.logged_hw_depth = int(hw_depth);
+        log("[openrr] depth is %s (%s), %s",
+            hw_depth ? "hardware" : "linear",
+            ctx.has_ngx_depth_type ? (ctx.ngx_hw_depth ? "NGX says hardware" : "NGX says linear") : "NGX says nothing",
+            depth_inverted ? "reversed Z" : "standard Z");
+    }
 
     const ULONGLONG now_tick = GetTickCount64();
     const bool stale_history = ctx.last_eval_tick != 0 && (now_tick - ctx.last_eval_tick) > 250;
@@ -1925,15 +2036,15 @@ bool fill_vk_frame(RrContext& ctx, const NVSDK_NGX_Parameter& params, OnrRrFrame
 
     read_eval_render_size(&params, ctx.max_render_w, ctx.max_render_h, frame.render_width, frame.render_height);
 
-    get_param_2(params, "DLSSD.Jitter.Offset.X", NVSDK_NGX_Parameter_Jitter_Offset_X, frame.jitter_x);
-    get_param_2(params, "DLSSD.Jitter.Offset.Y", NVSDK_NGX_Parameter_Jitter_Offset_Y, frame.jitter_y);
+    params.Get(NVSDK_NGX_Parameter_Jitter_Offset_X, &frame.jitter_x);
+    params.Get(NVSDK_NGX_Parameter_Jitter_Offset_Y, &frame.jitter_y);
     if (!std::isfinite(frame.jitter_x)) frame.jitter_x = 0.0f;
     if (!std::isfinite(frame.jitter_y)) frame.jitter_y = 0.0f;
 
-    if (!get_param_2(params, "DLSSD.MV.Scale.X", NVSDK_NGX_Parameter_MV_Scale_X, frame.mv_scale_x) ||
+    if (params.Get(NVSDK_NGX_Parameter_MV_Scale_X, &frame.mv_scale_x) != NVSDK_NGX_Result_Success ||
         !std::isfinite(frame.mv_scale_x) || frame.mv_scale_x == 0.0f)
         frame.mv_scale_x = 1.0f;
-    if (!get_param_2(params, "DLSSD.MV.Scale.Y", NVSDK_NGX_Parameter_MV_Scale_Y, frame.mv_scale_y) ||
+    if (params.Get(NVSDK_NGX_Parameter_MV_Scale_Y, &frame.mv_scale_y) != NVSDK_NGX_Result_Success ||
         !std::isfinite(frame.mv_scale_y) || frame.mv_scale_y == 0.0f)
         frame.mv_scale_y = 1.0f;
 
@@ -1945,9 +2056,9 @@ bool fill_vk_frame(RrContext& ctx, const NVSDK_NGX_Parameter& params, OnrRrFrame
                                      : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     const uint32_t output_layout = VK_IMAGE_LAYOUT_GENERAL;
 
-    auto tex = [&](const char* k1, const char* k2, const char* bx1, const char* bx2, const char* by1, const char* by2, uint32_t layout) {
+    auto tex = [&](const char* key, const char* bx, const char* by, uint32_t layout) {
         OnrRrTexture t{};
-        NVSDK_NGX_Resource_VK* res = get_vk_res(params, k1, k2);
+        NVSDK_NGX_Resource_VK* res = get_vk_res(params, key, nullptr);
         if (!res || res->Type != NVSDK_NGX_RESOURCE_VK_TYPE_VK_IMAGEVIEW ||
             !res->Resource.ImageViewInfo.Image || ctx.num_vk_images >= int(std::size(ctx.vk_images)))
             return t;
@@ -1963,83 +2074,77 @@ bool fill_vk_frame(RrContext& ctx, const NVSDK_NGX_Parameter& params, OnrRrFrame
                uint32_t(VK_IMAGE_USAGE_SAMPLED_BIT | (res->ReadWrite ? VK_IMAGE_USAGE_STORAGE_BIT : 0))};
         t.resource = &img;
         t.state = layout;
-        get_param_2(params, bx1, bx2, t.x);
-        get_param_2(params, by1, by2, t.y);
+        if (bx) params.Get(bx, &t.x);
+        if (by) params.Get(by, &t.y);
         return t;
     };
 
-    frame.color = tex(NVSDK_NGX_Parameter_Color, "DLSSD.Color",
-                      NVSDK_NGX_Parameter_DLSS_Input_Color_Subrect_Base_X, "DLSSD.Input.Color.Subrect.Base.X",
-                      NVSDK_NGX_Parameter_DLSS_Input_Color_Subrect_Base_Y, "DLSSD.Input.Color.Subrect.Base.Y", read_layout);
-    frame.diffuse_albedo = tex("DLSSD.DiffuseAlbedo", NVSDK_NGX_Parameter_DiffuseAlbedo,
-                               "DLSSD.Input.DiffuseAlbedo.Subrect.Base.X", NVSDK_NGX_Parameter_DLSS_Input_DiffuseAlbedo_Subrect_Base_X,
-                               "DLSSD.Input.DiffuseAlbedo.Subrect.Base.Y", NVSDK_NGX_Parameter_DLSS_Input_DiffuseAlbedo_Subrect_Base_Y, read_layout);
-    if (!frame.diffuse_albedo.resource)
-        frame.diffuse_albedo = tex("GBuffer.DiffuseAlbedo", "GBuffer.Albedo", nullptr, nullptr, nullptr, nullptr, read_layout);
+    frame.color = tex(NVSDK_NGX_Parameter_Color,
+                      NVSDK_NGX_Parameter_DLSS_Input_Color_Subrect_Base_X,
+                      NVSDK_NGX_Parameter_DLSS_Input_Color_Subrect_Base_Y, read_layout);
+    frame.diffuse_albedo = tex(NVSDK_NGX_Parameter_DiffuseAlbedo,
+                               NVSDK_NGX_Parameter_DLSS_Input_DiffuseAlbedo_Subrect_Base_X,
+                               NVSDK_NGX_Parameter_DLSS_Input_DiffuseAlbedo_Subrect_Base_Y, read_layout);
+    frame.specular_albedo = tex(NVSDK_NGX_Parameter_SpecularAlbedo,
+                                NVSDK_NGX_Parameter_DLSS_Input_SpecularAlbedo_Subrect_Base_X,
+                                NVSDK_NGX_Parameter_DLSS_Input_SpecularAlbedo_Subrect_Base_Y, read_layout);
+    frame.normals = tex(NVSDK_NGX_Parameter_GBuffer_Normals,
+                        NVSDK_NGX_Parameter_DLSS_Input_Normals_Subrect_Base_X,
+                        NVSDK_NGX_Parameter_DLSS_Input_Normals_Subrect_Base_Y, read_layout);
+    frame.roughness = tex(NVSDK_NGX_Parameter_GBuffer_Roughness,
+                          NVSDK_NGX_Parameter_DLSS_Input_Roughness_Subrect_Base_X,
+                          NVSDK_NGX_Parameter_DLSS_Input_Roughness_Subrect_Base_Y, read_layout);
+    frame.depth = tex(NVSDK_NGX_Parameter_Depth,
+                      NVSDK_NGX_Parameter_DLSS_Input_Depth_Subrect_Base_X,
+                      NVSDK_NGX_Parameter_DLSS_Input_Depth_Subrect_Base_Y, read_layout);
+    frame.motion = tex(NVSDK_NGX_Parameter_MotionVectors,
+                       NVSDK_NGX_Parameter_DLSS_Input_MV_SubrectBase_X,
+                       NVSDK_NGX_Parameter_DLSS_Input_MV_SubrectBase_Y, read_layout);
+    frame.specular_hit_distance = tex(NVSDK_NGX_Parameter_DLSSD_SpecularHitDistance,
+                                      NVSDK_NGX_Parameter_DLSSD_SpecularHitDistance_Subrect_Base_X,
+                                      NVSDK_NGX_Parameter_DLSSD_SpecularHitDistance_Subrect_Base_Y, read_layout);
+    frame.specular_ray_direction_hit_distance = tex(NVSDK_NGX_Parameter_DLSSD_SpecularRayDirectionHitDistance,
+                                                    NVSDK_NGX_Parameter_DLSSD_SpecularRayDirectionHitDistance_Subrect_Base_X,
+                                                    NVSDK_NGX_Parameter_DLSSD_SpecularRayDirectionHitDistance_Subrect_Base_Y, read_layout);
+    frame.output = tex(NVSDK_NGX_Parameter_Output, nullptr, nullptr, output_layout);
 
-    frame.specular_albedo = tex("DLSSD.SpecularAlbedo", NVSDK_NGX_Parameter_SpecularAlbedo,
-                                "DLSSD.Input.SpecularAlbedo.Subrect.Base.X", NVSDK_NGX_Parameter_DLSS_Input_SpecularAlbedo_Subrect_Base_X,
-                                "DLSSD.Input.SpecularAlbedo.Subrect.Base.Y", NVSDK_NGX_Parameter_DLSS_Input_SpecularAlbedo_Subrect_Base_Y, read_layout);
-    if (!frame.specular_albedo.resource)
-        frame.specular_albedo = tex("GBuffer.SpecularAlbedo", "GBuffer.Specular", nullptr, nullptr, nullptr, nullptr, read_layout);
-
-    frame.normals = tex("DLSSD.Normals", NVSDK_NGX_Parameter_GBuffer_Normals,
-                        "DLSSD.Input.Normals.Subrect.Base.X", NVSDK_NGX_Parameter_DLSS_Input_Normals_Subrect_Base_X,
-                        "DLSSD.Input.Normals.Subrect.Base.Y", NVSDK_NGX_Parameter_DLSS_Input_Normals_Subrect_Base_Y, read_layout);
-    frame.roughness = tex("DLSSD.Roughness", NVSDK_NGX_Parameter_GBuffer_Roughness,
-                          "DLSSD.Input.Roughness.Subrect.Base.X", NVSDK_NGX_Parameter_DLSS_Input_Roughness_Subrect_Base_X,
-                          "DLSSD.Input.Roughness.Subrect.Base.Y", NVSDK_NGX_Parameter_DLSS_Input_Roughness_Subrect_Base_Y, read_layout);
-    frame.depth = tex("DLSSD.Depth", NVSDK_NGX_Parameter_Depth,
-                      "DLSSD.Input.Depth.Subrect.Base.X", NVSDK_NGX_Parameter_DLSS_Input_Depth_Subrect_Base_X,
-                      "DLSSD.Input.Depth.Subrect.Base.Y", NVSDK_NGX_Parameter_DLSS_Input_Depth_Subrect_Base_Y, read_layout);
-    frame.motion = tex("DLSSD.MotionVectors", NVSDK_NGX_Parameter_MotionVectors,
-                       "DLSSD.Input.MV.Subrect.Base.X", NVSDK_NGX_Parameter_DLSS_Input_MV_SubrectBase_X,
-                       "DLSSD.Input.MV.Subrect.Base.Y", NVSDK_NGX_Parameter_DLSS_Input_MV_SubrectBase_Y, read_layout);
-    frame.specular_hit_distance = tex(NVSDK_NGX_Parameter_DLSSD_SpecularHitDistance, "RayTracingHitDistance",
-                                      NVSDK_NGX_Parameter_DLSSD_SpecularHitDistance_Subrect_Base_X, nullptr,
-                                      NVSDK_NGX_Parameter_DLSSD_SpecularHitDistance_Subrect_Base_Y, nullptr, read_layout);
-    frame.specular_ray_direction_hit_distance = tex(NVSDK_NGX_Parameter_DLSSD_SpecularRayDirectionHitDistance, nullptr,
-                                                    NVSDK_NGX_Parameter_DLSSD_SpecularRayDirectionHitDistance_Subrect_Base_X, nullptr,
-                                                    NVSDK_NGX_Parameter_DLSSD_SpecularRayDirectionHitDistance_Subrect_Base_Y, nullptr, read_layout);
-    frame.output = tex("DLSSD.Output", NVSDK_NGX_Parameter_Output,
-                       "DLSS.Output.Subrect.Base.X", nullptr,
-                       "DLSS.Output.Subrect.Base.Y", nullptr, output_layout);
-
-    frame.transparency_layer = tex(NVSDK_NGX_Parameter_DLSSD_ColorBeforeParticles, "DLSS.TransparencyLayer",
-                                   "DLSS.TransparencyLayer.Subrect.Base.X", nullptr,
-                                   "DLSS.TransparencyLayer.Subrect.Base.Y", nullptr, read_layout);
-    frame.transparency_opacity = tex("DLSS.TransparencyLayerOpacity", nullptr,
-                                     "DLSS.TransparencyLayerOpacity.Subrect.Base.X", nullptr,
-                                     "DLSS.TransparencyLayerOpacity.Subrect.Base.Y", nullptr, read_layout);
-    frame.disocclusion_mask = tex("DLSS.DisocclusionMask", "GBuffer.DisocclusionMask",
-                                  "DLSS.DisocclusionMask.Subrect.Base.X", nullptr,
-                                  "DLSS.DisocclusionMask.Subrect.Base.Y", nullptr, read_layout);
-    frame.sss_guide = tex(NVSDK_NGX_Parameter_DLSSD_ColorBeforeFog, NVSDK_NGX_Parameter_DLSSD_ScreenSpaceSubsurfaceScatteringGuide,
-                          nullptr, nullptr, nullptr, nullptr, read_layout);
+    frame.transparency_layer = tex(NVSDK_NGX_Parameter_DLSSD_ColorBeforeParticles,
+                                   "DLSS.TransparencyLayer.Subrect.Base.X",
+                                   "DLSS.TransparencyLayer.Subrect.Base.Y", read_layout);
+    if (!frame.transparency_layer.resource)
+        frame.transparency_layer = tex("DLSS.TransparencyLayer",
+                                       "DLSS.TransparencyLayer.Subrect.Base.X",
+                                       "DLSS.TransparencyLayer.Subrect.Base.Y", read_layout);
+    frame.transparency_opacity = tex("DLSS.TransparencyLayerOpacity",
+                                     "DLSS.TransparencyLayerOpacity.Subrect.Base.X",
+                                     "DLSS.TransparencyLayerOpacity.Subrect.Base.Y", read_layout);
+    frame.disocclusion_mask = tex("DLSS.DisocclusionMask",
+                                  "DLSS.DisocclusionMask.Subrect.Base.X",
+                                  "DLSS.DisocclusionMask.Subrect.Base.Y", read_layout);
+    frame.sss_guide = tex(NVSDK_NGX_Parameter_DLSSD_ColorBeforeFog, nullptr, nullptr, read_layout);
+    if (!frame.sss_guide.resource)
+        frame.sss_guide = tex(NVSDK_NGX_Parameter_DLSSD_ScreenSpaceSubsurfaceScatteringGuide, nullptr, nullptr, read_layout);
     frame.sss_guide.x = frame.color.x;
     frame.sss_guide.y = frame.color.y;
 
-    frame.responsivity_mask = tex("DLSSD.ResponsivityMask", nullptr,
-                                  "DLSSD.ResponsivityMask.Subrect.Base.X", nullptr,
-                                  "DLSSD.ResponsivityMask.Subrect.Base.Y", nullptr, read_layout);
-    frame.color_before_transparency = tex(NVSDK_NGX_Parameter_DLSSD_ColorBeforeTransparency, nullptr,
-                                          nullptr, nullptr, nullptr, nullptr, read_layout);
+    frame.responsivity_mask = tex("DLSSD.ResponsivityMask",
+                                  "DLSSD.ResponsivityMask.Subrect.Base.X",
+                                  "DLSSD.ResponsivityMask.Subrect.Base.Y", read_layout);
+    frame.color_before_transparency = tex(NVSDK_NGX_Parameter_DLSSD_ColorBeforeTransparency, nullptr, nullptr, read_layout);
     frame.color_before_transparency.x = frame.color.x;
     frame.color_before_transparency.y = frame.color.y;
 
-    frame.depth_of_field_guide = tex(NVSDK_NGX_Parameter_DLSSD_DepthOfFieldGuide, nullptr,
-                                     nullptr, nullptr, nullptr, nullptr, read_layout);
+    frame.depth_of_field_guide = tex(NVSDK_NGX_Parameter_DLSSD_DepthOfFieldGuide, nullptr, nullptr, read_layout);
     frame.depth_of_field_guide.x = frame.color.x;
     frame.depth_of_field_guide.y = frame.color.y;
 
-    frame.specular_motion = tex(NVSDK_NGX_Parameter_GBuffer_SpecularMvec, "MotionVectorsReflection",
-                                nullptr, nullptr, nullptr, nullptr, read_layout);
+    frame.specular_motion = tex(NVSDK_NGX_Parameter_GBuffer_SpecularMvec, nullptr, nullptr, read_layout);
     frame.specular_motion.x = frame.motion.x;
     frame.specular_motion.y = frame.motion.y;
 
-    frame.transparency_motion = tex("DLSS.TransparencyLayerMvecs", nullptr,
-                                    "DLSS.TransparencyLayerMvecs.Subrect.Base.X", nullptr,
-                                    "DLSS.TransparencyLayerMvecs.Subrect.Base.Y", nullptr, read_layout);
+    frame.transparency_motion = tex("DLSS.TransparencyLayerMvecs",
+                                    "DLSS.TransparencyLayerMvecs.Subrect.Base.X",
+                                    "DLSS.TransparencyLayerMvecs.Subrect.Base.Y", read_layout);
 
     frame.disocclusion_mask_scale = cfg.disocclusion_mask_scale > 0.0f ? cfg.disocclusion_mask_scale : 1.0f;
     if (!cfg.use_disocclusion_mask) frame.disocclusion_mask = {};
@@ -2373,7 +2478,13 @@ NVSDK_NGX_Result create_d3d12_rr(ID3D12GraphicsCommandList* cmd, NVSDK_NGX_Featu
     ci.backend = backend_choice;
 
     openrr::pe::vulkan_entry_points();
-    const int32_t rc = g_api.Create(&ci, &ctx->runtime_ctx);
+    int32_t rc = ONR_RR_FAILED;
+    {
+        InternalVkScope vk_scope;
+        ++t_in_openrr_record;
+        rc = g_api.Create(&ci, &ctx->runtime_ctx);
+        --t_in_openrr_record;
+    }
     if (rc != ONR_RR_OK || !ctx->runtime_ctx) {
         const std::string err = runtime_last_error();
         log("[openrr] D3D12 Create failed (rc=%d): %s", rc, err.c_str());
@@ -2511,12 +2622,29 @@ NVSDK_NGX_Result evaluate_d3d12_rr(ID3D12GraphicsCommandList* cmd, const NVSDK_N
             }
             ctx.unknown_streak = 0;
         }
+        bool just_became_ready = false;
+        if (!ctx.ready_logged && g_api.GetInfo) {
+            OnrRrInfo pre_info{};
+            pre_info.size = sizeof(pre_info);
+            if (g_api.GetInfo(ctx.runtime_ctx, &pre_info) == ONR_RR_OK && pre_info.state == ONR_RR_STATE_READY) {
+                ctx.ready_logged = true;
+                just_became_ready = true;
+                log("[openrr] D3D12 runtime transitioned to READY on frame %llu; recording first full network frame",
+                    static_cast<unsigned long long>(ctx.frame_count));
+            }
+        }
+        if (just_became_ready || ctx.frame_count < 4) {
+            openrr::pe::flush_log();
+        }
         const auto state = split_ok ? openrr::pe::split::snapshot(cmd) : nullptr;
         void* job = nullptr;
         t_record_target = nullptr;
         ++t_in_openrr_record;
         const int32_t rc = g_api4.Record(ctx.runtime_ctx, &frame, cmd, ONR_RR_EDIT_OFF, nullptr, &job);
         --t_in_openrr_record;
+        if (just_became_ready || ctx.frame_count < 4) {
+            openrr::pe::flush_log();
+        }
         ID3D12GraphicsCommandList* target = t_record_target;
         t_record_target = nullptr;
         if (split_ok && state) {
@@ -2594,7 +2722,10 @@ void destroy_d3d12_rr_context(RrContext& ctx) {
         rt = ctx.runtime_ctx;
     }
     ctx.runtime_ctx = nullptr;
-    if (rt) g_api.Destroy(rt);
+    if (rt) {
+        InternalVkScope vk_scope;
+        g_api.Destroy(rt);
+    }
 }
 
 NVSDK_NGX_Result release_d3d12_rr(NVSDK_NGX_Handle* handle, bool host_owned) {
@@ -2864,7 +2995,13 @@ NVSDK_NGX_Result create_vk_rr_feature(VkDevice dev, VkCommandBuffer cmd, NVSDK_N
     ci.vk_device = &vkd;
 
     openrr::pe::vulkan_entry_points();
-    const int32_t rc = g_api.Create(&ci, &ctx->runtime_ctx);
+    int32_t rc = ONR_RR_FAILED;
+    {
+        InternalVkScope vk_scope;
+        ++t_in_openrr_record;
+        rc = g_api.Create(&ci, &ctx->runtime_ctx);
+        --t_in_openrr_record;
+    }
     if (rc != ONR_RR_OK || !ctx->runtime_ctx) {
         const std::string err = runtime_last_error();
         log("[openrr] Vulkan Create failed (rc=%d): %s", rc, err.c_str());
@@ -2976,7 +3113,10 @@ NVSDK_NGX_Result RR_NGX_MSABI hk_vk_release(NVSDK_NGX_Handle* handle) {
     }
     if (!gone) return real_vk_release(handle);
     log("[openrr] Vulkan Ray Reconstruction feature released (handle=0x%X)", gone->handle_id);
-    if (gone->runtime_ctx) g_api.Destroy(gone->runtime_ctx);
+    if (gone->runtime_ctx) {
+        InternalVkScope vk_scope;
+        g_api.Destroy(gone->runtime_ctx);
+    }
     if (gone->allocated_handle == handle) delete gone->allocated_handle;
     openrr::pe::control::Status st{};
     openrr::pe::control::report(st);
@@ -3002,7 +3142,10 @@ void destroy_all_vk_rr(VkDevice filter_dev = VK_NULL_HANDLE) {
             openrr::pe::vulkan_entry_points();
             vkDeviceWaitIdle(ctx->vk_device);
         }
-        if (ctx->runtime_ctx) g_api.Destroy(ctx->runtime_ctx);
+        if (ctx->runtime_ctx) {
+            InternalVkScope vk_scope;
+            g_api.Destroy(ctx->runtime_ctx);
+        }
         if (ctx->allocated_handle) delete ctx->allocated_handle;
     }
 }
@@ -3061,6 +3204,7 @@ std::vector<SeenVkDevice> g_seen_vk_devices;
 
 VKAPI_ATTR VkResult VKAPI_CALL hk_vk_create_instance(const VkInstanceCreateInfo* ci, const VkAllocationCallbacks* a, VkInstance* out) {
     const VkResult r = real_vk_create_instance(ci, a, out);
+    if (t_in_internal_vk > 0) return r;
     if (r == VK_SUCCESS && out && *out) {
         const uint32_t ver = (ci && ci->pApplicationInfo && ci->pApplicationInfo->apiVersion)
                                  ? ci->pApplicationInfo->apiVersion
@@ -3074,6 +3218,7 @@ VKAPI_ATTR VkResult VKAPI_CALL hk_vk_create_instance(const VkInstanceCreateInfo*
 
 VKAPI_ATTR VkResult VKAPI_CALL hk_vk_enum_phys(VkInstance instance, uint32_t* count, VkPhysicalDevice* list) {
     const VkResult r = real_vk_enum_phys(instance, count, list);
+    if (t_in_internal_vk > 0) return r;
     if ((r == VK_SUCCESS || r == VK_INCOMPLETE) && instance && list && count) {
         std::lock_guard<std::mutex> lock(g_vk_dev_mutex);
         g_last_vk_instance.store(instance);
@@ -3084,6 +3229,7 @@ VKAPI_ATTR VkResult VKAPI_CALL hk_vk_enum_phys(VkInstance instance, uint32_t* co
 
 VkResult do_vk_create_device(PFN_vkCreateDevice create, VkInstance inst, VkPhysicalDevice phys,
                              const VkDeviceCreateInfo* ci, const VkAllocationCallbacks* a, VkDevice* out) {
+    if (t_in_internal_vk > 0) return create(phys, ci, a, out);
     ensure_deferred_init();
     openrr::pe::watchdog::Phase phase("vkCreateDevice (OpenRR)");
     struct Inside { Inside() { ++t_in_vk_create_device; } ~Inside() { --t_in_vk_create_device; } } inside;
@@ -3122,7 +3268,7 @@ VKAPI_ATTR VkResult VKAPI_CALL hk_vk_create_device(VkPhysicalDevice phys, const 
 
 VKAPI_ATTR VkResult VKAPI_CALL hk_vk_export_create_device(VkPhysicalDevice phys, const VkDeviceCreateInfo* ci,
                                                           const VkAllocationCallbacks* a, VkDevice* out) {
-    if (t_in_vk_create_device) return real_vk_export_create_device(phys, ci, a, out);
+    if (t_in_vk_create_device || t_in_internal_vk > 0) return real_vk_export_create_device(phys, ci, a, out);
     return do_vk_create_device(real_vk_export_create_device, VK_NULL_HANDLE, phys, ci, a, out);
 }
 
@@ -3139,12 +3285,12 @@ void on_vk_device_destroying(VkDevice device) {
 }
 
 VKAPI_ATTR void VKAPI_CALL hk_vk_destroy_device(VkDevice device, const VkAllocationCallbacks* a) {
-    on_vk_device_destroying(device);
+    if (t_in_internal_vk == 0) on_vk_device_destroying(device);
     real_vk_destroy_device(device, a);
 }
 
 VKAPI_ATTR void VKAPI_CALL hk_vk_gdpa_destroy_device(VkDevice device, const VkAllocationCallbacks* a) {
-    on_vk_device_destroying(device);
+    if (t_in_internal_vk == 0) on_vk_device_destroying(device);
     if (auto fn = g_gdpa_destroy_device.load()) fn(device, a);
 }
 

@@ -33,6 +33,7 @@ python3 asi/build/embed_font.py "$font" "$out/rr_menu_font.hpp" kMenuFont
 
 common_cxx=(-std=c++20 -mf16c -O2 -fno-strict-aliasing -DNDEBUG
             -DOPENRR_BUILD_STAMP="\"$stamp\""
+            -DONR_LT_DEEP="\"2,4,2,4\""
             -DONR_RR_BUILDING -DONR_RR_STATIC -DOPENRR_EXPERIMENTAL_OPTIFG_HOST
             -I"$vk_inc" -Igpu/include -Igpu/src -Iruntime/include -Iruntime/src
             -Iasi/src -I"$minhook/include" -I"$imgui" -I"$out")

@@ -825,10 +825,8 @@ void record_frame(Ctx* c, Rec& r, Job& j, bool network, bool split = false) {
             if (((ip.g[s][2] >> 16) & 12u) != 0) {
                 ip.dst[s] = 0;
             } else {
-                if (!c->guides[s].addr) {
+                if (!c->guides[s].addr)
                     c->guides[s] = d.create(size_t(c->guide_size.x) * c->guide_size.y * bpp8[s] + 64);
-                    d.fill(c->guides[s], 0, c->guides[s].size, 0);
-                }
                 ip.dst[s] = gt.buf[s] = c->guides[s].addr;
                 ingest = true;
             }
