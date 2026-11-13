@@ -32,6 +32,7 @@ patched=(src/amd/vulkan/radv_shader.c
          src/amd/vulkan/radv_descriptor_set.c
          src/amd/vulkan/nir/radv_nir_lower_cooperative_matrix.c
          src/amd/compiler/aco_assembler.cpp
+         src/amd/compiler/aco_insert_waitcnt.cpp
          src/amd/vulkan/radv_device.c)
 for f in "${patched[@]}"; do
     tar -xJf "$tarball" -C "$source" --strip-components=1 "mesa-26.3.0/$f"

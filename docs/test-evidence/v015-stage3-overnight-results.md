@@ -122,3 +122,29 @@ LLPC 1 次总等待 `0x0` 后批消费全部 5 个。全局 ACO 36 wait vs LLPC 
 采样的等待插入。**修复面在 Mesa/ACO 侧**：当多个 image_sample 的消费者在相邻窗口时
 合并为单次总等待。d3d_enc0_attr 侧（106 vs 109 wait，几乎持平）差距根源不同，暂未
 定位。160 族按指示维持 SPLIT=2（残余逐核差 ~0.002 ms）。
+
+
+## 8. Stage4 R1：两项单变量 Codegen 棘轮（E1 晋级 / E2 判负）
+
+**E1 enc0_attr readonly BDA（晋级，`c75740e`）**：`LT_ATTR_RO=1` 把 expo/prm/tab 三个
+纯标量 uniform 引用标 readonly（SPIR-V NonWritable，无 restrict）→ NIR/ACO 标
+CAN_REORDER 并提升到 SMEM。ISA：global_load 108→71、s_load 69→100、s_wait_loadcnt
+106→83、vgpr 96 持平、exec 26716→26284；仅 `_lt` 变体变，Legacy `_f` 哈希逐字节零变化。
+门禁：units 全绿；四相位 exact=100.000000%/ulp 0/psnr 999（对 green0）；日志防 A/A
+（基线 spv=72fc19aa vs 候选 5e2103a7）。速度：3×ABBA −0.903% @1080p / **−0.355%
+@4K（三组全负）**；@6 单核 0.961→0.936 ms（**−25.6 μs**）。
+
+**E2 post_f_lt 采样等待合并（判负，`build/v015-runs/s4-r1-item2-post-wait0/`）**：
+Mesa 26.3.0 GFX12 `ONR_ACO_SAMPLE_WAIT0` 使 s_wait_samplecnt 16→**4（全 0x0）**，
+采样发射不变（20）；仅 post_f_lt code_hash 变（95b8b8e1→93124126），其余全部记录
+逐位不变；同 spv 异 code 日志核验真 A/B；0-ULP 全过。但速度零收益：干净 ABBA
++0.274% @1080p / +0.034% @4K，**@40 单核 600 帧 1.3228 vs 1.3227 ms（零变化）**。
+阴性结论（修正 §7 推断）：ACO 的递减部分等待不花钱——首等待即等效全批等待；post 的
+14.5% 差距不在等待条数（LLPC 指令更多仍更快），在随后 SALU/VALU 排布与 barrier 位置。
+工具链已完整还原（Mesa 源 marker=0、post code_hash 复原 95b8b8e1、与 green1 零差异）。
+
+**终盘整帧 ACO vs LLPC**（无打点 3×ABBA 48/240/64，同会话）：1080p ACO 3.327 vs LLPC
+3.266 ms（+0.061 ms / +1.58%；ACO 侧较 2c 后实测 3.338 有改善）；4K 11.981 vs 11.658
+（+0.322 ms / +2.70%，组内 2.78/2.70/2.62 自洽）。跨会话绝对值有 ±1% 漂移（外部负载），
+单变量收益以组内 ABBA 与 @idx 微归因为准：**(bf57f97→c75740e) 已兑现 2c −0.61%@4K +
+E1 −0.36%@4K**。
