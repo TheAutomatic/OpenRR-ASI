@@ -47,3 +47,28 @@
 1. **4b 机制放大**：QV8 质量已证，把同模板推向 enc0/dec_up 的 Q/V 面（W1 头共享 `onr_w1_head.glsl`，一次改动三核受益）——注意 4b 在 dec_head 单核为速度中性，需三核一起测。
 2. hist10 v2 的探针/绑定机械已就绪（`item3/candidate.patch`），等一个非 UNORM 的符号容器决策。
 3. 4a 的 `2^k` 离线缩放（e4m3 次正规底 2^-9 截断小权重）单变量重试。
+
+
+## 5. 白天补测与当前 @idx 逐核终局剖析
+
+600 稳态帧 ×（ACO/LLPC）×（1080p/4K），`ONR_RR_FLOW=0 ONR_RR_STAMPS=1`，按 `stamped dispatches` 的 `@idx` 整数下标索引 intervals（ACO 候选侧 vs LLPC 候选侧；ACO 双侧交叉校验最大差 ≤0.005 ms）。全表 `build/v015-runs/day-idx/table.md` + `stamps.json`。
+
+**差距解剖（4K +0.404 ms / +3.61%）**：
+| 贡献源 | Δms | 比值 | 静态 |
+|---|---|---|---|
+| post_f_lt | +0.163 | 1.145× | 96 VGPR / LDS 8320 / exec 12216 |
+| d3d_enc0_attr_f_lt | +0.093 | 1.111× | 96 VGPR / LDS 0 / exec 26716（rsrc1 bit29=1 WGP_MODE）|
+| dec_up_160_256_160 | +0.033 | 1.279× | 192 VGPR / LDS 30208（CU_MODE，屏障 22×）|
+| enc_stage_160_256_0 | +0.018 | 1.349× | 同上 |
+| enc_stage_160_256_160 | +0.024 | 1.198× | 同上 |
+| dec_dfn_128_128_f_lt | **−0.080** | **0.699×** | ACO 反超 30%（SPLIT1+XS_TRIM 后 LDS 9728）|
+| 其余深层链 @14..@33 | ~+0.15 | 1.01–1.05× | 基本贴平 |
+
+1080p 同构：+0.184 ms，post +0.041、enc0_attr +0.038、dec_dfn_160 +0.026（1.528×）、downsample_tl +0.011（1.238×）。
+
+**白天三项实测判决**（全部按棘轮归档回退，树回 2118443）：
+- **item3-tight（hist10 紧致区间）**：Span A [-0.05,3.05] 使 4K 过内建逐帧门（54.84/59.59），但锚点 #4 编译器交叉 g1 127→57-70 dB、锚点 #2 对 5090 多案例 −0.6~−1.1 dB、速度 +0.05~+0.07%（post 是采样/LDS 界非带宽界，@42 实测 0.332/1.342 ms 反超 GREEN 的 0.321/1.291）。Span B 探测词（−0.0f/3.0f）与冻结 spv 碰撞（假阳性→基线设备移除），弃。四维全负，归档 `item3-tight/`。
+- **item1-dec-only（3a）**：每-tile 2-QC8 写法 + dont_unroll 后 dec_up vgpr 反降 216→192、质量全绿（min 帧 54.59——证实 enc0 输入层是唯一质量杀手）；但 ABBA +0.124/+0.092% 净负、锚点 #4 的 4k-g0-DRS −1.59 dB 超预算。归档 `item1-dec-only/`。
+- **item4b-w1-all3（3b）**：QV8 三核全开，质量与锚点 #4 全绿（1080-g0 +0.7），ABBA −0.027/+0.005% 中性。归档 `item4b-w1-all3/`。
+
+**结论**：W1/MLP/QV/hist10 表面上的 FP8 与带宽路线已系统性穷尽；剩余 LLPC 差距的 80% 集中在三个 codegen 面——post_f_lt（40%）、d3d_enc0_attr（23%）、SPLIT2 160 族（19%）——是下一轮（ACO 压核反超轮）的靶子。
