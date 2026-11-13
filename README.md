@@ -2,13 +2,13 @@
 
 简体中文 | [English](README.en.md)
 
-本仓库是基于上游 [OpenNeuralRendering/OpenRR](https://github.com/OpenNeuralRendering/OpenRR) 构建的**独立 OptiScaler `.asi` 插件分支**，用于在 AMD Radeon RX 9000 系列（RDNA4）显卡上运行 NVIDIA DLSS Ray Reconstruction（光线重建，`nvngx_dlssd.dll` 310.9.1）。
+本仓库是基于上游 [OpenNeuralRendering/OpenRR](https://github.com/OpenNeuralRendering/OpenRR) 构建的**独立 OptiScaler `.asi` 插件分支**，用于在 AMD Radeon RX 9000 系列（RDNA4）及实验性支持的 RX 7000 / RDNA3 / RDNA3.5 显卡上运行 NVIDIA DLSS Ray Reconstruction（光线重建，`nvngx_dlssd.dll` 310.9.1）。
 
 关于 OpenRR 的网络重实现原理、RDNA4 着色器架构、Clean-room 验证方法与基准数据，请直接参阅上游主仓库 **[OpenNeuralRendering/OpenRR](https://github.com/OpenNeuralRendering/OpenRR)**，本文不再赘述。
 
 ---
 
-当前整合上游 **v0.1.5**，采用其 Fast 模式显存复用与预投影权重优化，并保留本分支的 ASI 集成、菜单和 GPU 资源生命周期保护。旧版本的测试数据见下方历史记录。
+当前整合上游 **v0.1.6**（含 RX 7000 / RDNA3 shaders-gfx11 实验支持与光流默认策略），并保留本分支的 ASI 集成、菜单和 GPU 资源生命周期保护。旧版本的测试数据见下方历史记录。
 
 ## 本仓库做了什么
 

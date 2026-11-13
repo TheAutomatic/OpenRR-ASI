@@ -266,13 +266,19 @@ VkPhysicalDevice pick_vk_physical_device(const std::vector<VkPhysicalDevice>& de
         for (const auto& c : cands) {
             if (c.type == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU && c.is_amd && c.has_f8_cm) { chosen = &c; break; }
         }
-        // 2. Discrete GPU with AMD identity/driver (e.g. RDNA3 / RDNA2 discrete GPU)
+        // 2. Discrete GPU with AMD identity/driver (e.g. RDNA3 discrete GPU)
         if (!chosen) {
             for (const auto& c : cands) {
                 if (c.type == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU && c.is_amd) { chosen = &c; break; }
             }
         }
-        // 3. Fallback to first enumerated device only when no discrete candidate matched
+        // 3. Integrated/APU AMD GPU (e.g. Radeon 780M / 890M / 8060S) before non-AMD devices
+        if (!chosen) {
+            for (const auto& c : cands) {
+                if (c.is_amd) { chosen = &c; break; }
+            }
+        }
+        // 4. Fallback to first enumerated device only when no AMD candidate matched
         if (!chosen) chosen = &cands[0];
     }
 
@@ -351,6 +357,7 @@ bool Device::init(std::string& err, const DeviceOptions& opt) {
         VkPhysicalDeviceProperties2 p2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &drv};
         vkGetPhysicalDeviceProperties2(phys_, &p2);
         info_.name = p2.properties.deviceName;
+        info_.vendor = p2.properties.vendorID;
         info_.driver_version = p2.properties.driverVersion;
         info_.driver_info = drv.driverInfo;
         ts_period_ns_ = p2.properties.limits.timestampPeriod;
@@ -518,6 +525,7 @@ bool Device::adopt(const HostDevice& h, std::string& err) {
         VkPhysicalDeviceProperties2 p2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &drv};
         vkGetPhysicalDeviceProperties2(phys_, &p2);
         info_.name = p2.properties.deviceName;
+        info_.vendor = p2.properties.vendorID;
         info_.driver_version = p2.properties.driverVersion;
         info_.driver_info = drv.driverInfo;
         ts_period_ns_ = p2.properties.limits.timestampPeriod;
@@ -780,6 +788,7 @@ Kernel Device::load(const std::string& path, uint32_t subgroup) {
     const std::string stem = path_to_u8(fs_path.stem());
     k.views = stem.rfind("d3d_", 0) == 0;
     cpi.layout = k.views ? d3d_layout_ : layout_;
+    cpi.flags = pipeline_flags;
     if (stats_) cpi.flags |= VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR;
     const char* isa = stats_ ? getenv("ONR_ISA") : nullptr;   // directory: dump the driver's internal representations
     if (isa) cpi.flags |= VK_PIPELINE_CREATE_CAPTURE_INTERNAL_REPRESENTATIONS_BIT_KHR;

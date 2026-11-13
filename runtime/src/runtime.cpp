@@ -469,7 +469,12 @@ struct Ctx {
     bool direct_ok = false;            // d3d_ingest / d3d_pack read and write the game's textures (their check passed)
     Buffer dinput, doutput, dimage;    // the guides' copies, the output's rows, the denoised image (hop)
     uint64_t drecords = 0;             // recordings into the game's lists (dx ring slots)
+    // the last footprint per guide slot: GetCopyableFootprints only when the texture's description or offset changes
+    struct Footprint { D3D12_RESOURCE_DESC desc; UINT64 off, total; D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp; };
+    Footprint fps[G_COUNT] = {};
     uint32_t dq[D3dDevice::kSlots] = {}, dqnet[D3dDevice::kSlots][2] = {};
+    bool dqhop[D3dDevice::kSlots] = {};   // the slot holds a hop's first half, its RecordPost the rest
+    float dhop_ms = 0;                    // that first half's time, added to the RecordPost's
     std::wstring cache_dir;
     // Vulkan host backend (ABI 5): dev is the game's device, the frames recorded into its command buffers
     bool vk_host = false;
@@ -818,6 +823,12 @@ void record_frame(Ctx* c, Rec& r, Job& j, bool network, bool split = false) {
         }
         d.dispatch(r.k[r.ingest], &ip, sizeof ip, div_up(render.x, 16), div_up(render.y, 16));
     }
+    // the layer read by d3d_downsample_tl from the game's texture (the output written in place, no hop): not ingested
+    const bool tl_view = network && !split && direct && !c->vk_host && j.in[G_TL].present && j.in[G_TL].direct && r.out_fmt && c->engine.output_image_ok();
+    // the SSS guide and the mask (clamped or not; without its diagnostic invert or scale) read by d3d_enc0_attr from the game's views
+    const bool sss_view = direct && !c->vk_host && j.in[G_SSS].present && j.in[G_SSS].direct;
+    const bool dm_view = direct && !c->vk_host && j.in[G_DM].present && j.in[G_DM].direct &&
+                         !(f.flags & ONR_RR_FRAME_DM_INVERT) && !(f.disocclusion_mask_scale > 0.0f && f.disocclusion_mask_scale != 1.0f);
     if (network) {
         // the optional guides the game gave, in dispatches of their own (eight slots each, the others without a
         // destination): the transparency layer, ColorBeforeTransparency and the layer's opacity as rgba16f, the
@@ -832,7 +843,7 @@ void record_frame(Ctx* c, Rec& r, Job& j, bool network, bool split = false) {
         int k = 0;
         for (int o = 0; o < int(std::size(opt)); ++o) {
             const Copy& cp = j.in[opt[o]];
-            if (!cp.present) continue;
+            if (!cp.present || (opt[o] == G_TL && tl_view) || (opt[o] == G_SSS && sss_view) || (opt[o] == G_DM && dm_view)) continue;
             Buffer& gb = c->guides[opt[o]];
             if (!gb.addr) gb = d.create(size_t(c->guide_size.x) * c->guide_size.y * bpp[o] + 64);   // fully written below
             tp.dst[k] = gb.addr;
@@ -871,7 +882,11 @@ void record_frame(Ctx* c, Rec& r, Job& j, bool network, bool split = false) {
             g_log("small levels: %s", flow ? "row flags" : c->vk_host && !g_flow ? "barriers (Vulkan host)" : "barriers (more than one network, or ONR_RR_FLOW=0)");
             c->logged_flow = int(flow);
         }
-        const EngineFrame ef = engine_frame(c, j);
+        EngineFrame ef = engine_frame(c, j);
+        if (tl_view) ef.transparency = 0, ef.transparency_view = G_TL + 1, ef.transparency_origin = j.in[G_TL].x | j.in[G_TL].y << 16;
+        auto view = [&](int s) { return 1ull << 63 | uint64_t(j.in[s].x | j.in[s].y << 16) << 8 | uint64_t(s); };
+        if (sss_view) ef.sss = view(G_SSS);
+        if (dm_view) ef.disocclusion = view(G_DM) | uint64_t((f.flags & ONR_RR_FRAME_DM_CLAMP) != 0) << 40;
         Guides g{c->guides[G_COLOR].addr, c->guides[G_ALBEDO].addr, c->guides[G_SPEC].addr, c->guides[G_NORMALS].addr,
                  c->guides[G_ROUGH].addr, c->guides[G_DEPTH].addr, c->guides[G_MV].addr, c->guides[G_HIT].addr, direct ? &gt : nullptr};
         r.qnet[0] = d.queries();
@@ -1318,11 +1333,24 @@ void destroy_ctx(Ctx* c) {
     free_ctx(c);
 }
 
-std::string gpu_reason(const Device& d) {
+// RX 7000 / RDNA 3.5 (AMD, cooperative matrices without FP8), experimental: the kernels built for RDNA3's fragment layout
+// (ONR_GFX11) in shaders-gfx11 beside shaders
+bool rdna3(const Device& d, const std::wstring& shaders) {
     const auto& i = d.info();
-    if (!i.coopmat) return i.name + ": no cooperative matrices (needs an RDNA4 GPU)";
-    if (!i.fp8_coopmat) return i.name + ": not an RDNA4 GPU (RX 7000 and RX 6000 support comes later)";
+    return i.vendor == 0x1002 && i.coopmat && !i.fp8_coopmat && std::filesystem::is_directory(shaders + L"-gfx11");
+}
+
+std::string gpu_reason(const Device& d, const std::wstring& shaders) {
+    const auto& i = d.info();
+    if (!i.coopmat) return i.name + ": no cooperative matrices (needs an RDNA4 or RDNA3 GPU)";
+    if (!i.fp8_coopmat && !rdna3(d, shaders)) return i.name + ": not an RDNA4 GPU, and no RDNA3 kernels (opennr-rr\\shaders-gfx11)";
     return {};
+}
+
+void pick_kernels(Ctx* c) {
+    if (!rdna3(c->dev, c->shader_dir)) return;
+    c->shader_dir += L"-gfx11";
+    g_log("RDNA3 GPU (experimental): kernels from %s", utf8(c->shader_dir).c_str());
 }
 
 // ------------------------------------------------------------------------------------------------ API
@@ -1337,7 +1365,7 @@ int32_t Check(const void* luid, const wchar_t* dlssd) {
         o.luid = static_cast<const uint8_t*>(luid);
         o.interop = true;
         if (!d.init(err, o)) return fail(ONR_RR_UNSUPPORTED, "Vulkan: " + err);
-        std::string why = gpu_reason(d);
+        std::string why = gpu_reason(d, module_dir() + L"\\opennr-rr\\shaders");
         if (!why.empty()) return fail(ONR_RR_UNSUPPORTED, why);
         if (dlssd) {
             Weights w;
@@ -1371,7 +1399,8 @@ void create_vk_host(Ctx* c, const OnrRrVkDevice& v) {
     c->dev.set_stamps(g_stamps);
     g_log("Vulkan host device: %s, driver %s; the runtime's queue: family %u, index %u", c->dev.info().name.c_str(),
           c->dev.info().driver_info.c_str(), v.queue_family, v.queue_index);
-    if (std::string why = gpu_reason(c->dev); !why.empty()) throw std::runtime_error(why);
+    if (std::string why = gpu_reason(c->dev, c->shader_dir); !why.empty()) throw std::runtime_error(why);
+    pick_kernels(c);
     c->kern.load(c->dev, utf8(c->shader_dir), {"ingest", "pack", "selftest"});
     vk_selftest(c);
     // the guides read through the game's views and the output written through its view (d3d_ kernels, set 0 = views)
@@ -1461,11 +1490,12 @@ int32_t Create(const OnrRrCreateInfo* in, void** out) {
         // timestamps only at the submit's boundaries: one around every dispatch serialises the ones without a barrier
         c->dev.set_stamps(g_stamps);
         g_log("Vulkan device: %s, driver %s", c->dev.info().name.c_str(), c->dev.info().driver_info.c_str());
-        std::string why = gpu_reason(c->dev);
+        std::string why = gpu_reason(c->dev, c->shader_dir);
         if (!why.empty()) {
             destroy_ctx(c);
             return fail(ONR_RR_UNSUPPORTED, why);
         }
+        pick_kernels(c);
         c->fn.memProps = reinterpret_cast<PFN_vkGetMemoryWin32HandlePropertiesKHR>(vkGetDeviceProcAddr(c->dev.vk(), "vkGetMemoryWin32HandlePropertiesKHR"));
         c->fn.importSem = reinterpret_cast<PFN_vkImportSemaphoreWin32HandleKHR>(vkGetDeviceProcAddr(c->dev.vk(), "vkImportSemaphoreWin32HandleKHR"));
         if (!c->fn.memProps || !c->fn.importSem) throw std::runtime_error("Win32 interop entry points missing");
@@ -1735,8 +1765,13 @@ int32_t plan_job(Ctx* c, const OnrRrFrame* f, std::unique_ptr<Job>& j, D3D12_PLA
             }
             continue;
         }
-        UINT64 total = 0;
-        c->d3d->GetCopyableFootprints(&rd, 0, 1, off, &fp[i], nullptr, nullptr, &total);
+        auto& fc = c->fps[i];
+        if (fc.off != off || memcmp(&fc.desc, &rd, sizeof rd)) {
+            fc.desc = rd, fc.off = off;
+            c->d3d->GetCopyableFootprints(&rd, 0, 1, off, &fc.fp, nullptr, nullptr, &fc.total);
+        }
+        fp[i] = fc.fp;
+        const UINT64 total = fc.total;
         // a planar depth-stencil copies its depth plane alone: R32G8X24 gives R32 rows, not 8-byte texels
         if (Tf plane = tf_of(fp[i].Footprint.Format)) tf = plane;
         j->in[i] = Copy{true, tf, fp[i].Offset, fp[i].Footprint.RowPitch, tex[i]->x, tex[i]->y};
@@ -2260,7 +2295,13 @@ void d3d_harvest(Ctx* c) {
         std::vector<uint64_t> ts(n);
         if (!c->dx->read_stamps(slot, ts)) continue;
         c->dq[slot] = 0;
+        const bool hop = std::exchange(c->dqhop[slot], false);
         add_gaps(c, ts, ms);
+        const float span = float(double(ts.back() - ts.front()) * ms);
+        if (hop) {
+            c->dhop_ms = span;
+            continue;
+        }
         const uint32_t a = c->dqnet[slot][0], b = c->dqnet[slot][1];
         float part[3] = {};
         const bool has_parts = b > a && b <= n;
@@ -2269,7 +2310,7 @@ void d3d_harvest(Ctx* c) {
             part[1] = float(double(ts[b - 1] - ts[a]) * ms);
             part[2] = float(double(ts.back() - ts[b - 1]) * ms);
         }
-        record_gpu_sample(c, float(double(ts.back() - ts.front()) * ms), part, has_parts);
+        record_gpu_sample(c, span + std::exchange(c->dhop_ms, 0.0f), part, has_parts);
     }
 }
 
@@ -2474,16 +2515,19 @@ int32_t Record(void* ctx, const OnrRrFrame* f, void* list, uint32_t edit, OnrRrD
             if (!hop) {
                 if (direct_out) d.barrier();
                 else d3d_copy_output(c, *j);
-                d.stamp();
             }
+            d.stamp();
             if (!back.empty()) cl->ResourceBarrier(UINT(back.size()), back.data());
         } catch (...) {
             if (!overflow) c->dq[slot] = 0;
             d.unbind();
             throw;
         }
-        // a hop's times come with its RecordPost
-        if (!overflow) c->dq[slot] = hop ? 0 : d.queries();
+        // a hop's first half is timed here and added to its RecordPost's
+        if (!overflow) {
+            c->dq[slot] = d.queries();
+            c->dqhop[slot] = hop;
+        }
         if (g_stamps && !hop && !overflow && network) c->stamp_names = d.stamp_names;
         d.unbind();
         if (network) log_frame(c, render);
