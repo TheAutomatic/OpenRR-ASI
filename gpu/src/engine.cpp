@@ -606,10 +606,10 @@ void Engine::record_net(const EngineFrame& f, const Guides& g, uint64_t dfn_out,
     if (flow && reuse) {
         // a skipped level's row flags read as done: the first decoder kernel that runs waits on the slot before it
         // (three fills that do not overlap: nothing orders them)
-        const size_t sl = size_t(DL == 5 ? 3 : DL == 4 ? 5 : 7) * 512 * 4;
+        const size_t sl = size_t(DL == 5 ? 3 : DL == 4 ? 5 : 7) * 1280 * 4;
         d.fill(flow_, 0, sl, 0);
-        d.fill(flow_, sl, 512 * 4, 1);
-        d.fill(flow_, sl + 512 * 4, 10 * 1280 * 4 - sl - 512 * 4, 0);
+        d.fill(flow_, sl, 1280 * 4, 1);
+        d.fill(flow_, sl + 1280 * 4, 10 * 1280 * 4 - sl - 1280 * 4, 0);
     } else if (flow) {
         d.fill(flow_, 0, 10 * 1280 * 4, 0);
     }
@@ -659,7 +659,7 @@ void Engine::record_net(const EngineFrame& f, const Guides& g, uint64_t dfn_out,
             const I2 apad = {(alloc_render_.x + 31) & ~31, (alloc_render_.y + 31) & ~31};
             // Wide attributes must not relocate views inside the lifetime arena.
             if (!attr_wide_.addr) {
-                attr_wide_ = dev_->create_unzeroed(size_t(apad.x) * apad.y * 64 + 64);
+                attr_wide_ = dev_->create(size_t(apad.x) * apad.y * 64 + 64);
                 sized_.push_back(attr_wide_);
             }
             a.attr = attr_wide_.addr;

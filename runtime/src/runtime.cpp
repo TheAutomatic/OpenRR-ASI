@@ -41,6 +41,9 @@
 #include "opennr_rr/engine.hpp"
 #include "opennr_rr_api.h"
 #include "vk_host.hpp"
+#ifdef ONR_RR_STATIC
+#include "rr_pe_log.hpp"
+#endif
 
 using namespace onr;
 
@@ -89,16 +92,26 @@ class Log {
 public:
     ~Log() { close(); }
     void open(const std::wstring& path) {
+#ifdef ONR_RR_STATIC
+        (void)path;
+#else
         std::lock_guard l(m_);
         if (!f_) f_ = _wfsopen(path.c_str(), L"a", _SH_DENYNO);
+#endif
     }
     void flush() {
+#ifdef ONR_RR_STATIC
+        openrr::pe::flush_log();
+#else
         std::lock_guard l(m_);
         if (f_) fflush(f_);
+#endif
     }
     void close() {
+#ifndef ONR_RR_STATIC
         std::lock_guard l(m_);
         if (f_) fclose(f_), f_ = nullptr;
+#endif
     }
     void operator()(const char* fmt, ...) {
         char b[4096];
@@ -106,6 +119,11 @@ public:
         va_start(a, fmt);
         vsnprintf(b, sizeof b, fmt, a);
         va_end(a);
+#ifdef ONR_RR_STATIC
+        size_t len = std::strlen(b);
+        while (len > 0 && (b[len - 1] == '\n' || b[len - 1] == '\r')) b[--len] = '\0';
+        openrr::pe::log("%s", b);
+#else
         SYSTEMTIME t;
         GetLocalTime(&t);
         const ULONGLONG now = GetTickCount64();
@@ -118,6 +136,7 @@ public:
             fflush(f_);
             last_flush_ = now;
         }
+#endif
     }
 
 private:
@@ -876,10 +895,10 @@ void record_frame(Ctx* c, Rec& r, Job& j, bool network, bool split = false) {
     }
     if (network) {
         d.barrier();
-        const bool flow = g_flow ? strcmp(g_flow, "0") != 0 : !c->vk_host && g_live.load() == 1;
+        const bool flow = g_flow ? strcmp(g_flow, "0") != 0 : !c->vk_host && !c->use_d3d && g_live.load() == 1;
         c->engine.set_flow(flow);
         if (int(flow) != c->logged_flow) {
-            g_log("small levels: %s", flow ? "row flags" : c->vk_host && !g_flow ? "barriers (Vulkan host)" : "barriers (more than one network, or ONR_RR_FLOW=0)");
+            g_log("small levels: %s", flow ? "row flags" : c->vk_host && !g_flow ? "barriers (Vulkan host)" : c->use_d3d && !g_flow ? "barriers (D3D12 default)" : "barriers (more than one network, or ONR_RR_FLOW=0)");
             c->logged_flow = int(flow);
         }
         EngineFrame ef = engine_frame(c, j);
@@ -1343,7 +1362,7 @@ bool rdna3(const Device& d, const std::wstring& shaders) {
 std::string gpu_reason(const Device& d, const std::wstring& shaders) {
     const auto& i = d.info();
     if (!i.coopmat) return i.name + ": no cooperative matrices (needs an RDNA4 or RDNA3 GPU)";
-    if (!i.fp8_coopmat && !rdna3(d, shaders)) return i.name + ": not an RDNA4 GPU, and no RDNA3 kernels (opennr-rr\\shaders-gfx11)";
+    if (!i.fp8_coopmat && !rdna3(d, shaders)) return i.name + ": not an RDNA4 GPU, and no RDNA3 kernels (openrr-amd\\shaders-gfx11)";
     return {};
 }
 
@@ -1351,6 +1370,15 @@ void pick_kernels(Ctx* c) {
     if (!rdna3(c->dev, c->shader_dir)) return;
     c->shader_dir += L"-gfx11";
     g_log("RDNA3 GPU (experimental): kernels from %s", utf8(c->shader_dir).c_str());
+}
+
+std::wstring default_data_dir(const std::wstring& dir) {
+    std::error_code ec;
+    const std::filesystem::path md(dir);
+    if (std::filesystem::exists(md / L"openrr-amd" / L"shaders", ec)) return (md / L"openrr-amd").wstring();
+    if (std::filesystem::exists(md.parent_path() / L"openrr-amd" / L"shaders", ec)) return (md.parent_path() / L"openrr-amd").wstring();
+    if (std::filesystem::exists(md / L"opennr-rr" / L"shaders", ec)) return (md / L"opennr-rr").wstring();
+    return dir + L"\\openrr-amd";
 }
 
 // ------------------------------------------------------------------------------------------------ API
@@ -1365,7 +1393,7 @@ int32_t Check(const void* luid, const wchar_t* dlssd) {
         o.luid = static_cast<const uint8_t*>(luid);
         o.interop = true;
         if (!d.init(err, o)) return fail(ONR_RR_UNSUPPORTED, "Vulkan: " + err);
-        std::string why = gpu_reason(d, module_dir() + L"\\opennr-rr\\shaders");
+        std::string why = gpu_reason(d, default_data_dir(module_dir()) + L"\\shaders");
         if (!why.empty()) return fail(ONR_RR_UNSUPPORTED, why);
         if (dlssd) {
             Weights w;
@@ -1451,21 +1479,7 @@ int32_t Create(const OnrRrCreateInfo* in, void** out) {
             c->d3d = static_cast<ID3D12Device*>(in->d3d12_device);
             c->d3d->AddRef();
         }
-        std::wstring data;
-        if (in->data_dir) {
-            data = std::wstring(in->data_dir);
-        } else {
-            std::error_code ec;
-            const std::filesystem::path md(dir);
-            if (std::filesystem::exists(md / L"openrr-amd" / L"shaders", ec))
-                data = (md / L"openrr-amd").wstring();
-            else if (std::filesystem::exists(md.parent_path() / L"openrr-amd" / L"shaders", ec))
-                data = (md.parent_path() / L"openrr-amd").wstring();
-            else if (std::filesystem::exists(md / L"opennr-rr" / L"shaders", ec))
-                data = (md / L"opennr-rr").wstring();
-            else
-                data = dir + L"\\openrr-amd";
-        }
+        std::wstring data = in->data_dir ? std::wstring(in->data_dir) : default_data_dir(dir);
         c->shader_dir = data + L"\\shaders";
         c->dlssd_path = in->dlssd_path ? in->dlssd_path : L"";
         c->weights_source = utf8(c->dlssd_path);

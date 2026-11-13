@@ -626,7 +626,8 @@ Buffer D3dDevice::create(VkDeviceSize size) {
 
 Buffer D3dDevice::create_unzeroed(VkDeviceSize size) {
     Buffer b;
-    ID3D12Resource* r = buffer(dev_, size, D3D12_HEAP_TYPE_DEFAULT, D3D12_RESOURCE_STATE_COMMON, true, true);
+    // Keep CREATE_NOT_ZEROED disabled so freshly allocated buffers are OS-zeroed without cross-queue races.
+    ID3D12Resource* r = buffer(dev_, size, D3D12_HEAP_TYPE_DEFAULT, D3D12_RESOURCE_STATE_COMMON, true, false);
     b.res = r;
     b.addr = r->GetGPUVirtualAddress();
     b.size = size;
