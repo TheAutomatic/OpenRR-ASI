@@ -10,6 +10,7 @@
 #include "rr_pe_d3d12split.hpp"
 #include "rr_pe_vkdevice.hpp"
 #include "opennr_rr_api.h"
+#include "rr_data_paths.hpp"
 #include "opennr_rr/d3d12.hpp"
 #include "opennr_rr/engine.hpp"
 #include "opennr_rr/vk.hpp"
@@ -49,6 +50,37 @@ static void STDMETHODCALLTYPE probe_set_graphics_rs(ID3D12GraphicsCommandList*, 
 
 static void STDMETHODCALLTYPE probe_set_graphics_table(ID3D12GraphicsCommandList*, UINT, D3D12_GPU_DESCRIPTOR_HANDLE) {
     ++g_probe_set_graphics_table;
+}
+
+static int test_installed_data_paths() {
+    namespace fs = std::filesystem;
+    const auto game = fs::temp_directory_path() /
+        (L"openrr-data-paths-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
+    const auto storage = game / L"_storage_";
+    const auto payload = game / L"openrr-amd";
+    const auto shaders = payload / L"shaders";
+    fs::create_directories(shaders);
+    fs::create_directory(storage);
+    std::ofstream(storage / L"nvngx_dlssd.dll").close();
+    std::ofstream(payload / L"nvngx_dlssd.dll").close();
+
+    using openrr::pe::installed_data_dir;
+    const bool ok = installed_data_dir(storage, L"nvngx_dlssd.dll") == payload &&
+                    installed_data_dir(storage, L"shaders") == payload &&
+                    installed_data_dir(game, L"nvngx_dlssd.dll") == payload &&
+                    installed_data_dir(storage, L"missing").empty();
+    fs::remove(payload / L"nvngx_dlssd.dll");
+    fs::remove(storage / L"nvngx_dlssd.dll");
+    fs::remove(shaders);
+    fs::remove(payload);
+    fs::remove(storage);
+    fs::remove(game);
+    if (!ok) {
+        std::fprintf(stderr, "FAIL: OpenRR installed data lookup under RE9 _storage_\n");
+        return 1;
+    }
+    std::printf("[PASS] RE9 _storage_ resolves the game-root OpenRR weights and shaders\n");
+    return 0;
 }
 
 static int test_key_parsing() {
@@ -1147,6 +1179,18 @@ static int test_d3d12_gpu_and_engine() {
                         }
                         sat_alloc->Reset();
                         OnrRrNotifyD3d12AllocatorReset(sat_alloc);
+                        sat_lists[0]->Reset(sat_alloc, nullptr);
+                        OnrRrNotifyD3d12ListReset(sat_lists[0], sat_alloc);
+                        OnrRrFrame invalid_output = fr;
+                        invalid_output.output.x = 1;
+                        void* rejected_job = nullptr;
+                        const int32_t invalid_rc = api4.Record(rt, &invalid_output, sat_lists[0], ONR_RR_EDIT_OFF,
+                                                               nullptr, &rejected_job);
+                        char invalid_error[256]{};
+                        api4.v3.v2.v1.GetLastError(invalid_error, sizeof(invalid_error));
+                        sat_lists[0]->Close();
+                        const bool invalid_rect_rejected = invalid_rc == ONR_RR_INVALID_ARGUMENT && !rejected_job &&
+                                                           std::strstr(invalid_error, "output rectangle");
                         int loop_ok = 0;
                         for (int iter = 0; iter < 135; ++iter) {
                             sat_alloc->Reset();
@@ -1172,6 +1216,13 @@ static int test_d3d12_gpu_and_engine() {
                             if (r) r->Release();
                         api4.v3.v2.v1.Destroy(rt);
 
+                        if (!invalid_rect_rejected) {
+                            std::fprintf(stderr, "FAIL: D3D12 output rectangle outside texture (rc=%d, %s)\n",
+                                         invalid_rc, invalid_error);
+                            dev->Release();
+                            return 1;
+                        }
+                        std::printf("[PASS] D3D12 rejects an output rectangle that exceeds the texture at a nonzero offset\n");
                         if (ok_count != 127 || busy_rc != ONR_RR_BUSY || rc_after != ONR_RR_OK) {
                             std::fprintf(stderr, "FAIL: ONR_RR_BUSY test ok_count=%d busy_rc=%d loop_ok=%d\n",
                                          ok_count, busy_rc, loop_ok);
@@ -1554,6 +1605,7 @@ static int test_vk_unspoof_and_rdna3_pick() {
 int main() {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     std::setvbuf(stderr, nullptr, _IONBF, 0);
+    if (test_installed_data_paths() != 0) return 1;
     if (test_key_parsing() != 0) return 1;
     if (test_vk_unspoof_and_rdna3_pick() != 0) return 1;
     if (test_split_hardening_and_eligibility() != 0) return 1;

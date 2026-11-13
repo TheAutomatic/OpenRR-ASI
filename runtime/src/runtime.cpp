@@ -1724,6 +1724,17 @@ void stats_record(Ctx* c, const Job& j, ID3D12GraphicsCommandList* cl) {
     }
 }
 
+int32_t check_output_rect(const Ctx& c, const OnrRrTexture& output, uint64_t width, uint32_t height) {
+    const auto output_width = uint32_t(c.out_size.x);
+    const auto output_height = uint32_t(c.out_size.y);
+    if (uint64_t(output.x) + output_width <= width && uint64_t(output.y) + output_height <= height)
+        return ONR_RR_OK;
+    return fail(ONR_RR_INVALID_ARGUMENT,
+                "output rectangle at (" + std::to_string(output.x) + ", " + std::to_string(output.y) + ") of size " +
+                    std::to_string(output_width) + "x" + std::to_string(output_height) +
+                    " exceeds output texture " + std::to_string(width) + "x" + std::to_string(height));
+}
+
 // a frame's job: the guides laid out as placed footprints of one buffer from offset 0 (in_bytes in all) and the
 // output's rows (out_bytes); ONR_RR_UNSUPPORTED for an output format that is not written
 int32_t plan_job(Ctx* c, const OnrRrFrame* f, std::unique_ptr<Job>& j, D3D12_PLACED_SUBRESOURCE_FOOTPRINT* fp, UINT64& off, UINT64& obytes) {
@@ -1837,8 +1848,7 @@ int32_t plan_job(Ctx* c, const OnrRrFrame* f, std::unique_ptr<Job>& j, D3D12_PLA
         if (!tf_writable(j->out_tf) || !oi->image)
             return fail(ONR_RR_UNSUPPORTED, "output VkFormat " + std::to_string(oi->format) +
                                                 " is not written (written: RGBA16F/32F, B10G11R11, A2B10G10R10, RGBA8/BGRA8 (sRGB too), RGBA16, E5B9G9R9)");
-        if (oi->width < uint32_t(c->out_size.x) || oi->height < uint32_t(c->out_size.y))
-            return fail(ONR_RR_INVALID_ARGUMENT, "the output image is smaller than the output size given at Create");
+        if (int32_t rc = check_output_rect(*c, f->output, oi->width, oi->height)) return rc;
         j->out_pitch = (uint32_t(c->out_size.x) * tf_bytes(j->out_tf) + 255) & ~255u;
         j->out_bytes = obytes = UINT64(j->out_pitch) * uint32_t(c->out_size.y);
         return ONR_RR_OK;
@@ -1849,6 +1859,7 @@ int32_t plan_job(Ctx* c, const OnrRrFrame* f, std::unique_ptr<Job>& j, D3D12_PLA
     if (!tf_writable(j->out_tf))
         return fail(ONR_RR_UNSUPPORTED, "output texture format " + std::to_string(int(od.Format)) +
                                             " is not written (written: RGBA16F/32F, R11G11B10F, RGB10A2, RGBA8/BGRA8 (sRGB too), RGBA16, R9G9B9E5)");
+    if (int32_t rc = check_output_rect(*c, f->output, od.Width, od.Height)) return rc;
     D3D12_RESOURCE_DESC box = od;
     box.Width = UINT64(c->out_size.x), box.Height = UINT(c->out_size.y);
     D3D12_PLACED_SUBRESOURCE_FOOTPRINT ofp{};

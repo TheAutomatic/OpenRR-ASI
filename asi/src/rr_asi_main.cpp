@@ -8,6 +8,7 @@
 #include "rr_pe_control.hpp"
 #include "rr_pe_crash.hpp"
 #include "rr_pe_d3d12split.hpp"
+#include "rr_data_paths.hpp"
 #include "rr_pe_log.hpp"
 #include "rr_pe_menu.hpp"
 #include "rr_pe_vkdevice.hpp"
@@ -932,12 +933,15 @@ std::wstring find_dlssd_locked(const char** out_source) {
     std::error_code ec;
     const std::filesystem::path opti_dir = wide_from_utf8(openrr::pe::module_folder());
 
-    for (const wchar_t* sub : {L"openrr-amd", L"."}) {
-        const auto cand = opti_dir / sub / L"nvngx_dlssd.dll";
-        if (std::filesystem::exists(cand, ec)) {
-            if (out_source) *out_source = "OptiScaler folder";
-            return cand.wstring();
-        }
+    const auto data_dir = openrr::pe::installed_data_dir(opti_dir, L"nvngx_dlssd.dll");
+    if (!data_dir.empty()) {
+        if (out_source) *out_source = "installed OpenRR data folder";
+        return (data_dir / L"nvngx_dlssd.dll").wstring();
+    }
+    const auto beside_host = opti_dir / L"nvngx_dlssd.dll";
+    if (std::filesystem::exists(beside_host, ec)) {
+        if (out_source) *out_source = "OptiScaler folder";
+        return beside_host.wstring();
     }
 
     if (HMODULE loaded = GetModuleHandleW(L"nvngx_dlssd.dll")) {
@@ -998,8 +1002,8 @@ std::wstring resolve_data_dir() {
             log("[openrr] note: legacy %ls\\ directory detected and ignored; using openrr-amd\\", legacy_name);
         }
     }
-    if (std::filesystem::exists(opti_dir / L"openrr-amd" / L"shaders", ec))
-        return (opti_dir / L"openrr-amd").wstring();
+    const auto data_dir = openrr::pe::installed_data_dir(opti_dir, L"shaders");
+    if (!data_dir.empty()) return data_dir.wstring();
 
     wchar_t self_buf[MAX_PATH]{};
     if (g_self && GetModuleFileNameW(g_self, self_buf, MAX_PATH) != 0) {
@@ -1546,6 +1550,28 @@ void read_create_sizes(const NVSDK_NGX_Parameter* p, uint32_t& rw, uint32_t& rh,
     }
 }
 
+struct RrCreateParams {
+    uint32_t max_render_w = 0, max_render_h = 0;
+    uint32_t output_w = 0, output_h = 0;
+    uint32_t flags = 0;
+    int hw_depth = -1;
+    int roughness_packed = -1;
+};
+
+RrCreateParams read_create_params(const NVSDK_NGX_Parameter& params) {
+    // Streamline can reuse the parameter table for settings queries while RR is initializing.
+    RrCreateParams create;
+    read_create_sizes(&params, create.max_render_w, create.max_render_h, create.output_w, create.output_h);
+    int value = 0;
+    if (params.Get(NVSDK_NGX_Parameter_DLSS_Feature_Create_Flags, &value) == NVSDK_NGX_Result_Success)
+        create.flags = uint32_t(value);
+    if (params.Get(NVSDK_NGX_Parameter_Use_HW_Depth, &value) == NVSDK_NGX_Result_Success)
+        create.hw_depth = value == NVSDK_NGX_DLSS_Depth_Type_HW;
+    if (params.Get(NVSDK_NGX_Parameter_DLSS_Roughness_Mode, &value) == NVSDK_NGX_Result_Success)
+        create.roughness_packed = value == NVSDK_NGX_DLSS_Roughness_Mode_Packed;
+    return create;
+}
+
 // Read per-frame render resolution matching OptiScaler's IFeature::GetRenderResolution.
 void read_eval_render_size(const NVSDK_NGX_Parameter* p, uint32_t max_rw, uint32_t max_rh, uint32_t& rw, uint32_t& rh) {
     rw = max_rw;
@@ -1643,10 +1669,22 @@ struct RrContext {
 std::mutex g_ctx_mutex;
 std::unordered_map<unsigned int, std::unique_ptr<RrContext>> g_d3d12_rr;
 std::unordered_map<unsigned int, std::unique_ptr<RrContext>> g_vk_rr;
-bool g_ngx_depth_seen = false;
-bool g_ngx_depth_hw = true;
-bool g_ngx_roughness_seen = false;
-int g_ngx_roughness_packed = -1;
+std::atomic<int> g_ngx_hw_depth{-1};
+std::atomic<int> g_ngx_roughness_packed{-1};
+
+void apply_create_params(RrContext& ctx, const RrCreateParams& create) {
+    ctx.max_render_w = create.max_render_w;
+    ctx.max_render_h = create.max_render_h;
+    ctx.output_w = create.output_w;
+    ctx.output_h = create.output_h;
+    ctx.create_flags = create.flags;
+    if (create.hw_depth >= 0) g_ngx_hw_depth.store(create.hw_depth);
+    const int hw_depth = create.hw_depth >= 0 ? create.hw_depth : g_ngx_hw_depth.load();
+    ctx.has_ngx_depth_type = hw_depth >= 0;
+    ctx.ngx_hw_depth = hw_depth != 0;
+    if (create.roughness_packed >= 0) g_ngx_roughness_packed.store(create.roughness_packed);
+    ctx.roughness_packed = create.roughness_packed >= 0 ? create.roughness_packed : g_ngx_roughness_packed.load();
+}
 
 void log_d3d12_ngx_inputs(RrContext& ctx, const NVSDK_NGX_Parameter& params, const OnrRrFrame& frame) {
     if (ctx.ngx_log_count >= 16) return;
@@ -2271,8 +2309,9 @@ NVSDK_NGX_Result create_d3d12_rr(ID3D12GraphicsCommandList* cmd, NVSDK_NGX_Featu
     if (feature != NVSDK_NGX_Feature_RayReconstruction) {
         return host_owned ? NVSDK_NGX_Result_FAIL_FeatureNotSupported : fallback();
     }
-    ensure_deferred_init();
     if (!cmd || !params || !out) return NVSDK_NGX_Result_FAIL_InvalidParameter;
+    const RrCreateParams create = read_create_params(*params);
+    ensure_deferred_init();
 
     const openrr::pe::Config cfg = openrr::pe::current_config();
     if (!cfg.enabled) {
@@ -2308,35 +2347,11 @@ NVSDK_NGX_Result create_d3d12_rr(ID3D12GraphicsCommandList* cmd, NVSDK_NGX_Featu
     ctx->is_vk = false;
     ctx->d3d12_device = dev;
 
-    read_create_sizes(params, ctx->max_render_w, ctx->max_render_h, ctx->output_w, ctx->output_h);
-    if (!ctx->max_render_w || !ctx->max_render_h) {
-        log("[openrr] D3D12 CreateFeature: invalid dimensions (%ux%u)", ctx->max_render_w, ctx->max_render_h);
+    if (!create.max_render_w || !create.max_render_h) {
+        log("[openrr] D3D12 CreateFeature: invalid dimensions (%ux%u)", create.max_render_w, create.max_render_h);
         return NVSDK_NGX_Result_FAIL_InvalidParameter;
     }
-
-    int flags = 0;
-    if (params->Get(NVSDK_NGX_Parameter_DLSS_Feature_Create_Flags, &flags) == NVSDK_NGX_Result_Success)
-        ctx->create_flags = uint32_t(flags);
-
-    int depth_val = 0;
-    if (params->Get(NVSDK_NGX_Parameter_Use_HW_Depth, &depth_val) == NVSDK_NGX_Result_Success) {
-        ctx->has_ngx_depth_type = true;
-        ctx->ngx_hw_depth = (depth_val == NVSDK_NGX_DLSS_Depth_Type_HW);
-        g_ngx_depth_seen = true;
-        g_ngx_depth_hw = ctx->ngx_hw_depth;
-    } else if (g_ngx_depth_seen) {
-        ctx->has_ngx_depth_type = true;
-        ctx->ngx_hw_depth = g_ngx_depth_hw;
-    }
-
-    int rough_val = 0;
-    if (params->Get(NVSDK_NGX_Parameter_DLSS_Roughness_Mode, &rough_val) == NVSDK_NGX_Result_Success) {
-        ctx->roughness_packed = (rough_val == NVSDK_NGX_DLSS_Roughness_Mode_Packed) ? 1 : 0;
-        g_ngx_roughness_seen = true;
-        g_ngx_roughness_packed = ctx->roughness_packed;
-    } else if (g_ngx_roughness_seen) {
-        ctx->roughness_packed = g_ngx_roughness_packed;
-    }
+    apply_create_params(*ctx, create);
 
     const std::wstring data_dir = resolve_data_dir();
     const std::wstring log_path = resolve_log_path();
@@ -2805,10 +2820,8 @@ NVSDK_NGX_Result RR_NGX_MSABI hk_vk_get_scratch(NVSDK_NGX_Feature feat, const NV
     return real_vk_get_scratch ? real_vk_get_scratch(feat, params, out) : NVSDK_NGX_Result_Success;
 }
 
-NVSDK_NGX_Result create_vk_rr_feature(VkDevice dev, VkCommandBuffer cmd, NVSDK_NGX_Parameter* params, NVSDK_NGX_Handle** out) {
+NVSDK_NGX_Result create_vk_rr_feature(VkDevice dev, const RrCreateParams& create, NVSDK_NGX_Handle** out) {
     ensure_deferred_init();
-    (void)cmd;
-    if (!params || !out) return NVSDK_NGX_Result_FAIL_InvalidParameter;
 
     openrr::pe::vkdevice::DeviceInfo di{};
     if (!openrr::pe::vkdevice::get_device_info(dev, &di) || !di.prepared) {
@@ -2828,32 +2841,8 @@ NVSDK_NGX_Result create_vk_rr_feature(VkDevice dev, VkCommandBuffer cmd, NVSDK_N
     ctx->is_vk = true;
     ctx->vk_device = di.device;
 
-    read_create_sizes(params, ctx->max_render_w, ctx->max_render_h, ctx->output_w, ctx->output_h);
-    if (!ctx->max_render_w || !ctx->max_render_h) return NVSDK_NGX_Result_FAIL_InvalidParameter;
-
-    int flags = 0;
-    if (params->Get(NVSDK_NGX_Parameter_DLSS_Feature_Create_Flags, &flags) == NVSDK_NGX_Result_Success)
-        ctx->create_flags = uint32_t(flags);
-
-    int depth_val = 0;
-    if (params->Get(NVSDK_NGX_Parameter_Use_HW_Depth, &depth_val) == NVSDK_NGX_Result_Success) {
-        ctx->has_ngx_depth_type = true;
-        ctx->ngx_hw_depth = (depth_val == NVSDK_NGX_DLSS_Depth_Type_HW);
-        g_ngx_depth_seen = true;
-        g_ngx_depth_hw = ctx->ngx_hw_depth;
-    } else if (g_ngx_depth_seen) {
-        ctx->has_ngx_depth_type = true;
-        ctx->ngx_hw_depth = g_ngx_depth_hw;
-    }
-
-    int rough_val = 0;
-    if (params->Get(NVSDK_NGX_Parameter_DLSS_Roughness_Mode, &rough_val) == NVSDK_NGX_Result_Success) {
-        ctx->roughness_packed = (rough_val == NVSDK_NGX_DLSS_Roughness_Mode_Packed) ? 1 : 0;
-        g_ngx_roughness_seen = true;
-        g_ngx_roughness_packed = ctx->roughness_packed;
-    } else if (g_ngx_roughness_seen) {
-        ctx->roughness_packed = g_ngx_roughness_packed;
-    }
+    if (!create.max_render_w || !create.max_render_h) return NVSDK_NGX_Result_FAIL_InvalidParameter;
+    apply_create_params(*ctx, create);
 
     const std::wstring data_dir = resolve_data_dir();
     const std::wstring log_path = resolve_log_path();
@@ -2925,23 +2914,29 @@ NVSDK_NGX_Result create_vk_rr_feature(VkDevice dev, VkCommandBuffer cmd, NVSDK_N
 
 NVSDK_NGX_Result RR_NGX_MSABI hk_vk_create1(VkDevice dev, VkCommandBuffer cmd, NVSDK_NGX_Feature feature,
                                             NVSDK_NGX_Parameter* params, NVSDK_NGX_Handle** out) {
-    if (feature == NVSDK_NGX_Feature_RayReconstruction && openrr::pe::current_config().enabled && vk_rr_capable()) {
-        const NVSDK_NGX_Result r = create_vk_rr_feature(dev, cmd, params, out);
-        if (r == NVSDK_NGX_Result_Success) return r;
+    if (feature == NVSDK_NGX_Feature_RayReconstruction && params && out) {
+        const RrCreateParams create = read_create_params(*params);
+        if (openrr::pe::current_config().enabled && vk_rr_capable()) {
+            const NVSDK_NGX_Result r = create_vk_rr_feature(dev, create, out);
+            if (r == NVSDK_NGX_Result_Success) return r;
+        }
     }
     return real_vk_create1 ? real_vk_create1(dev, cmd, feature, params, out) : NVSDK_NGX_Result_Fail;
 }
 
 NVSDK_NGX_Result RR_NGX_MSABI hk_vk_create(VkCommandBuffer cmd, NVSDK_NGX_Feature feature,
                                            NVSDK_NGX_Parameter* params, NVSDK_NGX_Handle** out) {
-    if (feature == NVSDK_NGX_Feature_RayReconstruction && openrr::pe::current_config().enabled && vk_rr_capable()) {
-        VkDevice dev = VK_NULL_HANDLE;
-        {
-            std::lock_guard<std::mutex> lock(g_vk_ngx_mutex);
-            dev = g_ngx_vk_device;
+    if (feature == NVSDK_NGX_Feature_RayReconstruction && params && out) {
+        const RrCreateParams create = read_create_params(*params);
+        if (openrr::pe::current_config().enabled && vk_rr_capable()) {
+            VkDevice dev = VK_NULL_HANDLE;
+            {
+                std::lock_guard<std::mutex> lock(g_vk_ngx_mutex);
+                dev = g_ngx_vk_device;
+            }
+            const NVSDK_NGX_Result r = create_vk_rr_feature(dev, create, out);
+            if (r == NVSDK_NGX_Result_Success) return r;
         }
-        const NVSDK_NGX_Result r = create_vk_rr_feature(dev, cmd, params, out);
-        if (r == NVSDK_NGX_Result_Success) return r;
     }
     return real_vk_create ? real_vk_create(cmd, feature, params, out) : NVSDK_NGX_Result_Fail;
 }
