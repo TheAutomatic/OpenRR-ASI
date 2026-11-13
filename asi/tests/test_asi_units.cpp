@@ -28,6 +28,29 @@
 #include <thread>
 #include <vector>
 
+// ---- R33: count-only probes for host-visible command-list state mutations ----
+// They deliberately do not forward: the D3D12 vtable entries they shadow are already MinHook-detoured by the split
+// hooks of this process, and the detour resolves "our" entry back to itself, so forwarding would re-enter the probe.
+// R33 asserts the counts stay 0, so the shadowed call never has to reach the driver.
+static int g_probe_set_heaps = 0;
+static int g_probe_set_graphics_rs = 0;
+static int g_probe_set_graphics_table = 0;
+using PFN_Probe_SetHeaps = void(STDMETHODCALLTYPE*)(ID3D12GraphicsCommandList*, UINT, ID3D12DescriptorHeap* const*);
+using PFN_Probe_SetGraphicsRs = void(STDMETHODCALLTYPE*)(ID3D12GraphicsCommandList*, ID3D12RootSignature*);
+using PFN_Probe_SetGraphicsTable = void(STDMETHODCALLTYPE*)(ID3D12GraphicsCommandList*, UINT, D3D12_GPU_DESCRIPTOR_HANDLE);
+
+static void STDMETHODCALLTYPE probe_set_heaps(ID3D12GraphicsCommandList*, UINT, ID3D12DescriptorHeap* const*) {
+    ++g_probe_set_heaps;
+}
+
+static void STDMETHODCALLTYPE probe_set_graphics_rs(ID3D12GraphicsCommandList*, ID3D12RootSignature*) {
+    ++g_probe_set_graphics_rs;
+}
+
+static void STDMETHODCALLTYPE probe_set_graphics_table(ID3D12GraphicsCommandList*, UINT, D3D12_GPU_DESCRIPTOR_HANDLE) {
+    ++g_probe_set_graphics_table;
+}
+
 static int test_key_parsing() {
     int vk = 0, mods = 0;
 
@@ -485,6 +508,86 @@ static int test_d3d12_gpu_and_engine() {
             }
             std::printf("[PASS] Item #2 (D3dDevice::fill 256 KB > 64 KB ring): unbound wrong=%zu, bound wrong=%zu\n",
                         wrong_unbound, wrong_bound);
+        }
+
+        // ---- R33: D3dDevice::bind()/dispatch() must leave host descriptor heaps and graphics root state untouched ----
+        {
+            ID3D12CommandAllocator* ca_probe = nullptr;
+            ID3D12GraphicsCommandList* cl_probe = nullptr;
+            ID3D12DescriptorHeap* host_heaps[2]{};
+            D3D12_DESCRIPTOR_HEAP_DESC hpd{};
+            hpd.NumDescriptors = 16;
+            hpd.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+            hpd.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+            const HRESULT hr_ca = dev->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&ca_probe));
+            const HRESULT hr_cl = SUCCEEDED(hr_ca)
+                ? dev->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, ca_probe, nullptr, IID_PPV_ARGS(&cl_probe))
+                : hr_ca;
+            const HRESULT hr_h0 = SUCCEEDED(hr_cl) ? dev->CreateDescriptorHeap(&hpd, IID_PPV_ARGS(&host_heaps[0])) : hr_cl;
+            hpd.Type = D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER;
+            const HRESULT hr_h1 = SUCCEEDED(hr_h0) ? dev->CreateDescriptorHeap(&hpd, IID_PPV_ARGS(&host_heaps[1])) : hr_h0;
+            if (FAILED(hr_h1) || !cl_probe || !host_heaps[0] || !host_heaps[1]) {
+                std::fprintf(stderr, "FAIL: R33 could not create host command list / descriptor heaps (0x%lX)\n",
+                             static_cast<unsigned long>(hr_h1));
+                dev->Release();
+                return 1;
+            }
+            // The host (RE9 D3D12 path tracing) binds [ResourceDescriptorHeap, SamplerDescriptorHeap].
+            cl_probe->SetDescriptorHeaps(2, host_heaps);
+
+            onr::Kernels k_probe;
+            k_probe.load(d3d, spv_dir, {"clear_range"});
+            onr::Buffer b_probe = d3d.create(4096);
+            onr::d3d12_note_list_reset(cl_probe, ca_probe);
+
+            void** vt_probe = *reinterpret_cast<void***>(cl_probe);
+            void* copied_probe_vt[86]{};
+            std::memcpy(copied_probe_vt, vt_probe, sizeof copied_probe_vt);
+            copied_probe_vt[28] = reinterpret_cast<void*>(&probe_set_heaps);
+            copied_probe_vt[30] = reinterpret_cast<void*>(&probe_set_graphics_rs);
+            copied_probe_vt[32] = reinterpret_cast<void*>(&probe_set_graphics_table);
+            *reinterpret_cast<void***>(cl_probe) = copied_probe_vt;
+
+            // Self-check: the probe is wired into the copied vtable (count only, nothing reaches the driver).
+            reinterpret_cast<PFN_Probe_SetHeaps>(copied_probe_vt[28])(cl_probe, 0, nullptr);
+            const int probe_self_check = g_probe_set_heaps;
+            g_probe_set_heaps = g_probe_set_graphics_rs = g_probe_set_graphics_table = 0;
+
+            d3d.bind(cl_probe, 0);
+            const onr::ClearRangePC pc{b_probe.addr, 4096u, 0u};
+            k_probe.run(d3d, "clear_range", &pc, sizeof pc, 5u);
+            d3d.unbind();
+
+            *reinterpret_cast<void***>(cl_probe) = vt_probe;
+            const int n_heaps = g_probe_set_heaps;
+            const int n_graphics_rs = g_probe_set_graphics_rs;
+            const int n_graphics_table = g_probe_set_graphics_table;
+
+            d3d.destroy(b_probe);
+            k_probe.unload(d3d);
+            cl_probe->Close();
+            cl_probe->Release();
+            ca_probe->Release();
+            host_heaps[0]->Release();
+            host_heaps[1]->Release();
+
+            if (probe_self_check != 1) {
+                std::fprintf(stderr, "FAIL: R33 probe self-check did not observe the routed SetDescriptorHeaps call (%d)\n",
+                             probe_self_check);
+                dev->Release();
+                return 1;
+            }
+            if (n_heaps != 0 || n_graphics_rs != 0 || n_graphics_table != 0) {
+                std::fprintf(stderr,
+                             "FAIL: R33 bind()/dispatch() mutated host state: SetDescriptorHeaps=%d "
+                             "SetGraphicsRootSignature=%d SetGraphicsRootDescriptorTable=%d\n",
+                             n_heaps, n_graphics_rs, n_graphics_table);
+                dev->Release();
+                return 1;
+            }
+            std::printf("[PASS] R33 (D3dDevice::bind/dispatch preserves host state): SetDescriptorHeaps=%d, "
+                        "SetGraphicsRootSignature=%d, SetGraphicsRootDescriptorTable=%d\n",
+                        n_heaps, n_graphics_rs, n_graphics_table);
         }
 
         const char* dlssd = std::getenv("OPENRR_DLSSD");

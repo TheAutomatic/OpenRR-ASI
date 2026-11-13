@@ -577,7 +577,6 @@ uint64_t D3dDevice::bind(ID3D12GraphicsCommandList* cl, uint32_t slot) {
     }
     bound_ = nullptr;
     dirty_ = false;
-    if (heap_) cl_->SetDescriptorHeaps(1, &heap_);
     cl_->SetComputeRootSignature(rs_);
     return current_serial_;
 }

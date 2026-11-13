@@ -233,7 +233,6 @@ struct DirectListState {
     UINT heap_count = 0;
     ID3D12DescriptorHeap* heaps[2]{};
     DirectRootArgs compute_root{};
-    DirectRootArgs graphics_root{};
     ID3D12PipelineState* pso = nullptr;
     bool pso_set = false;
     ID3D12StateObject* state_object = nullptr;
@@ -248,9 +247,6 @@ struct DirectListState {
         compute_root.rs = nullptr;
         compute_root.rs_set = false;
         compute_root.clear_bindings();
-        graphics_root.rs = nullptr;
-        graphics_root.rs_set = false;
-        graphics_root.clear_bindings();
         pso = initial;
         pso_set = (initial != nullptr);
         state_object = nullptr;
@@ -390,8 +386,6 @@ void apply_direct_execute_indirect(DirectListState* s, void* sig) {
     }
     if (info.pipeline_kind == 2) {
         apply_cmd_sig_to_root(s->compute_root, &info);
-    } else if (info.pipeline_kind == 1) {
-        apply_cmd_sig_to_root(s->graphics_root, &info);
     }
 }
 
@@ -437,19 +431,12 @@ PFN_CL_SetPipelineState real_cl_set_pso = nullptr;
 PFN_CL_ExecuteBundle real_cl_exec_bundle = nullptr;
 PFN_CL_SetDescriptorHeaps real_cl_set_heaps = nullptr;
 PFN_CL_SetComputeRootSignature real_cl_set_compute_rs = nullptr;
-PFN_CL_SetComputeRootSignature real_cl_set_graphics_rs = nullptr;
 PFN_CL_SetComputeRootDescriptorTable real_cl_set_compute_table = nullptr;
-PFN_CL_SetComputeRootDescriptorTable real_cl_set_graphics_table = nullptr;
 PFN_CL_SetComputeRoot32BitConstant real_cl_set_compute_const = nullptr;
-PFN_CL_SetComputeRoot32BitConstant real_cl_set_graphics_const = nullptr;
 PFN_CL_SetComputeRoot32BitConstants real_cl_set_compute_consts = nullptr;
-PFN_CL_SetComputeRoot32BitConstants real_cl_set_graphics_consts = nullptr;
 PFN_CL_SetComputeRootView real_cl_set_compute_cbv = nullptr;
-PFN_CL_SetComputeRootView real_cl_set_graphics_cbv = nullptr;
 PFN_CL_SetComputeRootView real_cl_set_compute_srv = nullptr;
-PFN_CL_SetComputeRootView real_cl_set_graphics_srv = nullptr;
 PFN_CL_SetComputeRootView real_cl_set_compute_uav = nullptr;
-PFN_CL_SetComputeRootView real_cl_set_graphics_uav = nullptr;
 PFN_CL_ExecuteIndirect real_cl_exec_indirect = nullptr;
 PFN_CL_SetPipelineState1 real_cl_set_pso1 = nullptr;
 PFN_Dev_CreateCommandList real_dev_create_cl = nullptr;
@@ -547,16 +534,6 @@ void STDMETHODCALLTYPE hk_cl_exec_bundle(ID3D12GraphicsCommandList* cl, ID3D12Gr
                             if (dm & (1ull << off)) s->compute_root.constant(i, off, (*br.const_vals[i])[off]);
                     }
                 }
-                const DirectRootArgs& bgr = bs->graphics_root;
-                if (bgr.rs_set) s->graphics_root.set_rs(bgr.rs);
-                for (UINT i = 0; i < 64; ++i) {
-                    if (bgr.mask & (1ull << i)) s->graphics_root.set(i, bgr.kind[i], bgr.value[i]);
-                    if ((bgr.const_param_mask & (1ull << i)) && bgr.const_vals[i]) {
-                        uint64_t dm = bgr.const_dword_mask[i];
-                        for (UINT off = 0; off < 64; ++off)
-                            if (dm & (1ull << off)) s->graphics_root.constant(i, off, (*bgr.const_vals[i])[off]);
-                    }
-                }
                 if (bs->pso_set) { s->pso = bs->pso; s->pso_set = true; s->so_last = false; }
                 if (bs->so_set) { s->state_object = bs->state_object; s->so_set = true; s->so_last = bs->so_last; }
             }
@@ -577,8 +554,6 @@ void STDMETHODCALLTYPE hk_cl_set_heaps(ID3D12GraphicsCommandList* cl, UINT count
             for (UINT i = 0; i < 64; ++i) {
                 if ((s->compute_root.mask & (1ull << i)) && s->compute_root.kind[i] == 1)
                     s->compute_root.mask &= ~(1ull << i);
-                if ((s->graphics_root.mask & (1ull << i)) && s->graphics_root.kind[i] == 1)
-                    s->graphics_root.mask &= ~(1ull << i);
             }
         }
         s->heap_count = n;
@@ -596,15 +571,6 @@ void STDMETHODCALLTYPE hk_cl_set_compute_rs(ID3D12GraphicsCommandList* cl, ID3D1
     real_cl_set_compute_rs(cl, rs);
 }
 
-void STDMETHODCALLTYPE hk_cl_set_graphics_rs(ID3D12GraphicsCommandList* cl, ID3D12RootSignature* rs) {
-    if (t_in_openrr_record) {
-        if (!t_record_target) t_record_target = cl;
-    } else if (cl) {
-        direct_state_of(cl)->graphics_root.set_rs(rs);
-    }
-    real_cl_set_graphics_rs(cl, rs);
-}
-
 void STDMETHODCALLTYPE hk_cl_set_compute_table(ID3D12GraphicsCommandList* cl, UINT index, D3D12_GPU_DESCRIPTOR_HANDLE h) {
     if (t_in_openrr_record) {
         if (!t_record_target) t_record_target = cl;
@@ -614,15 +580,6 @@ void STDMETHODCALLTYPE hk_cl_set_compute_table(ID3D12GraphicsCommandList* cl, UI
     real_cl_set_compute_table(cl, index, h);
 }
 
-void STDMETHODCALLTYPE hk_cl_set_graphics_table(ID3D12GraphicsCommandList* cl, UINT index, D3D12_GPU_DESCRIPTOR_HANDLE h) {
-    if (t_in_openrr_record) {
-        if (!t_record_target) t_record_target = cl;
-    } else if (cl) {
-        direct_state_of(cl)->graphics_root.set(index, 1, h.ptr);
-    }
-    real_cl_set_graphics_table(cl, index, h);
-}
-
 void STDMETHODCALLTYPE hk_cl_set_compute_const(ID3D12GraphicsCommandList* cl, UINT index, UINT val, UINT offset) {
     if (t_in_openrr_record) {
         if (!t_record_target) t_record_target = cl;
@@ -630,15 +587,6 @@ void STDMETHODCALLTYPE hk_cl_set_compute_const(ID3D12GraphicsCommandList* cl, UI
         direct_state_of(cl)->compute_root.constant(index, offset, val);
     }
     real_cl_set_compute_const(cl, index, val, offset);
-}
-
-void STDMETHODCALLTYPE hk_cl_set_graphics_const(ID3D12GraphicsCommandList* cl, UINT index, UINT val, UINT offset) {
-    if (t_in_openrr_record) {
-        if (!t_record_target) t_record_target = cl;
-    } else if (cl) {
-        direct_state_of(cl)->graphics_root.constant(index, offset, val);
-    }
-    real_cl_set_graphics_const(cl, index, val, offset);
 }
 
 void STDMETHODCALLTYPE hk_cl_set_compute_consts(ID3D12GraphicsCommandList* cl, UINT index, UINT count, const void* data, UINT offset) {
@@ -652,17 +600,6 @@ void STDMETHODCALLTYPE hk_cl_set_compute_consts(ID3D12GraphicsCommandList* cl, U
     real_cl_set_compute_consts(cl, index, count, data, offset);
 }
 
-void STDMETHODCALLTYPE hk_cl_set_graphics_consts(ID3D12GraphicsCommandList* cl, UINT index, UINT count, const void* data, UINT offset) {
-    if (t_in_openrr_record) {
-        if (!t_record_target) t_record_target = cl;
-    } else if (cl && data) {
-        DirectRootArgs& r = direct_state_of(cl)->graphics_root;
-        const auto* v = static_cast<const uint32_t*>(data);
-        for (UINT i = 0; i < count; ++i) r.constant(index, offset + i, v[i]);
-    }
-    real_cl_set_graphics_consts(cl, index, count, data, offset);
-}
-
 void STDMETHODCALLTYPE hk_cl_set_compute_cbv(ID3D12GraphicsCommandList* cl, UINT index, D3D12_GPU_VIRTUAL_ADDRESS va) {
     if (t_in_openrr_record) {
         if (!t_record_target) t_record_target = cl;
@@ -670,15 +607,6 @@ void STDMETHODCALLTYPE hk_cl_set_compute_cbv(ID3D12GraphicsCommandList* cl, UINT
         direct_state_of(cl)->compute_root.set(index, 2, va);
     }
     real_cl_set_compute_cbv(cl, index, va);
-}
-
-void STDMETHODCALLTYPE hk_cl_set_graphics_cbv(ID3D12GraphicsCommandList* cl, UINT index, D3D12_GPU_VIRTUAL_ADDRESS va) {
-    if (t_in_openrr_record) {
-        if (!t_record_target) t_record_target = cl;
-    } else if (cl) {
-        direct_state_of(cl)->graphics_root.set(index, 2, va);
-    }
-    real_cl_set_graphics_cbv(cl, index, va);
 }
 
 void STDMETHODCALLTYPE hk_cl_set_compute_srv(ID3D12GraphicsCommandList* cl, UINT index, D3D12_GPU_VIRTUAL_ADDRESS va) {
@@ -690,15 +618,6 @@ void STDMETHODCALLTYPE hk_cl_set_compute_srv(ID3D12GraphicsCommandList* cl, UINT
     real_cl_set_compute_srv(cl, index, va);
 }
 
-void STDMETHODCALLTYPE hk_cl_set_graphics_srv(ID3D12GraphicsCommandList* cl, UINT index, D3D12_GPU_VIRTUAL_ADDRESS va) {
-    if (t_in_openrr_record) {
-        if (!t_record_target) t_record_target = cl;
-    } else if (cl) {
-        direct_state_of(cl)->graphics_root.set(index, 3, va);
-    }
-    real_cl_set_graphics_srv(cl, index, va);
-}
-
 void STDMETHODCALLTYPE hk_cl_set_compute_uav(ID3D12GraphicsCommandList* cl, UINT index, D3D12_GPU_VIRTUAL_ADDRESS va) {
     if (t_in_openrr_record) {
         if (!t_record_target) t_record_target = cl;
@@ -706,15 +625,6 @@ void STDMETHODCALLTYPE hk_cl_set_compute_uav(ID3D12GraphicsCommandList* cl, UINT
         direct_state_of(cl)->compute_root.set(index, 4, va);
     }
     real_cl_set_compute_uav(cl, index, va);
-}
-
-void STDMETHODCALLTYPE hk_cl_set_graphics_uav(ID3D12GraphicsCommandList* cl, UINT index, D3D12_GPU_VIRTUAL_ADDRESS va) {
-    if (t_in_openrr_record) {
-        if (!t_record_target) t_record_target = cl;
-    } else if (cl) {
-        direct_state_of(cl)->graphics_root.set(index, 4, va);
-    }
-    real_cl_set_graphics_uav(cl, index, va);
 }
 
 void STDMETHODCALLTYPE hk_cl_exec_indirect(ID3D12GraphicsCommandList* cl, ID3D12CommandSignature* sig,
@@ -857,19 +767,12 @@ bool ensure_direct_state_hooks(ID3D12Device* dev, ID3D12GraphicsCommandList* cl 
         {"ExecuteBundle",                     27, reinterpret_cast<void*>(&hk_cl_exec_bundle),       reinterpret_cast<void**>(&real_cl_exec_bundle)},
         {"SetDescriptorHeaps",                28, reinterpret_cast<void*>(&hk_cl_set_heaps),          reinterpret_cast<void**>(&real_cl_set_heaps)},
         {"SetComputeRootSignature",           29, reinterpret_cast<void*>(&hk_cl_set_compute_rs),     reinterpret_cast<void**>(&real_cl_set_compute_rs)},
-        {"SetGraphicsRootSignature",          30, reinterpret_cast<void*>(&hk_cl_set_graphics_rs),    reinterpret_cast<void**>(&real_cl_set_graphics_rs)},
         {"SetComputeRootDescriptorTable",     31, reinterpret_cast<void*>(&hk_cl_set_compute_table),  reinterpret_cast<void**>(&real_cl_set_compute_table)},
-        {"SetGraphicsRootDescriptorTable",    32, reinterpret_cast<void*>(&hk_cl_set_graphics_table), reinterpret_cast<void**>(&real_cl_set_graphics_table)},
         {"SetComputeRoot32BitConstant",       33, reinterpret_cast<void*>(&hk_cl_set_compute_const),  reinterpret_cast<void**>(&real_cl_set_compute_const)},
-        {"SetGraphicsRoot32BitConstant",      34, reinterpret_cast<void*>(&hk_cl_set_graphics_const), reinterpret_cast<void**>(&real_cl_set_graphics_const)},
         {"SetComputeRoot32BitConstants",      35, reinterpret_cast<void*>(&hk_cl_set_compute_consts), reinterpret_cast<void**>(&real_cl_set_compute_consts)},
-        {"SetGraphicsRoot32BitConstants",     36, reinterpret_cast<void*>(&hk_cl_set_graphics_consts),reinterpret_cast<void**>(&real_cl_set_graphics_consts)},
         {"SetComputeRootConstantBufferView",  37, reinterpret_cast<void*>(&hk_cl_set_compute_cbv),    reinterpret_cast<void**>(&real_cl_set_compute_cbv)},
-        {"SetGraphicsRootConstantBufferView", 38, reinterpret_cast<void*>(&hk_cl_set_graphics_cbv),   reinterpret_cast<void**>(&real_cl_set_graphics_cbv)},
         {"SetComputeRootShaderResourceView",  39, reinterpret_cast<void*>(&hk_cl_set_compute_srv),    reinterpret_cast<void**>(&real_cl_set_compute_srv)},
-        {"SetGraphicsRootShaderResourceView", 40, reinterpret_cast<void*>(&hk_cl_set_graphics_srv),   reinterpret_cast<void**>(&real_cl_set_graphics_srv)},
         {"SetComputeRootUnorderedAccessView", 41, reinterpret_cast<void*>(&hk_cl_set_compute_uav),    reinterpret_cast<void**>(&real_cl_set_compute_uav)},
-        {"SetGraphicsRootUnorderedAccessView",42, reinterpret_cast<void*>(&hk_cl_set_graphics_uav),   reinterpret_cast<void**>(&real_cl_set_graphics_uav)},
         {"ExecuteIndirect",                   59, reinterpret_cast<void*>(&hk_cl_exec_indirect),      reinterpret_cast<void**>(&real_cl_exec_indirect)},
     };
 
@@ -944,9 +847,6 @@ void restore_direct_state(ID3D12GraphicsCommandList* cmd, ID3D12GraphicsCommandL
     if (!s || !s->valid || s->unknown) return;
 
     ++t_in_openrr_record;
-    if (s->heap_count > 0 && s->heaps[0]) {
-        cmd->SetDescriptorHeaps(s->heap_count, s->heaps);
-    }
     const DirectRootArgs& r = s->compute_root;
     if (r.rs_set && r.rs) {
         cmd->SetComputeRootSignature(r.rs);
@@ -970,16 +870,6 @@ void restore_direct_state(ID3D12GraphicsCommandList* cmd, ID3D12GraphicsCommandL
                     const uint64_t run = (count == 64) ? ~0ull : ((1ull << count) - 1ull);
                     dm &= ~(run << start);
                 }
-            }
-        }
-    }
-    const DirectRootArgs& gr = s->graphics_root;
-    // OpenRR never touches graphics root signature, graphics root constants, or graphics root CBV/SRV/UAVs;
-    // only SetDescriptorHeaps invalidates bound graphics descriptor tables (kind == 1).
-    if (s->heap_count > 0 && s->heaps[0] && gr.mask) {
-        for (UINT i = 0; i < 64; ++i) {
-            if ((gr.mask & (1ull << i)) && gr.kind[i] == 1) {
-                cmd->SetGraphicsRootDescriptorTable(i, {gr.value[i]});
             }
         }
     }
