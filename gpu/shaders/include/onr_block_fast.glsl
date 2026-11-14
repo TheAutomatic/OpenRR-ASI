@@ -326,6 +326,35 @@ uint ocp4(uint w) {
 // semantics - satfinite via the clamp, no MODE register; NaN would propagate, which no real
 // activation produces). Used only OUTSIDE the product loops, once per reuse scope.
 floate4m3_t qe4(float16_t v) { return floate4m3_t(clamp(v, float16_t(-448.0), float16_t(448.0))); }
+// mode-4 paired quantizer (Mochi NR_QUANT_PAIR32): the Inf -> NaN select must be spelled
+// abs(x) == +Inf - the vkd3d-proton shape nir_opt_algebraic matches to f2e4m3fn_satfn
+// (NIR has no isinf lowering, so an OpIsInf condition never folds; defined for scalars and
+// vec2 only in Mesa 26.3 - never widen past a pair). ACO lowers the pair to ONE
+// hardware-saturated v_cvt_pk_fp8_f32 (MODE.FP16_OVFL): zero software clamps, zero v_perm_b32.
+fe4m3vec2 qe4_pair32(vec2 x) {
+    fe4m3vec2 r;
+    saturatedConvertEXT(r, mix(x, vec2(uintBitsToFloat(0x7FC00000u)),
+                               equal(abs(x), vec2(uintBitsToFloat(0x7F800000u)))));
+    return r;
+}
+// the four e4m3 codes of two pairs as one dword (byte i of the dword = element i)
+uint qe4_pack2(fe4m3vec2 a, fe4m3vec2 b) {
+    return pack32(u8vec4(floate4m3BitsToUintEXT(a.x), floate4m3BitsToUintEXT(a.y),
+                         floate4m3BitsToUintEXT(b.x), floate4m3BitsToUintEXT(b.y)));
+}
+// GELU with gelu2's algebra straight in f32 (gelu2 clamps |x| at 2: same values, no f16
+// round-trip). 4 f32 VALU per element feeding qe4_pair32 directly from the QC8 accumulator.
+float gelu_f32(float x) {
+    float m = min(abs(x), 2.0);
+    float u = fma(-m, float(float16_t(0.08108)), float(GELU_A));
+    float g = min(max(fma(x, u, 0.5), 0.0), 1.0);
+    return x * g;
+}
+// a QC8 tile -> GELU in f32 -> paired hardware-saturated quantization -> QB8 (narrow scope:
+// the 8-VGPR f32 accumulator dies the moment its 2-VGPR e4m3 fragment exists)
+#define GELUQ8(h, g8) { [[unroll]] for (int i_ = 0; i_ < (g8).length(); i_ += 2) { \
+        fe4m3vec2 q_ = qe4_pair32(vec2(gelu_f32((h)[i_]), gelu_f32((h)[i_ + 1]))); \
+        (g8)[i_] = q_.x, (g8)[i_ + 1] = q_.y; } }
 #endif
 
 // GPU fragment position of arena channel a (inverse of arena_channel within a plane)
@@ -907,33 +936,45 @@ void main() {
 #ifdef LT_MLP8
     // Native-FP8 MLP, SPLIT2 flavour: fc1/fc2 as 1-byte e4m3 A tiles from the UT8 tail
     // (zero conversions in the product loops). The half's x1 tiles quantize once below
-    // and feed every slice's single fc1 tile; the GELU exchange keeps its fp16 LDS
-    // format untouched and each consumer quantizes the two loaded tiles locally (qe4 is
-    // deterministic, so both halves see identical bytes). fc2 keeps QC8 (f32 WMMA)
-    // accumulators and folds into the fp16 exchange stores after the loop.
+    // and feed every slice's single fc1 tile. The GELU exchange moves the lane's 8
+    // quantized bytes as one uvec2 (1 x ds_store_b64, 2 x ds_load_b64): the producer
+    // runs gelu_f32 + qe4_pair32 straight from its QC8 tile - QC8 and QB8 share the
+    // lane -> coordinates (8*(ln>>4)+i, ln&15), so byte i of the lane is element i of
+    // both fragments - and each consumer rebuilds its two QB8 tiles by uintBitsToFloate4m3EXT
+    // (zero compute). fc2 keeps QC8 (f32 WMMA) accumulators and folds into the fp16
+    // exchange stores after the loop.
 #define S2_FC1_W8 E4View(uint64_t(pc.fc1) + uint64_t(4u * HID * ENC_C)).v
 #define S2_FC2_W8 E4View(uint64_t(pc.fc2) + uint64_t(4u * HID * ENC_C)).v
     QC8 mc[5];
 #define FC2B8_T(cn, i) mc[i] = QC8(bias_acc_t(pc.fc2_b, TO(i) * 16u));
     FOR_NO(FC2B8_T)
-#define XQ8_T2(cn, xn, n) QB8 x8##n; { for (int i = 0; i < x8##n.length(); ++i) x8##n[i] = qe4(xn[i]); }
+#define XQ8_T2(cn, xn, n) QB8 x8##n; { [[unroll]] for (int i = 0; i < x8##n.length(); i += 2) { \
+        fe4m3vec2 q_ = qe4_pair32(vec2(xn[i], xn[i + 1])); x8##n[i] = q_.x, x8##n[i + 1] = q_.y; } }
     FOR_NX(XQ8_T2)
     J2_UNROLL for (uint j = 0u; j < LT_HID; j += 32u) {
         uint jt = j + 16u * hf;
         QC8 h0 = QC8(bias_acc_t(pc.fc1_b, jt));
 #define FC1_T8(cn, xn, n) { QA8 a8_; coopMatLoad(a8_, S2_FC1_W8, jt * ENC_C + (n) * 16u, ENC_C, ROW); h0 = coopMatMulAdd(a8_, x8##n, h0); }
         FOR_NX(FC1_T8)
-        MH g = MH(h0);
-        for (int i = 0; i < g.length(); i += 2) { f16vec2 q = gelu2(f16vec2(g[i], g[i + 1])); g[i] = q.x, g[i + 1] = q.y; }
         uint hb = QV + ((j >> 5) & 1u) * 2048u + rt * 512u;
-        coopMatStore(g, lds, hb + hf * 256u, 16u, ROW);
+        // 512 halves per rt slot = 128 uvec2; lane ln writes (hb>>2) + hf*32 + ln (<= 63, in slot)
+        uvec2 gw_;
+        [[unroll]] for (int i = 0; i < 8; i += 4) {
+            fe4m3vec2 q0_ = qe4_pair32(vec2(gelu_f32(h0[i]), gelu_f32(h0[i + 1])));
+            fe4m3vec2 q1_ = qe4_pair32(vec2(gelu_f32(h0[i + 2]), gelu_f32(h0[i + 3])));
+            gw_[i >> 2] = qe4_pack2(q0_, q1_);
+        }
+        lds2[(hb >> 2) + hf * 32u + ln] = gw_;
         WG_SYNC();
         QB8 g8a, g8b;
         {
-            MH ga, gb;
-            coopMatLoad(ga, lds, hb, 16u, ROW);
-            coopMatLoad(gb, lds, hb + 256u, 16u, ROW);
-            for (int i = 0; i < g8a.length(); ++i) { g8a[i] = qe4(ga[i]); g8b[i] = qe4(gb[i]); }
+            uvec2 wa_ = lds2[(hb >> 2) + ln], wb_ = lds2[(hb >> 2) + 32u + ln];
+            [[unroll]] for (int i = 0; i < 8; i += 2) {
+                g8a[i] = uintBitsToFloate4m3EXT(unpack8(wa_[i >> 2])[uint(i & 3)]);
+                g8a[i + 1] = uintBitsToFloate4m3EXT(unpack8(wa_[i >> 2])[uint((i + 1) & 3)]);
+                g8b[i] = uintBitsToFloate4m3EXT(unpack8(wb_[i >> 2])[uint(i & 3)]);
+                g8b[i + 1] = uintBitsToFloate4m3EXT(unpack8(wb_[i >> 2])[uint((i + 1) & 3)]);
+            }
         }
 #define FC2_T8(cn, i) { QA8 a8_; \
             coopMatLoad(a8_, S2_FC2_W8, TO(i) * 16u * HID + j, HID, ROW); mc[i] = coopMatMulAdd(a8_, g8a, mc[i]); \
@@ -973,7 +1014,12 @@ void main() {
 #define X2_X(cn, xn, n) RESID_X(cn, xn, n, ls2)
     FOR_NX(X2_X)
 #else
+#if defined(LT_MLP8) && defined(LT_XQ_F32)
+// beta fuses the ls1 residual into the quantizer, so RESID_T must not run first
+#define X1_T(cn, xn, n)
+#else
 #define X1_T(cn, xn, n) RESID_T(cn, xn, ls1)
+#endif
     FOR_NX(X1_T)
     CUT(4)
 // MLP slice width: 64 hidden neurons where the register budget allows, else 32 (both MLP paths)
@@ -985,40 +1031,38 @@ void main() {
 #ifdef LT_MLP8
     // Native-FP8 MLP (fc1/fc2): the weights' RNE e4m3 codes follow the fp16 values + tiles in the fc1/fc2
     // buffers in natural [row][K] order (Engine::upload_stage) and load straight as 1-byte A tiles - zero
-    // conversions inside the product loops. Activations quantize ONCE outside their reuse scope with an fp16
-    // clamp (Mochi NR_QUANT mode-1 semantics, no MODE register): the x1 tiles before the slice loop (reused
-    // by every fc1 tile of every slice), each GELU pair once per slice (reused by all NT fc2 tiles). The fp8
-    // WMMA accumulates f32, so the slice accumulators are QC8 and fc2 keeps local QC8 tiles folding back
-    // into the block's fp16 output accumulators once after the loop.
+    // conversions inside the product loops. Activations quantize ONCE outside their reuse scope: the x1
+    // tiles before the slice loop (reused by every fc1 tile of every slice) and each GELU pair once per
+    // slice (reused by all NT fc2 tiles), both through the paired mode-4 quantizer (qe4_pair32). The fp8
+    // WMMA accumulates f32, so the slice accumulators are QC8; each fc1 tile is quantized to its 2-VGPR
+    // QB8 the moment it completes (narrow scope, one live f32 tile at a time) and fc2 keeps local QC8
+    // tiles folding back into the block's fp16 output accumulators once after the loop.
 #define FC1_W8 E4View(uint64_t(pc.fc1) + uint64_t(4u * HID * ENC_C)).v
 #define FC2_W8 E4View(uint64_t(pc.fc2) + uint64_t(4u * HID * ENC_C)).v
-#define XQ8_T(cn, xn, n) QB8 x8##n; { for (int i = 0; i < x8##n.length(); ++i) x8##n[i] = qe4(xn[i]); }
+#if defined(LT_XQ_F32)
+// beta: the ls1 residual runs in f32 straight into the paired quantizer (zero f16 rounding on the
+// x8 path, no separate fp16 fma pass); xn narrows from the same f32 value
+#define XQ8_T(cn, xn, n) QB8 x8##n; { [[unroll]] for (int i = 0; i < x8##n.length(); i += 2) { \
+        precise vec2 v_ = fma(vec2(cn[i], cn[i + 1]), vec2(float(ls1)), vec2(xn[i], xn[i + 1])); \
+        fe4m3vec2 q_ = qe4_pair32(v_); x8##n[i] = q_.x, x8##n[i + 1] = q_.y; \
+        xn[i] = float16_t(v_.x), xn[i + 1] = float16_t(v_.y); } }
+#else
+// alpha: xn (fp16, v_pk_fma_f16) quantized in pairs - f16 -> f32 -> one saturated cvt_pk per pair
+#define XQ8_T(cn, xn, n) QB8 x8##n; { [[unroll]] for (int i = 0; i < x8##n.length(); i += 2) { \
+        fe4m3vec2 q_ = qe4_pair32(vec2(xn[i], xn[i + 1])); x8##n[i] = q_.x, x8##n[i + 1] = q_.y; } }
+#endif
     FOR_NX(XQ8_T)
 #define MQ8_T(cn, xn, n) QC8 m##n = QC8(bias_acc_t(pc.fc2_b, (n) * 16u));
     FOR_NX(MQ8_T)
     MLP_SLICE_LOOP for (uint j = 0u; j < LT_HID; j += SLICE) {
-        QC8 h0 = QC8(bias_acc_t(pc.fc1_b, j)), h1 = QC8(bias_acc_t(pc.fc1_b, j + 16u));
+        // per-tile narrow scope: a fc1 accumulator dies into its QB8 as soon as it is complete
+#define FC1Q_STEP(cn, xn, n) { QA8 a8_; coopMatLoad(a8_, FC1_W8, fc1r_ * ENC_C + (n) * 16u, ENC_C, ROW); h_ = coopMatMulAdd(a8_, x8##n, h_); }
+#define FC1Q_T(g8, jrow) QB8 g8; { uint fc1r_ = (jrow); QC8 h_ = QC8(bias_acc_t(pc.fc1_b, jrow)); FOR_NX(FC1Q_STEP) GELUQ8(h_, g8) }
+        FC1Q_T(g80, j) FC1Q_T(g81, j + 16u)
 #if MLP64
-        QC8 h2 = QC8(bias_acc_t(pc.fc1_b, j + 32u)), h3 = QC8(bias_acc_t(pc.fc1_b, j + 48u));
-#define FC1_T(cn, xn, n) { QA8 a8_; \
-            coopMatLoad(a8_, FC1_W8, j * ENC_C + (n) * 16u, ENC_C, ROW); h0 = coopMatMulAdd(a8_, x8##n, h0); \
-            coopMatLoad(a8_, FC1_W8, (j + 16u) * ENC_C + (n) * 16u, ENC_C, ROW); h1 = coopMatMulAdd(a8_, x8##n, h1); \
-            coopMatLoad(a8_, FC1_W8, (j + 32u) * ENC_C + (n) * 16u, ENC_C, ROW); h2 = coopMatMulAdd(a8_, x8##n, h2); \
-            coopMatLoad(a8_, FC1_W8, (j + 48u) * ENC_C + (n) * 16u, ENC_C, ROW); h3 = coopMatMulAdd(a8_, x8##n, h3); }
-#else
-#define FC1_T(cn, xn, n) { QA8 a8_; \
-            coopMatLoad(a8_, FC1_W8, j * ENC_C + (n) * 16u, ENC_C, ROW); h0 = coopMatMulAdd(a8_, x8##n, h0); \
-            coopMatLoad(a8_, FC1_W8, (j + 16u) * ENC_C + (n) * 16u, ENC_C, ROW); h1 = coopMatMulAdd(a8_, x8##n, h1); }
+        FC1Q_T(g82, j + 32u) FC1Q_T(g83, j + 48u)
 #endif
-        FOR_NX(FC1_T)
-#define GELU_TT(h, g) MH g = MH(h); for (int i = 0; i < g.length(); i += 2) { f16vec2 q = gelu2(f16vec2(g[i], g[i + 1])); g[i] = q.x, g[i + 1] = q.y; }
-        GELU_TT(h0, g0) GELU_TT(h1, g1)
-        QB8 g80, g81;
-        for (int i = 0; i < g80.length(); ++i) { g80[i] = qe4(g0[i]); g81[i] = qe4(g1[i]); }
 #if MLP64
-        GELU_TT(h2, g2) GELU_TT(h3, g3)
-        QB8 g82, g83;
-        for (int i = 0; i < g82.length(); ++i) { g82[i] = qe4(g2[i]); g83[i] = qe4(g3[i]); }
 #define FC2_T(cn, xn, n) { QA8 a8_; \
             coopMatLoad(a8_, FC2_W8, (n) * 16u * HID + j, HID, ROW); m##n = coopMatMulAdd(a8_, g80, m##n); \
             coopMatLoad(a8_, FC2_W8, (n) * 16u * HID + j + 16u, HID, ROW); m##n = coopMatMulAdd(a8_, g81, m##n); \
