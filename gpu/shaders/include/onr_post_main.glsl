@@ -672,7 +672,11 @@ void main() {
     if (v0) pair_cands(X, Y0, fx, 0.5 * (fy0 + fy1));
 #endif
     vec3 o1t = vec3(0.0), o1b = vec3(0.0);
+    #ifdef LT_POST_PAIR
+    for (int p = 0; p < 2; ++p) {
+    #else
     [[dont_unroll]] for (int p = 0; p < 2; ++p) {
+    #endif
         if (!(p == 0 ? v0 : v1)) continue;
         int Y = Y0 + p;
         vec3 o1, o2;
