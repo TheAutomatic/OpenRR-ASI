@@ -8,4 +8,8 @@
 #define ENC_K8 1
 #define DEC_UP 1
 #define ENC_CP 96
+// W2_SL=64 FP8 MLP: Mesa's full unroll of 4 fat slices bloats exec +42%; keep it rolled.
+#if defined(LT_MLP8)
+#define MLP_SLICE_LOOP [[dont_unroll]]
+#endif
 #include "onr_block.glsl"

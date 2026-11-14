@@ -356,6 +356,55 @@ void main() {
 #define RES_A2(n) RESID1(c0##n, x0##n, ls2)
 #define RES_B2(n) RESID1(c1##n, x1##n, ls2)
     W2T(RES_A1) W2T(RES_B1)
+#ifdef LT_MLP8
+    // Native-FP8 MLP, W2: fc1/fc2 stream as 1-byte e4m3 A tiles from the UT8 tail (natural
+    // [row][K] order, NOT FC1_TILE which addresses the fp16 tile suffix); the x1 token tiles
+    // quantize once in pairs below and feed every fc1 tile of every slice. One hidden tile at
+    // a time: a fc1 QC8 accumulator dies into its 2-VGPR QB8 the moment its K chain completes
+    // (gelu_f32 + qe4_pair32 straight from the f32 tile via GELUQ8), keeping VGPRs within
+    // budget with zero scratch. fc2 accumulates in QC8 (f32 WMMA) across slices.
+#define W2_FC1_W8 E4View(uint64_t(pc.fc1) + uint64_t(4u * HID * ENC_C)).v
+#define W2_FC2_W8 E4View(uint64_t(pc.fc2) + uint64_t(4u * HID * ENC_C)).v
+#define W2_XQ8(n) QB8 x8a##n, x8b##n; { [[unroll]] for (int i_ = 0; i_ < x8a##n.length(); i_ += 2) { \
+        fe4m3vec2 qa_ = qe4_pair32(vec2(x0##n[i_], x0##n[i_ + 1])); \
+        fe4m3vec2 qb_ = qe4_pair32(vec2(x1##n[i_], x1##n[i_ + 1])); \
+        x8a##n[i_] = qa_.x, x8a##n[i_ + 1] = qa_.y, x8b##n[i_] = qb_.x, x8b##n[i_ + 1] = qb_.y; } }
+    W2T(W2_XQ8)
+#define W2_MB(n) QC8 m0##n = QC8(bias_acc_t(pc.fc2_b, uint(n) * 16u)), m1##n = m0##n;
+    W2T(W2_MB)
+#if NT > 4
+#define W2_FC245(m) W2_FC21(4, m) W2_FC21(5, m)
+#else
+#define W2_FC245(m)
+#endif
+#define W2_FC21(n, m) { QA8 g8_; coopMatLoad(g8_, W2_FC2_W8, uint(n) * 16u * HID + j + (m) * 16u, HID, ROW); \
+            m0##n = coopMatMulAdd(g8_, ga##m, m0##n); m1##n = coopMatMulAdd(g8_, gb##m, m1##n); }
+#define W2_FC1K(n) { QA8 f8_; coopMatLoad(f8_, W2_FC1_W8, fc1r_ * ENC_C + uint(n) * 16u, ENC_C, ROW); \
+            h0_ = coopMatMulAdd(f8_, x8a##n, h0_); h1_ = coopMatMulAdd(f8_, x8b##n, h1_); }
+#define W2_FC1Q(ga, gb, jrow) QB8 ga, gb; { uint fc1r_ = (jrow); \
+            QC8 h0_ = QC8(bias_acc_t(pc.fc1_b, jrow)), h1_ = h0_; \
+            W2T(W2_FC1K) \
+            GELUQ8(h0_, ga) GELUQ8(h1_, gb) }
+#if W2_SL == 64
+    MLP_SLICE_LOOP for (uint j = 0u; j < LT_HID; j += 64u) {
+        W2_FC1Q(ga0, gb0, j) W2_FC1Q(ga1, gb1, j + 16u) W2_FC1Q(ga2, gb2, j + 32u) W2_FC1Q(ga3, gb3, j + 48u)
+        W2_FC21(0, 0) W2_FC21(1, 0) W2_FC21(2, 0) W2_FC21(3, 0) W2_FC245(0)
+        W2_FC21(0, 1) W2_FC21(1, 1) W2_FC21(2, 1) W2_FC21(3, 1) W2_FC245(1)
+        W2_FC21(0, 2) W2_FC21(1, 2) W2_FC21(2, 2) W2_FC21(3, 2) W2_FC245(2)
+        W2_FC21(0, 3) W2_FC21(1, 3) W2_FC21(2, 3) W2_FC21(3, 3) W2_FC245(3)
+    }
+#else
+    MLP_SLICE_LOOP for (uint j = 0u; j < LT_HID; j += 32u) {
+        W2_FC1Q(ga0, gb0, j) W2_FC1Q(ga1, gb1, j + 16u)
+        W2_FC21(0, 0) W2_FC21(1, 0) W2_FC21(2, 0) W2_FC21(3, 0) W2_FC245(0)
+        W2_FC21(0, 1) W2_FC21(1, 1) W2_FC21(2, 1) W2_FC21(3, 1) W2_FC245(1)
+    }
+#endif
+#define W2_RES8(cn, xn) { MH r_ = MH(cn); for (int i_ = 0; i_ < r_.length(); i_ += 2) { precise f16vec2 v_ = fma(f16vec2(r_[i_], r_[i_ + 1]), f16vec2(ls2), f16vec2(xn[i_], xn[i_ + 1])); xn[i_] = v_.x, xn[i_ + 1] = v_.y; } }
+#define W2_RA2(n) W2_RES8(m0##n, x0##n)
+#define W2_RB2(n) W2_RES8(m1##n, x1##n)
+    W2T(W2_RA2) W2T(W2_RB2)
+#else
 #define FC2B0(n) c0##n = bias_acc_t(pc.fc2_b, uint(n) * 16u);
 #define FC2B1(n) c1##n = c0##n;
     W2T(FC2B0) W2T(FC2B1)
@@ -399,6 +448,7 @@ void main() {
     }
 #endif
     W2T(RES_A2) W2T(RES_B2)
+#endif
     // TensorOutput of the own tokens straight from the x^T tiles, one 16-byte store per lane and plane
 #define XOUT2(xa, xb, tp, own, pl) if (own) { uvec4 w_; [[unroll]] for (int k_ = 0; k_ < 4; ++k_) \
         w_[k_] = e4m3x4(f16vec2(xa[2 * k_], xa[2 * k_ + 1]), f16vec2(xb[2 * k_], xb[2 * k_ + 1])); \
