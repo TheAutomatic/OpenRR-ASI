@@ -360,11 +360,14 @@ inline Bytes splice(const Bytes& binary,const Record& r,unsigned push_bytes=256,
         p.set(".spill_threshold",Value(a.spill>=0?1:65535));
         cs.set(".shader_spill_threshold",Value(a.spill>=0?1:65535));
         cs.set(".user_sgprs",Value(a.user));
-        cs.set(".sgpr_count",Value(108));
+        cs.set(".sgpr_count",Value(106));
         cs.set(".vgpr_count",Value(((r.rsrc1&63)+1)*8));
         cs.set(".lds_size",Value(((r.rsrc2>>15)&511)*512));cs.set(".float_mode",Value((r.rsrc1>>12)&255));
         cs.set(".wgp_mode",Value::boolean((r.rsrc1>>29)&1));
-        cs.set(".mem_ordered",Value::boolean((r.rsrc1>>30)&1));
+        // GFX12 RSRC1 carries no MEM_ORDERED (radv_shader.c writes it only up to GFX11_7); the
+        // LLPC-built PAL container for GFX12 always reports it true, so keep the template value.
+        cs.set(".mem_ordered",Value::boolean(is_gfx12(e.mach) ? true : bool((r.rsrc1>>30)&1)));
+        cs.set(".image_op",Value::boolean(r.set0>=0));
         cs.set(".forward_progress",Value::boolean((r.rsrc1>>31)&1));
         cs.set(".fp16_overflow",Value::boolean((r.rsrc1>>26)&1));
         cs.set(".scratch_en",Value::boolean(r.scratch_en));cs.set(".scratch_memory_size",Value(r.scratch_bytes));

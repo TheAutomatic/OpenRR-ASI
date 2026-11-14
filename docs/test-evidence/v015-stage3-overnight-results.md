@@ -278,6 +278,11 @@ true 覆写成 false）→ is_gfx12 保持 true；`.sgpr_count` 108→106（模�
 `s4-r3-item1-pal-meta/`（candidate.patch、dump/ 94 条 spliced ELF、dump.tsv、verify_splice 源码、
 stamps、swap 对照、ABBA 原始 JSON）。
 
+**合入决定（Step 0）**：尽管该修复对帧耗时 0% 中性，但它是 GFX12 PAL 3.6 容器规范与越界修正
+（`.sgpr_count` 108 超过模板 `.sgpr_limit 106`、`.image_op` 与 `.mem_ordered` 与 LLPC 容器语义相反），
+0-ULP 与 3×ABBA 证据已在 `s4-r3-item1-pal-meta/` 取全 —— 现作为后续 FP8 量化轮的新干净基线
+`GREEN_HEAD` 合入（仅 `gpu/src/rr_pal_binary.hpp` 三处，不含临时 dump 钩子）。
+
 ### 11.2 R3-E2 post_f_lt 5-tap 凑满 `s_clause 0x4` — 判负（clause 形态对齐，收益噪声级）
 
 Mesa 26.3.0 `aco_scheduler.cpp::schedule_VMEM` 增 `ONR_ACO_MIMG_CLAUSE`：`current->isMIMG()` 时
