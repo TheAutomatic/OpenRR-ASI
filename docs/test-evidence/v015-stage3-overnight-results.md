@@ -251,3 +251,50 @@ LDS 载入（R2-E1 合并）与 dscnt 等待（本轮）双方向证伪，post �
 对照 R1 收尾同口径（+1.58%/+2.70%）：4K 持平；1080p 比例上升系 LLPC 绝对值随机器状态同步变快
 （R1 3.266→本轮 3.053，ACO 3.327→3.132），跨会话绝对值漂移，比例以同会话为准。
 本夜零晋级，GREEN_HEAD 保持 `c75740e`。
+
+
+## 11. Stage 4 R3：PAL 元数据对齐与 MIMG clause 束宽（两项判负，机制均按预测命中）
+
+GREEN_HEAD 保持 `c75740e`。硬件口径：gfx1201 wave32 VGPR 文件 1536、分配粒度 8 —— 88 与 96 VGPR
+同为满占 16 waves/SIMD，本轮无占用档位变化。
+
+### 11.1 R3-E1 GFX12 PAL 容器元数据失配修复 — 判负（零收益）
+
+根因确认并修复三处：`.image_op`（旧 splice 从不写，模板 clear_range 为 false，导致 21 个含 MIMG 的
+核在 PAL 元数据里与 LLPC 相反）→ `r.set0>=0`；`.mem_ordered`（GFX12 RSRC1 无该位，旧代码把模板的
+true 覆写成 false）→ is_gfx12 保持 true；`.sgpr_count` 108→106（模板 `.sgpr_limit` 106）。
+
+**全仓核实**：109 条记录中 `set0>=0` 恰 **21** 条，与含 MIMG 指令的记录 **21/21 一一对应（0 例外）**。
+**真实路径取证**：splice 后按既有 `ONR_ACO_DUMP` 导出 `.spliced.elf`，短跑导出 94 条逐条解码断言：
+**94/94 `.mem_ordered=true`、`.sgpr_count=106`、`.image_op == (set0>=0)`（16 true / 78 false）**；
+代表核 post_f_lt image_op=true / attr=true / enc_stage_64_64_96=false。两侧 runtime 分别构建
+（base 958b1da5…、cand f2d4ba5c…；注意 mingw PE 时间戳使重建 SHA 非确定，SHA 不作语义证据）。
+
+门禁：units 全绿；base-vs-cand 四相位 **exact 100.000000% / ulp 0 / psnr 999**。
+测速：首轮 600 帧 @idx 似 4K −0.76%（BDA 核 −0.72%、纹理核 −0.94%，各核比例一致），**交换两侧复跑
+后总计 −0.02%** → 首轮为测量顺序/会话偏置；3×ABBA（互换）4K **+0.353%**（组 −0.105/+0.353/+0.924）、
+1080p **+0.215%**（组 +0.278/−0.186/+0.215）。
+裁决：**PAL 元数据失配不是 ACO-vs-LLPC 差距来源**；元数据对齐对运行时间无影响。归档
+`s4-r3-item1-pal-meta/`（candidate.patch、dump/ 94 条 spliced ELF、dump.tsv、verify_splice 源码、
+stamps、swap 对照、ABBA 原始 JSON）。
+
+### 11.2 R3-E2 post_f_lt 5-tap 凑满 `s_clause 0x4` — 判负（clause 形态对齐，收益噪声级）
+
+Mesa 26.3.0 `aco_scheduler.cpp::schedule_VMEM` 增 `ONR_ACO_MIMG_CLAUSE`：`current->isMIMG()` 时
+`clause_max_grab_dist` 10 → 64，使首个 `image_sample_lz` 跨 ~23 条坐标计算下移并入后 4 条。
+补丁经 prepare_capture 组合式叠加、`aco_scheduler.cpp` 入 patched 还原清单 + FATAL marker 自检；
+`build_aco_records.py --mimg-clause-shaders` 白名单（仅 post_f_lt）。
+
+上机前预检（全命中）：manifest **仅 post_f_lt code 变**（95b8b8e1 → **b96b1028**，其余 108 条
+逐字节不变）；反汇编 `image_sample_lz` 仍 20、clause 由 `10×0x1/7×0x2/6×0x3` 变为
+`10×0x1/7×0x2/**4×0x4**/2×0x3`（4 个 bicubic 分支各成 5 连发，与 LLPC 同形）；vgpr 96 不变、
+scratch 0、exec 12216→12156。
+
+门禁：units 全绿；四相位 0-ULP；日志同 spv（d57398b3）异 code = 真 A/B。
+测速（600 帧、扣漂移、奇数槽 0.0000 ms CLEAN）：4K `@40` **−2.21 μs（−0.17%）**、
+1080p **−2.19 μs（−0.67%）**；单组 4K ABBA 组中位 **−0.160%**（call0 −0.399%、call1 +0.079%）。
+裁决：形态完全对齐 LLPC 但核内仅 −2.2 μs（<5 μs 噪声带），按门禁判负归档 `s4-r3-item2-post-clause/`。
+
+**收敛结论（post 差距四重证伪）**：等待条数（R1-E2 wait0）、LDS 载入/合并（R2-E1）、k 循环展开
+（overnight item1）、采样 clause 束宽（本轮）均无效 —— post 的 14.5% 差距只剩 SALU/VALU 排布与
+整体调度，属编译器侧，源码/记录层无可达杠杆。还原：Mesa marker=0、hook=2，记录与 GREEN_HEAD 零差异。
