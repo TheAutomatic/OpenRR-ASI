@@ -239,6 +239,9 @@ std::unordered_map<uint64_t, CachedAmdProps> g_real_props_cache;
 
 bool ask_amd_icd(HMODULE icd, const uint8_t* luid, VkPhysicalDeviceProperties& out_props,
                  VkPhysicalDeviceDriverProperties& out_drv) {
+    // Compatibility caveat: this probes an AMD ICD already loaded by Vulkan without
+    // negotiating a new loader/driver interface. No failure has been reproduced in
+    // the tested configurations. If the probe fails, keep the loader's properties.
     auto gipa = reinterpret_cast<PFN_vkGetInstanceProcAddr>(
         reinterpret_cast<void*>(GetProcAddress(icd, "vk_icdGetInstanceProcAddr")));
     auto create_inst = gipa ? reinterpret_cast<PFN_vkCreateInstance>(gipa(VK_NULL_HANDLE, "vkCreateInstance")) : nullptr;

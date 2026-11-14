@@ -196,16 +196,14 @@ LONG WINAPI on_unhandled_exception(EXCEPTION_POINTERS* ep) {
 
 std::string where_address(const void* at) { return where(reinterpret_cast<DWORD64>(at)); }
 
-void install_crash_watch() {
+void install_crash_watch(void* host_module) {
     if (handler) return;
     HMODULE self_mod = nullptr;
     if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
                            reinterpret_cast<LPCWSTR>(&install_crash_watch), &self_mod))
         module_bounds(self_mod, g_self_begin, g_self_end);
-    HMODULE host_mod = nullptr;
-    if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                           reinterpret_cast<LPCWSTR>(__builtin_return_address(0)), &host_mod) &&
-        host_mod != self_mod)
+    const auto host_mod = static_cast<HMODULE>(host_module);
+    if (host_mod && host_mod != self_mod && host_mod != GetModuleHandleW(nullptr))
         module_bounds(host_mod, g_host_begin, g_host_end);
     // Do not call LoadLibraryW under the loader lock in InitializeASI; use already-loaded module if present.
     dbghelp = GetModuleHandleW(L"dbghelp.dll");

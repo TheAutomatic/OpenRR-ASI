@@ -1934,8 +1934,9 @@ bool fill_d3d12_frame(RrContext& ctx, const NVSDK_NGX_Parameter& params, OnrRrFr
     frame.specular_ray_direction_hit_distance = tex(NVSDK_NGX_Parameter_DLSSD_SpecularRayDirectionHitDistance,
                                                     NVSDK_NGX_Parameter_DLSSD_SpecularRayDirectionHitDistance_Subrect_Base_X,
                                                     NVSDK_NGX_Parameter_DLSSD_SpecularRayDirectionHitDistance_Subrect_Base_Y, read_state);
-    // Output is written from its origin (0, 0), matching OpenNrRrFeature_Dx12.
-    frame.output = tex(NVSDK_NGX_Parameter_Output, nullptr, nullptr, output_state);
+    frame.output = tex(NVSDK_NGX_Parameter_Output,
+                       NVSDK_NGX_Parameter_DLSS_Output_Subrect_Base_X,
+                       NVSDK_NGX_Parameter_DLSS_Output_Subrect_Base_Y, output_state);
 
     frame.transparency_layer = tex(NVSDK_NGX_Parameter_DLSSD_ColorBeforeParticles,
                                    "DLSS.TransparencyLayer.Subrect.Base.X",
@@ -2128,7 +2129,9 @@ bool fill_vk_frame(RrContext& ctx, const NVSDK_NGX_Parameter& params, OnrRrFrame
     frame.specular_ray_direction_hit_distance = tex(NVSDK_NGX_Parameter_DLSSD_SpecularRayDirectionHitDistance,
                                                     NVSDK_NGX_Parameter_DLSSD_SpecularRayDirectionHitDistance_Subrect_Base_X,
                                                     NVSDK_NGX_Parameter_DLSSD_SpecularRayDirectionHitDistance_Subrect_Base_Y, read_layout);
-    frame.output = tex(NVSDK_NGX_Parameter_Output, nullptr, nullptr, output_layout);
+    frame.output = tex(NVSDK_NGX_Parameter_Output,
+                       NVSDK_NGX_Parameter_DLSS_Output_Subrect_Base_X,
+                       NVSDK_NGX_Parameter_DLSS_Output_Subrect_Base_Y, output_layout);
 
     frame.transparency_layer = tex(NVSDK_NGX_Parameter_DLSSD_ColorBeforeParticles,
                                    "DLSS.TransparencyLayer.Subrect.Base.X",
@@ -3945,7 +3948,7 @@ extern "C" __declspec(dllexport) void InitializeASI() {
 
     openrr::pe::set_module(g_opti);
     openrr::pe::enable_d3d12_dred();
-    openrr::pe::install_crash_watch();
+    openrr::pe::install_crash_watch(g_opti);
     std::set_terminate([] {
         log("[openrr] std::terminate: an unhandled exception terminated an OpenRR thread");
         std::abort();
