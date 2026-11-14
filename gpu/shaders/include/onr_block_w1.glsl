@@ -254,47 +254,48 @@ void main() {
     RESID1(c20, x20, ls1) RESID1(c21, x21, ls1) RESID1(c30, x30, ls1) RESID1(c31, x31, ls1)
 #ifdef LT_MLP8
     // Native-FP8 MLP, decoder-only shape: enc0 keeps its fp16 path (the input layer's
-    // activation noise does not clear the quality gate); here each token tile runs the
-    // whole slice chain in its own scope, so only its own quantized x, its own two f32
-    // output accumulators and the slice's hidden state are ever live (2 QC8 + 4 QC8 +
-    // 2 QB8 + the streamed weight tiles - no 8-tile accumulator bank, no preload bank).
+    // activation noise does not clear the quality gate); here active token tiles quantize once
+    // and stream each fc1/fc2 hidden slice across all active tiles so weights load once instead
+    // of 4x redundantly, reusing one QC8 h_ across tiles per slice.
 #define W1_FC1_W8 E4View(uint64_t(pc.fc1) + uint64_t(4u * HID * ENC_C)).v
 #define W1_FC2_W8 E4View(uint64_t(pc.fc2) + uint64_t(4u * HID * ENC_C)).v
 #define W1_GELU8(g8, h) { for (int i_ = 0; i_ < g8.length(); i_ += 2) { fe4m3vec2 q_ = qe4_pair32(vec2(gelu_f32(h[i_]), gelu_f32(h[i_ + 1]))); g8[i_] = q_.x, g8[i_ + 1] = q_.y; } }
-#define W1_M8_TT(xa, xb) { \
-        QB8 x8a, x8b; \
-        [[unroll]] for (int i_ = 0; i_ < x8a.length(); i_ += 2) { \
-            fe4m3vec2 qa_ = qe4_pair32(vec2(xa[i_], xa[i_ + 1])), qb_ = qe4_pair32(vec2(xb[i_], xb[i_ + 1])); \
-            x8a[i_] = qa_.x, x8a[i_ + 1] = qa_.y, x8b[i_] = qb_.x, x8b[i_ + 1] = qb_.y; } \
-        QC8 mc0 = QC8(bias_acc_t(pc.fc2_b, 0u)), mc1 = QC8(bias_acc_t(pc.fc2_b, 16u)); \
-        MLP_SLICE_LOOP for (uint j = 0u; j < LT_HID; j += 64u) { \
-            QC8 h0 = QC8(bias_acc_t(pc.fc1_b, j)), h1 = QC8(bias_acc_t(pc.fc1_b, j + 16u)); \
-            QC8 h2 = QC8(bias_acc_t(pc.fc1_b, j + 32u)), h3 = QC8(bias_acc_t(pc.fc1_b, j + 48u)); \
-            QA8 w_; \
-            coopMatLoad(w_, W1_FC1_W8, j * ENC_C, ENC_C, ROW);               h0 = coopMatMulAdd(w_, x8a, h0); \
-            coopMatLoad(w_, W1_FC1_W8, j * ENC_C + 16u, ENC_C, ROW);         h0 = coopMatMulAdd(w_, x8b, h0); \
-            coopMatLoad(w_, W1_FC1_W8, (j + 16u) * ENC_C, ENC_C, ROW);       h1 = coopMatMulAdd(w_, x8a, h1); \
-            coopMatLoad(w_, W1_FC1_W8, (j + 16u) * ENC_C + 16u, ENC_C, ROW); h1 = coopMatMulAdd(w_, x8b, h1); \
-            coopMatLoad(w_, W1_FC1_W8, (j + 32u) * ENC_C, ENC_C, ROW);       h2 = coopMatMulAdd(w_, x8a, h2); \
-            coopMatLoad(w_, W1_FC1_W8, (j + 32u) * ENC_C + 16u, ENC_C, ROW); h2 = coopMatMulAdd(w_, x8b, h2); \
-            coopMatLoad(w_, W1_FC1_W8, (j + 48u) * ENC_C, ENC_C, ROW);       h3 = coopMatMulAdd(w_, x8a, h3); \
-            coopMatLoad(w_, W1_FC1_W8, (j + 48u) * ENC_C + 16u, ENC_C, ROW); h3 = coopMatMulAdd(w_, x8b, h3); \
-            QB8 g0_, g1_, g2_, g3_; \
-            W1_GELU8(g0_, h0) W1_GELU8(g1_, h1) W1_GELU8(g2_, h2) W1_GELU8(g3_, h3) \
-            coopMatLoad(w_, W1_FC2_W8, j, HID, ROW);                 mc0 = coopMatMulAdd(w_, g0_, mc0); \
-            coopMatLoad(w_, W1_FC2_W8, j + 16u, HID, ROW);           mc0 = coopMatMulAdd(w_, g1_, mc0); \
-            coopMatLoad(w_, W1_FC2_W8, j + 32u, HID, ROW);           mc0 = coopMatMulAdd(w_, g2_, mc0); \
-            coopMatLoad(w_, W1_FC2_W8, j + 48u, HID, ROW);           mc0 = coopMatMulAdd(w_, g3_, mc0); \
-            coopMatLoad(w_, W1_FC2_W8, 16u * HID + j, HID, ROW);     mc1 = coopMatMulAdd(w_, g0_, mc1); \
-            coopMatLoad(w_, W1_FC2_W8, 16u * HID + j + 16u, HID, ROW); mc1 = coopMatMulAdd(w_, g1_, mc1); \
-            coopMatLoad(w_, W1_FC2_W8, 16u * HID + j + 32u, HID, ROW); mc1 = coopMatMulAdd(w_, g2_, mc1); \
-            coopMatLoad(w_, W1_FC2_W8, 16u * HID + j + 48u, HID, ROW); mc1 = coopMatMulAdd(w_, g3_, mc1); } \
-        MH r0_ = MH(mc0), r1_ = MH(mc1); \
+#define W1_XQ8(n, xa, xb) QB8 x8a##n, x8b##n; \
+    if (lv##n) { [[unroll]] for (int i_ = 0; i_ < x8a##n.length(); i_ += 2) { \
+        fe4m3vec2 qa_ = qe4_pair32(vec2(xa[i_], xa[i_ + 1])), qb_ = qe4_pair32(vec2(xb[i_], xb[i_ + 1])); \
+        x8a##n[i_] = qa_.x, x8a##n[i_ + 1] = qa_.y, x8b##n[i_] = qb_.x, x8b##n[i_ + 1] = qb_.y; } }
+    W1_XQ8(0, x00, x01) W1_XQ8(1, x10, x11) W1_XQ8(2, x20, x21) W1_XQ8(3, x30, x31)
+    QC8 b20_ = QC8(bias_acc_t(pc.fc2_b, 0u)), b21_ = QC8(bias_acc_t(pc.fc2_b, 16u));
+    QC8 mc00 = b20_, mc01 = b20_, mc02 = b20_, mc03 = b20_;
+    QC8 mc10 = b21_, mc11 = b21_, mc12 = b21_, mc13 = b21_;
+#define W1_H1(n) if (lv##n) { QC8 h_ = b1_; \
+        h_ = coopMatMulAdd(f0_, x8a##n, h_); h_ = coopMatMulAdd(f1_, x8b##n, h_); \
+        W1_GELU8(gg##n, h_) }
+#define W1_F2(n) if (lv##n) { \
+        mc0##n = coopMatMulAdd(w0_, gg##n, mc0##n); \
+        mc1##n = coopMatMulAdd(w1_, gg##n, mc1##n); }
+#define W1_M8_STEP(jr) { \
+        uint jr_ = (jr); \
+        QA8 f0_, f1_; \
+        coopMatLoad(f0_, W1_FC1_W8, jr_ * ENC_C, ENC_C, ROW); \
+        coopMatLoad(f1_, W1_FC1_W8, jr_ * ENC_C + 16u, ENC_C, ROW); \
+        QC8 b1_ = QC8(bias_acc_t(pc.fc1_b, jr_)); \
+        QB8 gg0, gg1, gg2, gg3; \
+        W1_H1(0) W1_H1(1) W1_H1(2) W1_H1(3) \
+        QA8 w0_, w1_; \
+        coopMatLoad(w0_, W1_FC2_W8, jr_, HID, ROW); \
+        coopMatLoad(w1_, W1_FC2_W8, 16u * HID + jr_, HID, ROW); \
+        W1_F2(0) W1_F2(1) W1_F2(2) W1_F2(3) }
+    MLP_SLICE_LOOP for (uint j = 0u; j < LT_HID; j += 16u) {
+        W1_M8_STEP(j);
+    }
+#define W1_RES8(n, xa, xb) if (lv##n) { \
+        MH r0_ = MH(mc0##n), r1_ = MH(mc1##n); \
         for (int i_ = 0; i_ < r0_.length(); i_ += 2) { \
             precise f16vec2 va_ = fma(f16vec2(r0_[i_], r0_[i_ + 1]), f16vec2(ls2), f16vec2(xa[i_], xa[i_ + 1])); \
             precise f16vec2 vb_ = fma(f16vec2(r1_[i_], r1_[i_ + 1]), f16vec2(ls2), f16vec2(xb[i_], xb[i_ + 1])); \
             xa[i_] = va_.x, xa[i_ + 1] = va_.y, xb[i_] = vb_.x, xb[i_ + 1] = vb_.y; } }
-    if (lv0) W1_M8_TT(x00, x01) if (lv1) W1_M8_TT(x10, x11) if (lv2) W1_M8_TT(x20, x21) if (lv3) W1_M8_TT(x30, x31)
+    W1_RES8(0, x00, x01) W1_RES8(1, x10, x11) W1_RES8(2, x20, x21) W1_RES8(3, x30, x31)
 #else
     c00 = bias_acc_t(pc.fc2_b, 0u), c01 = bias_acc_t(pc.fc2_b, 16u);
     c10 = c00, c11 = c01, c20 = c00, c21 = c01, c30 = c00, c31 = c01;
