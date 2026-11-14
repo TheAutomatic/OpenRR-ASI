@@ -303,3 +303,69 @@ scratch 0、exec 12216→12156。
 **收敛结论（post 差距四重证伪）**：等待条数（R1-E2 wait0）、LDS 载入/合并（R2-E1）、k 循环展开
 （overnight item1）、采样 clause 束宽（本轮）均无效 —— post 的 14.5% 差距只剩 SALU/VALU 排布与
 整体调度，属编译器侧，源码/记录层无可达杠杆。还原：Mesa marker=0、hook=2，记录与 GREEN_HEAD 零差异。
+
+## 12. Stage 5：mode-4 纯 f32 量化战役（Wave 1–3 + 终局对决）
+
+起点 `d3229e9`（冻结整包 `build/v015-runs/frozen-d3229e9/`：非 mode-4 Fast SPV + trace.asi，
+兼作终局 LLPC 基线）。工具链：Mesa 26.3.0 drirc 捕获（`ONR_ACO_PRECISION=global`），
+ISA 门禁用编码长度感知的裸码扫描（`s5-wave1-quant-mode4/scan_isa.py`）——llvm-mc-21 流式反汇编
+在 gfx12 8 字节编码上失步（`v_cvt_pk_fp8_f32` 显示为假 `cndmask+subrev`、min3/max3 显示为
+`v_min_num_f64_e32`），指令直方图不可信。
+
+### 12.1 Wave 1（晋级 `69fdd01`）：LT_MLP8 六核 mode-4 量化底座
+
+- `qe4_pair32`：`saturatedConvertEXT` 的 Inf→NaN 选择必须拼成 `abs(x)==+Inf`（vkd3d-proton 形状；
+  NIR 无 isinf 低化，`OpIsInf` 条件永不折叠）→ Mesa 26.3 vec2 规则 → ACO 单条硬件饱和
+  `v_cvt_pk_fp8_f32`（MODE.FP16_OVFL）。
+- `gelu_f32`：gelu2 代数直落 f32（4 条 f32 VALU/元素，零 f16 往返）；SPLIT1 逐 tile 窄作用域
+  FC1Q（fc1 累加器一完成即压成 2-VGPR QB8）；x8 配对量化 α 方案胜出（β 融合残差探针
+  +880 exec bytes，判负归档）；SPLIT2 GELU 交换改每 lane 8 字节 uvec2（1×ds_store_b64 +
+  2×ds_load_b64，QC8/QB8 lane 坐标恒等式）。
+- 静态（frozen 对照）：6 核 exec −6.4~−12.7%，cvt_pk8 96→44 / 80→40（满载配对），
+  `v_maxmin_*` 16→**0**，`v_perm_b32` −60~−90/核，VGPR/scratch 不变，Legacy 0 字节差异。
+- 门禁：units 全绿；Legacy 0-ULP 双分辨率 exact 100%；锚点 #2 v1+v2_motion 全 ok（45/45 哈希门，
+  dlaa min 32.94 vs 前值 33.08）；锚点 #4 ACO/LLPC 交叉 g0 59–61 dB / DRS 999-exact、g1 121–129 dB、
+  nf=0；4K 600 帧 @idx 扣漂移：dec_dfn_128 −5.1µs、160 族 −3.2~−6.5µs/核（enc_stage_128 +1.1µs）、
+  对照 post +3.0µs 噪声；3×ABBA **−0.304% @1080p / −0.382% @4K**（6/6 组全负）。
+
+### 12.2 Wave 2（判负，复核后维持）：W2 五核 LT_MLP8
+
+初判"激活量化墙"经复核撤回（三种量化实现测得逐位相同的 exact=25.676/30.39 dB，分歧源不在量化）。
+追加隔离全部否证：cmat-address 白名单（30.40 dB）、fc1-only FP8（22.13 dB，更糟且非单侧干净故障）、
+item2b 逐字补丁（30.39 dB）。同套 helper 在 W1（58.79 dB 晋级）与 TR 体（Wave 1 船载）全部正常——
+残缺假设收敛为"W2 双 token-tile 体与 FP8 操作数的未解交互"。完整证据链与过程事故
+（两次拼接误删 `W2T(RES_A1)`/FC2B 定义被 Legacy 锚点当场捕获并修复、fastmode.cmake CRLF 污染）
+见 `s5-wave2-w2-mlp8/REJECTED.md`。树还原。
+
+### 12.3 Wave 3（晋级 `4332470`）：W1 解码双核 LT_MLP8
+
+item1-dec-only 形状（enc0 保持 fp16）+ Wave-1 量化器：x1 tile 一次配对量化，fc1 QC8 一完成即
+GELUQ8 压成 QB8，MLP_SLICE_LOOP dont_unroll。静态周期账：WMMA 周期省 1904 > ΔVALU 1352，
+净 −552（dec_up −881 / dec_head +329）；exec +8/+22%（VALU 换 WMMA 周期）。
+门禁：Legacy 0-ULP；fast 对 green 稳态 58.79 dB nf=0；锚点 #2 全 ok（dlaa min 34.38，优于前值）；
+锚点 #4 g0 58.6–59.7/g1 121–130 nf=0；@idx dec_up −5.11µs / dec_head −6.78µs（合计 −11.9µs）；
+3×ABBA 1080p −0.079%、4K 干净复跑 **−0.179%**（三组全负）。
+（过程：我的首版移植测得 7.47 dB——逐组件探针证明配对 x 量化/gelu_f32/配对 g 量化各自全绿，
+最终以 item1 结构内联两处配对量化收敛 58.79 dB。）
+
+### 12.4 终局：ACO（`4332470`）vs LLPC（frozen d3229e9 非 mode-4 SPV，驱动原生）
+
+3×ABBA 48/240/64，基线侧日志 130/130 `compiler=LLPC`（零混编）：
+
+| 分辨率 | ACO vs LLPC | 组内 | 较 §10.5 基线（+2.58/+2.72%） |
+|---|---|---|---|
+| 1080p | **+2.214%** | 2.21/2.24/2.04 | 收窄 0.37pp |
+| 4K | **+2.347%** | 2.81/2.35/1.85 | 收窄 0.37pp |
+
+4K 600 帧 @idx 扣漂移分核（ACO cand vs LLPC base）：dec_dfn_128_128 **−95.2µs（−35.1%）**、
+dec_up_160_256_160 −9.0µs、dec_up_32_64_64 −19.6µs、dec_head_32_64 −13.0µs、enc_stage_128 ±0、
+post_f_lt **+156.5µs（+13.8%）**。本轮战役把 MLP 面全部抹平/反超；残余差距按 §7 定性仍集中在
+post_f_lt 采样/调度与 enc0_attr（ACO 调度器策略，源码不可达）。
+
+### 12.5 结论
+
+- GREEN_HEAD 演进：`d3229e9` → `69fdd01`（Wave 1）→ `4332470`（Wave 3）；Wave 2 判负留档。
+- 净效果：ACO 自身 −0.30~−0.38%（Wave1）再 −0.08~−0.18%（Wave3）；对 LLPC 差距
+  +2.58/+2.72% → **+2.21/+2.35%**。
+- 遗留：W2 体 FP8 MLP 根因未明（重开条件：先在 W2 体上做单 tile e4m3 B 操作数微基准）；
+  post_f_lt 差距依旧（编译器侧）。
