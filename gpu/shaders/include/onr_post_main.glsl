@@ -97,27 +97,27 @@ vec3 hist_hw(float x, float y) { return vec3(f16vec3(textureLod(tex[(pc.reset >>
 // 1D lerps of two texels; only the middle one needs four. (axl/axr/ayt/ayb: second texel unused.)
 // the 5-tap sum, called in each branch: no phi of the taps, so the sampler's fp16 fetches fold into v_fma_mix
 vec3 bicubic_sum(vec4 tx, vec4 ty, vec3 T0, vec3 T1, vec3 T2, vec3 T3, vec3 T4) {
-    precise float w0 = tx.x * ty.y, w1 = tx.y * ty.x, w2 = tx.y * ty.y, w3 = tx.y * ty.z, w4 = tx.z * ty.y;
-    precise float S = (((w0 + w1) + w2) + w3) + w4;
-    precise vec3 c = w1 * T1;
+    PP float w0 = tx.x * ty.y, w1 = tx.y * ty.x, w2 = tx.y * ty.y, w3 = tx.y * ty.z, w4 = tx.z * ty.y;
+    PP float S = (((w0 + w1) + w2) + w3) + w4;
+    PP vec3 c = w1 * T1;
     c = fma(T0, vec3(w0), c);
     c = fma(vec3(w2), T2, c);
     c = fma(vec3(w3), T3, c);
     c = fma(vec3(w4), T4, c);
-    precise vec3 r = rcp_rn(S) * c;
+    PP vec3 r = rcp_rn(S) * c;
     return r;
 }
 
 vec3 bicubic_hist(float px, float py) {
-    precise float bx = floor(px - 0.5) + 0.5;
-    precise float by = floor(py - 0.5) + 0.5;
-    precise float fx = clamp(px - bx, 0.0, 1.0);
-    precise float fy = clamp(py - by, 0.0, 1.0);
+    PP float bx = floor(px - 0.5) + 0.5;
+    PP float by = floor(py - 0.5) + 0.5;
+    PP float fx = clamp(px - bx, 0.0, 1.0);
+    PP float fy = clamp(py - by, 0.0, 1.0);
     int ix = min(int(trunc(fma(fx, 512.0, 0.5))), 512);
     int iy = min(int(trunc(fma(fy, 512.0, 0.5))), 512);
     vec4 tx = bicubic_row(ix), ty = bicubic_row(iy);
-    precise float xm = pc.inv_size.x * (bx + tx.w);
-    precise float ym = pc.inv_size.y * (by + ty.w);
+    PP float xm = pc.inv_size.x * (bx + tx.w);
+    PP float ym = pc.inv_size.y * (by + ty.w);
     int i = int(bx - 0.5), j = int(by - 0.5);
     vec3 T0, T1, T2, T3, T4;
 #ifdef POST_PLAIN
@@ -263,8 +263,8 @@ ivec2 ls_o;
 void ls_fill(ivec2 g) {
     uint li = gl_LocalInvocationIndex;
     // the group's first and last pair, with main()'s own expressions for their positions (the same roundings)
-    precise float ax = fma(float(g.x) + 0.5, pc.scale.x, pc.offset.x), ay = fma(pc.scale.y, float(g.y) + 0.5, pc.offset.y);
-    precise float bx = fma(float(g.x + 15) + 0.5, pc.scale.x, pc.offset.x), by = fma(pc.scale.y, float(g.y + 30) + 0.5, pc.offset.y);
+    PP float ax = fma(float(g.x) + 0.5, pc.scale.x, pc.offset.x), ay = fma(pc.scale.y, float(g.y) + 0.5, pc.offset.y);
+    PP float bx = fma(float(g.x + 15) + 0.5, pc.scale.x, pc.offset.x), by = fma(pc.scale.y, float(g.y + 30) + 0.5, pc.offset.y);
     ivec2 a = ivec2(int(floor(ax - 0.5)), int(floor(ay - 0.5))) - 1;
     ivec2 b = ivec2(int(floor(bx - 0.5)), int(floor(by - 0.5))) + 2;
     ls_o = clamp(a, ivec2(0), pc.lr_size - 1);
@@ -288,25 +288,25 @@ void ls_fill(ivec2 g) {
 void splat_pair(int X, float fx, float fy0, float fy1, out Splat s0, out Splat s1) {
     int r8 = int(floor(fx - 0.5));
     int ry0 = int(floor(fy0 - 0.5)), ry1 = int(floor(fy1 - 0.5));
-    precise float dxf = (float(r8) + 0.5) - fx;
-    precise float dyf0 = (float(ry0) + 0.5) - fy0;
-    precise float dyf1 = (float(ry1) + 0.5) - fy1;
+    PP float dxf = (float(r8) + 0.5) - fx;
+    PP float dyf0 = (float(ry0) + 0.5) - fy0;
+    PP float dyf1 = (float(ry1) + 0.5) - fy1;
     float16_t dx0 = float16_t(dxf), dy0 = float16_t(dyf0), dy1 = float16_t(dyf1);
     int base = ry0;
     if (base != ry1) dy1 = dy1 + (-1.0hf);
     // both pixels' sums packed: (c.xyz, c.w) and (a.x, a.y) per pixel, the second pixel's terms in the high halves
-    precise f16vec4 c0 = f16vec4(0.0hf), c1 = f16vec4(0.0hf);
-    precise f16vec2 a0 = f16vec2(0.0hf), a1 = f16vec2(0.0hf);
+    PP f16vec4 c0 = f16vec4(0.0hf), c1 = f16vec4(0.0hf);
+    PP f16vec2 a0 = f16vec2(0.0hf), a1 = f16vec2(0.0hf);
 #ifdef POST_DELTA
-    precise f16vec3 x0 = f16vec3(0.0hf), x1 = f16vec3(0.0hf);
+    PP f16vec3 x0 = f16vec3(0.0hf), x1 = f16vec3(0.0hf);
 #endif
-    precise float w0 = 0.0, w1 = 0.0;
+    PP float w0 = 0.0, w1 = 0.0;
 #ifdef LT_POST_W16
-    precise f16vec2 wp = f16vec2(0.0hf);
+    PP f16vec2 wp = f16vec2(0.0hf);
 #endif
     for (int k = -1; k <= 2; ++k) {
-        precise float16_t dxk = dx0 + float16_t(k);
-        precise float16_t dx2 = dxk * dxk;
+        PP float16_t dxk = dx0 + float16_t(k);
+        PP float16_t dx2 = dxk * dxk;
         int cx = clamp(r8 + k, 0, pc.lr_size.x - 1);
         for (int j = -1; j <= 2; ++j) {
 #ifdef LT_POST_NOCORNER
@@ -335,11 +335,11 @@ void splat_pair(int X, float fx, float fy0, float fy1, out Splat s0, out Splat s
 #endif
 #endif
             // the two pixels' exponents in one packed chain (x: upper pixel, y: lower)
-            precise f16vec2 dyj = f16vec2(dy0, dy1) + float16_t(j);
-            precise f16vec2 dy2 = dyj * dyj;
-            precise float16_t e0 = dx2 * a.w;
-            precise f16vec2 e = fma(dy2, f16vec2(n.x), f16vec2(e0));
-            precise f16vec2 dxy = dxk * dyj;
+            PP f16vec2 dyj = f16vec2(dy0, dy1) + float16_t(j);
+            PP f16vec2 dy2 = dyj * dyj;
+            PP float16_t e0 = dx2 * a.w;
+            PP f16vec2 e = fma(dy2, f16vec2(n.x), f16vec2(e0));
+            PP f16vec2 dxy = dxk * dyj;
             e = fma(dxy, f16vec2(n.y), e);
 #ifdef LT_POST_W16
             float16_t w = exp2(e.x), v = exp2(e.y);
@@ -396,8 +396,8 @@ int g_nl, g_ns, g_sl[4];
 vec2 g_q[4];
 float g_wc[4], g_cum;
 void pair_cands(int X, int Y0, float fx, float fy) {
-    precise float lu = fx * pc.lr_inv_size.x;
-    precise float lv = fy * pc.lr_inv_size.y;
+    PP float lu = fx * pc.lr_inv_size.x;
+    PP float lv = fy * pc.lr_inv_size.y;
     int lx = int(floor(fx)), ly = int(floor(fy));
     // ---- four motion-vector candidates with their factors
     Bilerp bl = bilerp_setup(lu, lv, pc.lr_size);
@@ -424,11 +424,11 @@ void pair_cands(int X, int Y0, float fx, float fy) {
     sw(s1, s2); sw(s3, s4); sw(s1, s3); sw(s2, s4); sw(s2, s3);
     cs = Cand[4](s1, s2, s3, s4);
     [[unroll]] for (int i = 0; i < 4; ++i) sat[i] = clamp(cs[i].f, 0.0, 1.0);
-    precise float tot = ((sat[0] + sat[1]) + sat[2]) + sat[3];
+    PP float tot = ((sat[0] + sat[1]) + sat[2]) + sat[3];
     rs = rcp_rn(max(tot, EPS10));
 
-    precise float fx7 = float(X) + 0.5, fy10 = float(Y0) + 0.5;
-    precise float cum = 0.0;
+    PP float fx7 = float(X) + 0.5, fy10 = float(Y0) + 0.5;
+    PP float cum = 0.0;
     bool live = true;
     g_nl = 0, g_ns = 0;
     g_q = vec2[4](vec2(0.0), vec2(0.0), vec2(0.0), vec2(0.0));
@@ -437,10 +437,10 @@ void pair_cands(int X, int Y0, float fx, float fy) {
         g_wc[i] = 0.0;
         if (!live) continue;
         g_nl = i + 1;
-        precise float w = sat[i] * rs;
+        PP float w = sat[i] * rs;
         g_wc[i] = w;
-        precise float px = fx7 + cs[i].mx;
-        precise float py = cs[i].my + fy10;
+        PP float px = fx7 + cs[i].mx;
+        PP float py = cs[i].my + fy10;
         bool ok = !(px < 0.0) && !(px > float(pc.size.x)) && !(py < 0.0) && !(py > float(pc.size.y)) && (pc.reset & 1u) == 0u;
         bool same = false;
         [[unroll]] for (int k = 0; k < i; ++k)
@@ -477,13 +477,13 @@ void pixel(int X, int Y, float fx, float fy, Splat sp, out vec3 out1, out vec3 o
 #else
     float e0 = pc.exposure.v[0], e1 = pc.exposure.v[1], e2 = pc.exposure.v[2];
 #endif
-    precise float lu = fx * pc.lr_inv_size.x;
-    precise float lv = fy * pc.lr_inv_size.y;
+    PP float lu = fx * pc.lr_inv_size.x;
+    PP float lv = fy * pc.lr_inv_size.y;
     int lx = int(floor(fx)), ly = int(floor(fy));    float inv_w = rcp_rn(max(wsum, EPS10));
-    precise vec3 nrm = inv_w * vec3(accc);
-    precise vec3 nra = inv_w * vec3(acca);
+    PP vec3 nrm = inv_w * vec3(accc);
+    PP vec3 nra = inv_w * vec3(acca);
     vec3 net = post_decode(nrm);
-    precise vec3 net_e = e1 * (e2 * net);
+    PP vec3 net_e = e1 * (e2 * net);
 #ifdef LT_POST_NETH
     // only where no history candidate is valid; the exposure's change over one frame left out
     vec3 net_h = (pc.reset & 1u) != 0u ? post_encode(net_e) : nrm;
@@ -523,7 +523,7 @@ void pixel(int X, int Y, float fx, float fy, Splat sp, out vec3 out1, out vec3 o
     Cand cs[4] = Cand[4](s1, s2, s3, s4);
     float sat[4];
     [[unroll]] for (int i = 0; i < 4; ++i) sat[i] = clamp(cs[i].f, 0.0, 1.0);
-    precise float tot = ((sat[0] + sat[1]) + sat[2]) + sat[3];
+    PP float tot = ((sat[0] + sat[1]) + sat[2]) + sat[3];
     float rs = rcp_rn(max(tot, EPS10));
 
 #endif
@@ -545,19 +545,19 @@ void pixel(int X, int Y, float fx, float fy, Splat sp, out vec3 out1, out vec3 o
     dacc = g_sl[0] == 0 ? dh_catrom(g_q[0].x, g_q[0].y + pl) : dcur;
 #endif
 #endif
-    precise vec3 accu = vec3(0.0);
+    PP vec3 accu = vec3(0.0);
     [[unroll]] for (int i = 0; i < 4; ++i) {
         if (i >= g_nl) break;
         int k = g_sl[i];
         vec3 smp = k < 0 ? net_h : k == 0 ? sm0 : k == 1 ? sm1 : k == 2 ? sm2 : sm3;
-        precise float w = g_wc[i];
+        PP float w = g_wc[i];
         if (i == 0) accu = w * smp;
         else accu = fma(vec3(w), smp, accu);
     }
     float cum = g_cum;
 #else
-    precise float fx7 = float(X) + 0.5, fy10 = float(Y) + 0.5;
-    precise float cum = 0.0;
+    PP float fx7 = float(X) + 0.5, fy10 = float(Y) + 0.5;
+    PP float cum = 0.0;
     bool live = true;
     int nl = 0, ns = 0, sl[4];
     vec2 q[4] = vec2[4](vec2(0.0), vec2(0.0), vec2(0.0), vec2(0.0));
@@ -567,10 +567,10 @@ void pixel(int X, int Y, float fx, float fy, Splat sp, out vec3 out1, out vec3 o
         wc[i] = 0.0;
         if (!live) continue;
         nl = i + 1;
-        precise float w = sat[i] * rs;
+        PP float w = sat[i] * rs;
         wc[i] = w;
-        precise float px = fx7 + cs[i].mx;
-        precise float py = cs[i].my + fy10;
+        PP float px = fx7 + cs[i].mx;
+        PP float py = cs[i].my + fy10;
         bool ok = !(px < 0.0) && !(px > float(pc.size.x)) && !(py < 0.0) && !(py > float(pc.size.y)) && (pc.reset & 1u) == 0u;
         // a candidate with the motion of an earlier one samples the same texels: it takes that slot
         bool same = false;
@@ -600,26 +600,26 @@ void pixel(int X, int Y, float fx, float fy, Splat sp, out vec3 out1, out vec3 o
     if (ns > 1) sm1 = bicubic_hist(q[1].x, q[1].y);
     if (ns > 2) sm2 = bicubic_hist(q[2].x, q[2].y);
     if (ns > 3) sm3 = bicubic_hist(q[3].x, q[3].y);
-    precise vec3 accu = vec3(0.0);
+    PP vec3 accu = vec3(0.0);
     [[unroll]] for (int i = 0; i < 4; ++i) {
         if (i >= nl) break;
         int k = sl[i];
         vec3 smp = k < 0 ? net_h : k == 0 ? sm0 : k == 1 ? sm1 : k == 2 ? sm2 : sm3;
-        precise float w = wc[i];
+        PP float w = wc[i];
         if (i == 0) accu = w * smp;
         else accu = fma(vec3(w), smp, accu);
     }
 #endif
-    precise vec3 h_log = accu * rcp_rn(cum);
-    precise vec3 h_lin = e0 * (post_decode(h_log) * rcp_rn(e1));
+    PP vec3 h_log = accu * rcp_rn(cum);
+    PP vec3 h_lin = e0 * (post_decode(h_log) * rcp_rn(e1));
 
     // ---- gates
-    precise float g = clamp((pc.gate_scale * wsum) * nra.x, 0.0, 1.0);
-    precise float a1 = fma(g, 1.0 - nra.y, nra.y);
-    precise float a2 = fma(g, 1.0 - nra.z, nra.z);
-    precise vec3 d = net - h_lin;
-    precise vec3 o1 = fma(d, vec3(a1), h_lin);
-    precise vec3 o2 = fma(d, vec3(a2), h_lin);
+    PP float g = clamp((pc.gate_scale * wsum) * nra.x, 0.0, 1.0);
+    PP float a1 = fma(g, 1.0 - nra.y, nra.y);
+    PP float a2 = fma(g, 1.0 - nra.z, nra.z);
+    PP vec3 d = net - h_lin;
+    PP vec3 o1 = fma(d, vec3(a1), h_lin);
+    PP vec3 o2 = fma(d, vec3(a2), h_lin);
 #ifdef POST_DELTA
     vec3 dprev = (pc.reset & 4u) != 0u ? dcur : dacc;
     // the display's own rate a2, so the delta averages over the jitter as the image does; a floor of dh_alpha where
@@ -628,8 +628,8 @@ void pixel(int X, int Y, float fx, float fy, Splat sp, out vec3 out1, out vec3 o
     dlt = mix(dprev, dcur, edited ? max(pc.dh_alpha * dmove, a2) : 0.0);
     if (any(isnan(dlt))) dlt = vec3(0.0);
 #endif
-    precise float s1v = abs((o1.x + o1.y) + o1.z);
-    precise float s2v = abs((o2.x + o2.y) + o2.z);
+    PP float s1v = abs((o1.x + o1.y) + o1.z);
+    PP float s2v = abs((o2.x + o2.y) + o2.z);
     out1 = (s1v <= uintBitsToFloat(0x7f800000u)) ? o1 : net;
     out2 = (s2v <= uintBitsToFloat(0x7f800000u)) ? o2 : net;
 }
@@ -660,9 +660,9 @@ void main() {
 #endif
     int x1 = min(pc.end.x, pc.size.x), y1 = min(pc.end.y, pc.size.y);
     bool v0 = X < x1 && Y0 < y1, v1 = X < x1 && Y0 + 1 < y1;
-    precise float fx = fma(float(X) + 0.5, pc.scale.x, pc.offset.x);
-    precise float fy0 = fma(pc.scale.y, float(Y0) + 0.5, pc.offset.y);
-    precise float fy1 = fma(pc.scale.y, float(Y0 + 1) + 0.5, pc.offset.y);
+    PP float fx = fma(float(X) + 0.5, pc.scale.x, pc.offset.x);
+    PP float fy0 = fma(pc.scale.y, float(Y0) + 0.5, pc.offset.y);
+    PP float fy1 = fma(pc.scale.y, float(Y0 + 1) + 0.5, pc.offset.y);
 #ifdef LT_POST_LDS
     ls_fill(pc.origin + tile);
 #endif
@@ -701,8 +701,8 @@ void main() {
 #endif
         }
     }
-    precise vec3 col = o1t + o1b;
-    precise vec3 s = col + subgroupQuadSwapHorizontal(col);
+    PP vec3 col = o1t + o1b;
+    PP vec3 s = col + subgroupQuadSwapHorizontal(col);
     int c = int(v0) + int(v1);
     c += subgroupQuadSwapHorizontal(c);
 #if !defined(POST_FIXUP) && !defined(POST_PLAIN)
@@ -716,9 +716,9 @@ void main() {
     }
 #endif
     if ((li & 1u) != 0u || !v0) return;
-    precise vec3 m = s * rcp_rn(float(max(c, 1)));
+    PP vec3 m = s * rcp_rn(float(max(c, 1)));
     vec3 v = post_encode(m);
-    precise vec3 qv = v * uintBitsToFloat(0x3ed0fac6u);            // 1/2.45
+    PP vec3 qv = v * uintBitsToFloat(0x3ed0fac6u);            // 1/2.45
     int dw = (pc.size.x + 1) / 2;
     AT32(U32Buf, pc.down, (Y0 / 2) * dw + X / 2, 4u).v[0] = pack1010102(qv);
 }
