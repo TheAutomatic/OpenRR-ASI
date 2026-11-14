@@ -342,6 +342,11 @@ uint qe4_pack2(fe4m3vec2 a, fe4m3vec2 b) {
     return pack32(u8vec4(floate4m3BitsToUintEXT(a.x), floate4m3BitsToUintEXT(a.y),
                          floate4m3BitsToUintEXT(b.x), floate4m3BitsToUintEXT(b.y)));
 }
+// XOUT quantizer: mode-4 paired hardware-saturating converter (LT-flagged fast builds only;
+// FP8QV alone is on by default in legacy TR C>=64 variants, which must keep e4m3x4).
+#if defined(LT_MLP8) || defined(LT_UP8) || defined(LT_MI8)
+#define XOUTQ(a, b) qe4_pack2(qe4_pair32(vec2(a)), qe4_pair32(vec2(b)))
+#endif
 // GELU with gelu2's algebra straight in f32 (gelu2 clamps |x| at 2: same values, no f16
 // round-trip). 4 f32 VALU per element feeding qe4_pair32 directly from the QC8 accumulator.
 float gelu_f32(float x) {
@@ -397,6 +402,9 @@ uint e4m3x4(f16vec2 a, f16vec2 b) {
     u8vec4 p = unpack8(u), q = unpack8(v);
     return pack32(u8vec4(p.y, p.w, q.y, q.w));
 }
+#ifndef XOUTQ
+#define XOUTQ(a, b) e4m3x4(a, b)
+#endif
 
 // arena channels a .. a + 15 (a % 16 == 0) sit at two runs of 8 GPU positions of the row: g .. g + 7 (bytes 0, 1 of
 // each u32) and g + 16 .. g + 23 (bytes 2, 3); put16 / get16 move them as two 16-byte LDS accesses

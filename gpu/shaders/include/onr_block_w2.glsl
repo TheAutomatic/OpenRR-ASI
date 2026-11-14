@@ -451,7 +451,7 @@ void main() {
 #endif
     // TensorOutput of the own tokens straight from the x^T tiles, one 16-byte store per lane and plane
 #define XOUT2(xa, xb, tp, own, pl) if (own) { uvec4 w_; [[unroll]] for (int k_ = 0; k_ < 4; ++k_) \
-        w_[k_] = e4m3x4(f16vec2(xa[2 * k_], xa[2 * k_ + 1]), f16vec2(xb[2 * k_], xb[2 * k_ + 1])); \
+        w_[k_] = XOUTQ(f16vec2(xa[2 * k_], xa[2 * k_ + 1]), f16vec2(xb[2 * k_], xb[2 * k_ + 1])); \
         U32x4View(uint64_t(pc.y)).v[plane_index(tp, int(pl) * 32 + int(hh) * 16) >> 4] = w_; }
 #define XOUT_A(pl, a, b) XOUT2(x0##a, x0##b, tpa, towna, uint(pl))
 #define XOUT_B(pl, a, b) XOUT2(x1##a, x1##b, tpb, townb, uint(pl))
