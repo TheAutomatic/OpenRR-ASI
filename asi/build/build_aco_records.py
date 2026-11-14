@@ -94,6 +94,10 @@ def main():
     ap.add_argument('--toolchain', type=Path, default=Path('build/aco-tools/toolchain.json'))
     ap.add_argument('--capture', type=Path, default=Path('build/aco-tools/aco_capture'))
     ap.add_argument('--precision', choices=('native', 'local', 'global'), default='local')
+    ap.add_argument('--precision-split', action='store_true',
+                    help='Capture *_lt/_lx variants at native precision; all other shaders keep --precision')
+    ap.add_argument('--precision-native-only', nargs='*', default=[],
+                    help='With --precision-split, restrict native precision to these exact stems; all other shaders keep --precision')
     ap.add_argument('--matrix-loads', choices=('scalar', 'vector8'), default='scalar')
     ap.add_argument('--refresh', action='store_true')
     ap.add_argument('--capture-dir', type=Path, help='Build-only capture diagnostics (outside the package stage)')
@@ -125,9 +129,30 @@ def main():
         if key in input_policies and input_policies[key] != address:
             ap.error('identical SPIR-V requests conflicting cmat address policies: ' + spv.name)
         input_policies[key] = address
+    # Variant-split precision: fast variants (*_lt / *_lx) may run at native
+    # precision while every legacy shader keeps the requested default, so
+    # legacy records stay bit-identical. A fast SPIR-V whose hash is shared
+    # with any legacy input is forced back onto the legacy policy.
+    precision_by_stem = {}
+    if ns.precision_split:
+        def _is_fast(stem):
+            return stem.endswith('_lt') or stem.endswith('_lx')
+        native_only = set(ns.precision_native_only)
+        legacy_keys = {f'{fnv(p.read_bytes()):016x}' for p in files if not _is_fast(p.stem)}
+        for spv in files:
+            key = f'{fnv(spv.read_bytes()):016x}'
+            is_native = (spv.stem in native_only) if native_only else _is_fast(spv.stem)
+            if not is_native or key in legacy_keys:
+                precision_by_stem[spv.stem] = ns.precision
+                if is_native:
+                    print(f'{spv.name}: hash shared with a legacy input; keeping precision={ns.precision}', flush=True)
+            else:
+                precision_by_stem[spv.stem] = 'native'
     records = {}
     failures = []
     policy = dict(precision=ns.precision, matrix_loads=ns.matrix_loads, address_adaptation='assembler-dual-sentinel-v1')
+    if ns.precision_split:
+        policy['precision_split'] = dict(sorted(precision_by_stem.items()))
     if ns.shared_cmat != 'off':
         policy['shared_cmat'] = ns.shared_cmat
     if ns.cmat_address_shaders:
@@ -146,7 +171,7 @@ def main():
         try:
             env = dict(os.environ, VK_ICD_FILENAMES=cfg['icd'], LD_PRELOAD=cfg['shim'],
                        AMDGPU_GPU_ID='gfx1201', MESA_SHADER_CACHE_DISABLE='true',
-                       LD_LIBRARY_PATH=cfg['library_path'], ONR_ACO_PRECISION=ns.precision)
+                       LD_LIBRARY_PATH=cfg['library_path'], ONR_ACO_PRECISION=precision_by_stem.get(spv.stem, ns.precision))
             env.pop('ONR_ACO_VECTOR_LOADS', None)
             # Never inherit a global experimental setting into unrelated shaders.
             env.pop('ONR_ACO_CMAT_ADDRESS', None)
@@ -180,7 +205,8 @@ def main():
                                 workgroup=list(dims), layout='views' if spv.stem.startswith('d3d_') else 'sampled',
                                 cmat_address=spv.stem in ns.cmat_address_shaders,
                                 record_sha256=hashlib.sha256(record_data).hexdigest(),
-                                address_report=address_report, record=key+'.nrp')
+                                address_report=address_report, record=key+'.nrp',
+                                precision=precision_by_stem.get(spv.stem, ns.precision))
             print(f'{spv.name}: {key} {len(code)} bytes, {info["vgprs"]} VGPR, set0={info["set0"]}', flush=True)
         except (ValueError, KeyError, OSError, subprocess.SubprocessError) as e:
             failures.append(dict(spv=str(spv), error=str(e)))
