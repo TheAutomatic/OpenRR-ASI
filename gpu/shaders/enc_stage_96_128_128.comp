@@ -14,7 +14,5 @@
 #define W2 0
 // W2's DFN uses SIG_RCP under LT_HM. Preserve that policy in this body too.
 #define ENC_DFN_SIG_RCP 1
-// Pin the FLOW (_fl_lt, W2=0 transposed) variant to fp16 MLP (overnight-stage3/item2a).
-#undef LT_MLP8
 #endif
 #include "onr_block.glsl"
