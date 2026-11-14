@@ -1245,16 +1245,37 @@ template <int N> HRESULT STDMETHODCALLTYPE resize1_hook(IDXGISwapChain3* sc, UIN
     return hr;
 }
 
+void log_removed_at_present(IDXGISwapChain* sc, HRESULT hr) {
+    if (hr != DXGI_ERROR_DEVICE_REMOVED && hr != DXGI_ERROR_DEVICE_RESET && hr != DXGI_ERROR_DEVICE_HUNG) return;
+    if (!d3d12_diagnostics_enabled()) return;
+    ID3D12Device* device = nullptr;
+    if (FAILED(sc->GetDevice(IID_PPV_ARGS(&device))) || !device) {
+        ID3D12CommandQueue* queue = dxgi_queue::get(sc);
+        if (queue) {
+            queue->GetDevice(IID_PPV_ARGS(&device));
+            queue->Release();
+        }
+    }
+    if (device) {
+        log_d3d12_device_removed(device, "Present");
+        device->Release();
+    }
+}
+
 template <int N> HRESULT STDMETHODCALLTYPE present_hook(IDXGISwapChain* sc, UINT interval, UINT flags) {
     const PresentScope scope;
     if (scope.outermost()) draw_on(sc, flags);
-    return g_present[N](sc, interval, flags);
+    const HRESULT hr = g_present[N](sc, interval, flags);
+    if (scope.outermost()) log_removed_at_present(sc, hr);
+    return hr;
 }
 template <int N> HRESULT STDMETHODCALLTYPE present1_hook(IDXGISwapChain1* sc, UINT interval, UINT flags,
                                                          const DXGI_PRESENT_PARAMETERS* p) {
     const PresentScope scope;
     if (scope.outermost()) draw_on(sc, flags);
-    return g_present1[N](sc, interval, flags, p);
+    const HRESULT hr = g_present1[N](sc, interval, flags, p);
+    if (scope.outermost()) log_removed_at_present(sc, hr);
+    return hr;
 }
 template <int N> HRESULT STDMETHODCALLTYPE colour_space_hook(IDXGISwapChain3* sc, DXGI_COLOR_SPACE_TYPE space) {
     const HRESULT hr = g_colour_space[N](sc, space);

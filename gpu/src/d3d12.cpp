@@ -320,6 +320,8 @@ bool D3dDevice::init(ID3D12Device* dev, Device* compiler, const std::wstring& ca
         check(dev_->CreateCommandQueue(&qd, IID_PPV_ARGS(&q_)), "CreateCommandQueue");
         check(dev_->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&ca_)), "CreateCommandAllocator");
         check(dev_->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, ca_, nullptr, IID_PPV_ARGS(&own_)), "CreateCommandList");
+        q_->SetName(L"OpenRR private queue");
+        own_->SetName(L"OpenRR private list");
         own_->Close();
         check(dev_->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence_)), "CreateFence");
         check(q_->GetTimestampFrequency(&ts_freq_), "GetTimestampFrequency");

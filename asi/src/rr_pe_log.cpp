@@ -4,6 +4,7 @@
 #include "rr_pe_log.hpp"
 
 #include <windows.h>
+#include <d3d12.h>
 #include <atomic>
 #include <cstdarg>
 #include <cstdio>
@@ -142,6 +143,119 @@ void log(const char* format, ...) {
 void flush_log() {
     std::lock_guard<std::mutex> guard(log_lock);
     if (FILE* handle = file()) std::fflush(handle);
+}
+
+bool d3d12_diagnostics_enabled() {
+    static const bool enabled = [] {
+        wchar_t exe[MAX_PATH * 4]{};
+        const DWORD len = GetModuleFileNameW(nullptr, exe, sizeof exe / sizeof *exe);
+        if (!len || len >= sizeof exe / sizeof *exe) return false;
+        const std::wstring path(exe, len);
+        const auto slash = path.find_last_of(L"\\/");
+        if (slash == std::wstring::npos) return false;
+        const DWORD attr = GetFileAttributesW((path.substr(0, slash + 1) + L"openrr-amd.dred").c_str());
+        return attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY);
+    }();
+    return enabled;
+}
+
+void enable_d3d12_dred() {
+    if (!d3d12_diagnostics_enabled()) return;
+    ID3D12DeviceRemovedExtendedDataSettings1* settings = nullptr;
+    const HRESULT hr = D3D12GetDebugInterface(IID_PPV_ARGS(&settings));
+    if (SUCCEEDED(hr)) {
+        settings->SetAutoBreadcrumbsEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
+        settings->SetBreadcrumbContextEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
+        settings->SetPageFaultEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
+        settings->Release();
+        log("[d3d12 diag] DRED enabled for subsequent D3D12 devices");
+    } else {
+        log("[d3d12 diag] DRED settings unavailable (0x%08lX)", static_cast<unsigned long>(hr));
+    }
+    flush_log();
+}
+
+namespace {
+
+const char* dred_op(D3D12_AUTO_BREADCRUMB_OP op) {
+    switch (op) {
+        case D3D12_AUTO_BREADCRUMB_OP_DISPATCH: return "Dispatch";
+        case D3D12_AUTO_BREADCRUMB_OP_DISPATCHRAYS: return "DispatchRays";
+        case D3D12_AUTO_BREADCRUMB_OP_COPYTEXTUREREGION: return "CopyTextureRegion";
+        case D3D12_AUTO_BREADCRUMB_OP_COPYBUFFERREGION: return "CopyBufferRegion";
+        case D3D12_AUTO_BREADCRUMB_OP_RESOURCEBARRIER: return "ResourceBarrier";
+        case D3D12_AUTO_BREADCRUMB_OP_RESOLVEQUERYDATA: return "ResolveQueryData";
+        default: return "other";
+    }
+}
+
+void log_dred_allocations(const char* label, const D3D12_DRED_ALLOCATION_NODE1* node) {
+    for (unsigned i = 0; node && i < 12; ++i, node = node->pNext)
+        log("[d3d12 diag] DRED %s allocation type=%u name=%.200ls",
+            label, unsigned(node->AllocationType), node->ObjectNameW ? node->ObjectNameW : L"");
+}
+
+}  // namespace
+
+bool log_d3d12_device_removed(ID3D12Device* device, const char* where) {
+    if (!device) return false;
+    const HRESULT reason = device->GetDeviceRemovedReason();
+    if (SUCCEEDED(reason)) return false;
+    if (!d3d12_diagnostics_enabled()) return true;
+    static std::atomic<bool> logged{false};
+    if (logged.exchange(true)) return true;
+
+    log("[d3d12 diag] %s detected device removal device=%p reason=0x%08lX",
+        where, static_cast<void*>(device), static_cast<unsigned long>(reason));
+    flush_log();
+    ID3D12DeviceRemovedExtendedData1* dred = nullptr;
+    const HRESULT qi = device->QueryInterface(IID_PPV_ARGS(&dred));
+    if (FAILED(qi)) {
+        log("[d3d12 diag] DRED interface unavailable (0x%08lX)", static_cast<unsigned long>(qi));
+        flush_log();
+        return true;
+    }
+
+    D3D12_DRED_AUTO_BREADCRUMBS_OUTPUT1 crumbs{};
+    HRESULT hr = dred->GetAutoBreadcrumbsOutput1(&crumbs);
+    unsigned shown = 0;
+    if (SUCCEEDED(hr)) {
+        for (auto node = crumbs.pHeadAutoBreadcrumbNode; node && shown < 32; node = node->pNext) {
+            const UINT done = node->pLastBreadcrumbValue ? *node->pLastBreadcrumbValue : 0;
+            if (done >= node->BreadcrumbCount || !node->pCommandHistory) continue;
+            ++shown;
+            log("[d3d12 diag] DRED list=%p name=%.200ls queue=%p name=%.200ls completed=%u/%u",
+                static_cast<void*>(node->pCommandList), node->pCommandListDebugNameW ? node->pCommandListDebugNameW : L"",
+                static_cast<void*>(node->pCommandQueue), node->pCommandQueueDebugNameW ? node->pCommandQueueDebugNameW : L"",
+                done, node->BreadcrumbCount);
+            const UINT first = done > 4 ? done - 4 : 0;
+            const UINT last = done + std::min<UINT>(5, node->BreadcrumbCount - done);
+            for (UINT i = first; i < last; ++i) {
+                const auto op = node->pCommandHistory[i % 65536u];
+                log("[d3d12 diag] DRED %s%u %s (%u)", i == done ? "> " : "  ", i, dred_op(op), unsigned(op));
+            }
+            if (node->pBreadcrumbContexts) {
+                for (UINT i = 0; i < node->BreadcrumbContextsCount; ++i) {
+                    const auto& context = node->pBreadcrumbContexts[i];
+                    if (context.pContextString && wcsncmp(context.pContextString, L"OpenRR:", 7) == 0)
+                        log("[d3d12 diag] DRED marker %u %.200ls", context.BreadcrumbIndex, context.pContextString);
+                }
+            }
+        }
+    }
+    log("[d3d12 diag] DRED breadcrumbs hr=0x%08lX incomplete_lists=%u", static_cast<unsigned long>(hr), shown);
+
+    D3D12_DRED_PAGE_FAULT_OUTPUT1 fault{};
+    hr = dred->GetPageFaultAllocationOutput1(&fault);
+    log("[d3d12 diag] DRED page fault hr=0x%08lX VA=0x%llX",
+        static_cast<unsigned long>(hr), static_cast<unsigned long long>(fault.PageFaultVA));
+    if (SUCCEEDED(hr)) {
+        log_dred_allocations("live", fault.pHeadExistingAllocationNode);
+        log_dred_allocations("recently freed", fault.pHeadRecentFreedAllocationNode);
+    }
+    dred->Release();
+    flush_log();
+    return true;
 }
 
 namespace {

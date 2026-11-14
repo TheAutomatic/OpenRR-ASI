@@ -10,6 +10,7 @@
 #include "rr_pe_d3d12split.hpp"
 #include "rr_pe_vkdevice.hpp"
 #include "opennr_rr_api.h"
+#include "rr_d3d12_record.hpp"
 #include "rr_data_paths.hpp"
 #include "opennr_rr/d3d12.hpp"
 #include "opennr_rr/engine.hpp"
@@ -1165,13 +1166,16 @@ static int test_d3d12_gpu_and_engine() {
                         ID3D12CommandAllocator* sat_alloc = nullptr;
                         dev->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&sat_alloc));
                         std::vector<ID3D12GraphicsCommandList*> sat_lists;
+                        bool host_binding_report_ok = true;
                         int ok_count = 0, busy_rc = 0;
                         for (int i = 0; i < 128; ++i) {
                             ID3D12GraphicsCommandList* l = nullptr;
                             dev->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, sat_alloc, nullptr, IID_PPV_ARGS(&l));
                             OnrRrNotifyD3d12ListReset(l, sat_alloc);
-                            void* job = nullptr;
-                            const int32_t rc = api4.Record(rt, &fr, l, ONR_RR_EDIT_OFF, nullptr, &job);
+                            bool host_bound = false;
+                            const int32_t rc = openrr::pe::record_d3d12(rt, &fr, l, host_bound, false);
+                            if (rc == ONR_RR_OK && !host_bound) host_binding_report_ok = false;
+                            if (rc == ONR_RR_BUSY && host_bound) host_binding_report_ok = false;
                             l->Close();
                             sat_lists.push_back(l);
                             if (rc == ONR_RR_OK) ++ok_count;
@@ -1216,6 +1220,12 @@ static int test_d3d12_gpu_and_engine() {
                             if (r) r->Release();
                         api4.v3.v2.v1.Destroy(rt);
 
+                        if (!host_binding_report_ok) {
+                            std::fprintf(stderr, "FAIL: D3D12 host binding report on successful or busy Record\n");
+                            dev->Release();
+                            return 1;
+                        }
+                        std::printf("[PASS] D3D12 host binding report distinguishes successful and busy Record\n");
                         if (!invalid_rect_rejected) {
                             std::fprintf(stderr, "FAIL: D3D12 output rectangle outside texture (rc=%d, %s)\n",
                                          invalid_rc, invalid_error);
@@ -1605,6 +1615,13 @@ static int test_vk_unspoof_and_rdna3_pick() {
 int main() {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     std::setvbuf(stderr, nullptr, _IONBF, 0);
+    bool host_bound = true;
+    const int32_t rc = openrr::pe::record_d3d12(nullptr, nullptr, nullptr, host_bound, false);
+    if (rc != ONR_RR_INVALID_ARGUMENT || host_bound) {
+        std::fprintf(stderr, "FAIL: rejected D3D12 Record must not request host state restoration\n");
+        return 1;
+    }
+    std::printf("[PASS] rejected D3D12 Record leaves host state untouched\n");
     if (test_installed_data_paths() != 0) return 1;
     if (test_key_parsing() != 0) return 1;
     if (test_vk_unspoof_and_rdna3_pick() != 0) return 1;

@@ -43,6 +43,7 @@
 #include "vk_host.hpp"
 #ifdef ONR_RR_STATIC
 #include "rr_pe_log.hpp"
+#include "rr_d3d12_record.hpp"
 #endif
 
 using namespace onr;
@@ -744,9 +745,15 @@ struct Rec {
     const char* ingest = "ingest";
     const char* pack = "pack";
     uint32_t out_fmt = 0, out_pitch = 0;   // D3D12 straight into the output texture: TF_RGBA16F | 256, x | y << 16
+    ID3D12GraphicsCommandList* diagnostic_list = nullptr;
 };
 
+template <size_t N> void rr_marker(ID3D12GraphicsCommandList* list, const wchar_t (&label)[N]) {
+    if (list) list->SetMarker(0, label, sizeof(label));
+}
+
 void record_pack(Ctx* c, Rec& r, Job& j) {
+    rr_marker(r.diagnostic_list, L"OpenRR: pack output");
     if (!c->out16.addr) c->out16 = r.d.create(size_t(c->out_size.x) * c->out_size.y * 8 + 64);
     r.d.barrier();
     PackPC pk{c->out16.addr, r.output, c->out_size, c->out_size, r.out_fmt ? r.out_pitch : j.out_pitch, r.out_fmt ? r.out_fmt : uint32_t(j.out_tf)};
@@ -833,6 +840,7 @@ void record_frame(Ctx* c, Rec& r, Job& j, bool network, bool split = false) {
         }
     }
     if (ingest) {
+        rr_marker(r.diagnostic_list, L"OpenRR: ingest inputs");
         const size_t bpp8[8] = {8, 4, 4, 8, 2, 4, 4, 2};
         for (int s = 0; s < 8; ++s) {
             if (!direct && (network || s == G_COLOR) && !c->guides[s].addr)
@@ -918,6 +926,7 @@ void record_frame(Ctx* c, Rec& r, Job& j, bool network, bool split = false) {
         const bool img = r.out_fmt && c->engine.output_image_ok();
         c->engine.set_output_image(img);
         if (!img && !c->out16.addr) c->out16 = d.create(size_t(c->out_size.x) * c->out_size.y * 8 + 64);
+        rr_marker(r.diagnostic_list, L"OpenRR: network and downsample");
         c->engine.record(ef, g, img ? uint64_t(r.out_pitch) : c->out16.addr);
         c->engine.set_output_image(false);
         d.stamp();
@@ -2473,7 +2482,9 @@ int32_t GetBackend(void* ctx, uint32_t* backend) {
     return ONR_RR_OK;
 }
 
-int32_t Record(void* ctx, const OnrRrFrame* f, void* list, uint32_t edit, OnrRrDenoisedImage* image, void** job) {
+int32_t record_d3d12_frame(void* ctx, const OnrRrFrame* f, void* list, uint32_t edit, OnrRrDenoisedImage* image, void** job,
+                           bool& host_bound, bool trace) {
+    host_bound = false;
     if (!ctx || !f || !list || !job || f->size < ONR_RR_FRAME_SIZE_V1 || !f->color.resource || !f->output.resource ||
         (image && image->size < sizeof(OnrRrDenoisedImage)))
         return fail(ONR_RR_INVALID_ARGUMENT, "Record: missing arguments");
@@ -2496,7 +2507,15 @@ int32_t Record(void* ctx, const OnrRrFrame* f, void* list, uint32_t edit, OnrRrD
         // as PrepareDenoised: no hop on the frame that finds the network ready
         const bool was_ready = c->state == ONR_RR_STATE_READY;
         // our buffers outlive the lists that use them by D3dDevice's deferred release, so nothing waits here
+        if (trace) {
+            g_log("[d3d12 diag] frame %llu list=%p prepare_network built=%d engine_ready=%d",
+                  static_cast<unsigned long long>(j->seq), static_cast<void*>(cl), int(c->built.load()), int(c->engine_ready));
+            g_log.flush();
+        }
         const bool network = prepare_network(c, d, render, [] {});
+#ifdef ONR_RR_STATIC
+        trace = trace || (network && !was_ready && openrr::pe::d3d12_diagnostics_enabled());
+#endif
         // dinput and doutput are allocated on demand below only when a texture is not read/written directly.
         (void)out_bytes;
         const bool hop = network && was_ready && image && (edit == ONR_RR_EDIT_LOOP || edit == ONR_RR_EDIT_DISPLAY);
@@ -2520,12 +2539,15 @@ int32_t Record(void* ctx, const OnrRrFrame* f, void* list, uint32_t edit, OnrRrD
                 g_log("Record: all D3D12 recording slots (63 primary + 64 overflow) are in flight; skipping this frame (output not written)");
             return ONR_RR_BUSY;
         }
+        host_bound = true;
         const uint32_t slot = d.bound_slot();
         const bool overflow = d.using_overflow();
         uint32_t dummy_qnet[2] = {};
         Rec r{d, c->dkern, c->dinput.addr, c->doutput.addr, c->dimage.addr, overflow ? dummy_qnet : c->dqnet[slot]};
+        if (trace) r.diagnostic_list = cl;
         std::vector<D3D12_RESOURCE_BARRIER> back;
         try {
+            rr_marker(r.diagnostic_list, L"OpenRR: input texture preparation");
             d.stamp();
             if (c->direct_ok) {
                 r.ingest = "d3d_ingest", r.pack = "d3d_pack";
@@ -2538,13 +2560,24 @@ int32_t Record(void* ctx, const OnrRrFrame* f, void* list, uint32_t edit, OnrRrD
                 d3d_ensure(c, c->doutput, out_bytes);
                 r.output = c->doutput.addr;
             }
+            if (trace) {
+                g_log("[d3d12 diag] frame %llu list=%p network=%d slot=%u overflow=%d ingest=%s pack=%s color=%s output=%s",
+                      static_cast<unsigned long long>(j->seq), static_cast<void*>(cl), int(network), slot, int(overflow),
+                      r.ingest, r.pack, j->in[G_COLOR].direct ? "view" : "copy",
+                      hop ? "deferred" : direct_out ? "view" : "copy");
+                g_log.flush();
+            }
             record_frame(c, r, *j, network, hop);
             if (!hop) {
                 if (direct_out) d.barrier();
-                else d3d_copy_output(c, *j);
+                else {
+                    rr_marker(r.diagnostic_list, L"OpenRR: copy output texture");
+                    d3d_copy_output(c, *j);
+                }
             }
             d.stamp();
             if (!back.empty()) cl->ResourceBarrier(UINT(back.size()), back.data());
+            rr_marker(r.diagnostic_list, L"OpenRR: recording complete");
         } catch (...) {
             if (!overflow) c->dq[slot] = 0;
             d.unbind();
@@ -2577,6 +2610,11 @@ int32_t Record(void* ctx, const OnrRrFrame* f, void* list, uint32_t edit, OnrRrD
         }
         return fail(ONR_RR_FAILED, e.what());
     }
+}
+
+int32_t Record(void* ctx, const OnrRrFrame* f, void* list, uint32_t edit, OnrRrDenoisedImage* image, void** job) {
+    bool host_bound;
+    return record_d3d12_frame(ctx, f, list, edit, image, job, host_bound, false);
 }
 
 int32_t RecordPost(void* ctx, void* job, void* list, uint32_t format) {
@@ -3143,6 +3181,14 @@ int32_t GetLastErrorText(char* buf, uint32_t n) {
 }
 
 }  // namespace
+
+#ifdef ONR_RR_STATIC
+int32_t openrr::pe::record_d3d12(void* context, const OnrRrFrame* frame, ID3D12GraphicsCommandList* list,
+                                bool& host_bound, bool trace) {
+    void* job = nullptr;
+    return record_d3d12_frame(context, frame, list, ONR_RR_EDIT_OFF, nullptr, &job, host_bound, trace);
+}
+#endif
 
 // the user's "Fast mode" (docs/FASE24-FASTMODE.md), outside the ABI as OnrRrSetDeltaRate: a DLL without it has no such mode.
 // Safe every frame; the first frame asked starts the kernels' build, and the next recorded frame after it uses them.

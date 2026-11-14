@@ -8,6 +8,7 @@
 #include "rr_pe_control.hpp"
 #include "rr_pe_crash.hpp"
 #include "rr_pe_d3d12split.hpp"
+#include "rr_d3d12_record.hpp"
 #include "rr_data_paths.hpp"
 #include "rr_pe_log.hpp"
 #include "rr_pe_menu.hpp"
@@ -228,7 +229,39 @@ void apply_cmd_sig_to_root(DirectRootArgs& r, const DirectCmdSigInfo* sig) {
     }
 }
 
+struct ObservedTextureBarrier {
+    ID3D12Resource* resource;
+    bool enhanced;
+    UINT before, after;
+    UINT access_before, access_after;
+    UINT flags;
+    D3D12_BARRIER_SUBRESOURCE_RANGE range;
+};
+
 struct DirectListState {
+    // Diagnostic history only. A command list can inherit states from earlier submissions.
+    std::vector<ObservedTextureBarrier> barriers;
+    size_t barrier_cursor = 0;
+
+    void note_barrier(const ObservedTextureBarrier& b) {
+        constexpr size_t capacity = 128;
+        if (barriers.size() < capacity) barriers.push_back(b);
+        else barriers[barrier_cursor] = b;
+        barrier_cursor = (barrier_cursor + 1) % capacity;
+    }
+
+    void clear_barriers() {
+        barriers.clear();
+        barrier_cursor = 0;
+    }
+
+    const ObservedTextureBarrier* last_barrier(const void* resource) const {
+        for (size_t i = 0; i < barriers.size(); ++i) {
+            const size_t pos = (barrier_cursor + barriers.size() - i - 1) % barriers.size();
+            if (barriers[pos].resource == resource) return &barriers[pos];
+        }
+        return nullptr;
+    }
     bool valid = false;
     bool unknown = false;
     UINT heap_count = 0;
@@ -298,6 +331,7 @@ void direct_forget_list(void* list) {
     auto it = shard.map.find(list);
     if (it != shard.map.end() && it->second) {
         it->second->reset(nullptr);
+        it->second->clear_barriers();
         it->second->valid = false;
     }
 }
@@ -398,7 +432,6 @@ std::atomic<bool> g_cmd_sig_hook_installed{false};
 std::atomic<bool> g_cmd_sig_hook_ok{false};
 thread_local int t_in_openrr_record = 0;
 thread_local int t_in_internal_vk = 0;
-thread_local ID3D12GraphicsCommandList* t_record_target = nullptr;
 
 struct InternalVkScope {
     InternalVkScope() { ++t_in_internal_vk; }
@@ -475,24 +508,22 @@ HRESULT STDMETHODCALLTYPE hk_cl_reset(ID3D12GraphicsCommandList* cl, ID3D12Comma
     const HRESULT hr = real_cl_reset(cl, alloc, pso);
     if (SUCCEEDED(hr) && cl && !t_in_openrr_record) {
         OnrRrNotifyD3d12ListReset(cl, alloc);
-        direct_state_of(cl)->reset(pso);
+        DirectListState* state = direct_state_of(cl);
+        state->reset(pso);
+        state->clear_barriers();
     }
     return hr;
 }
 
 void STDMETHODCALLTYPE hk_cl_clear_state(ID3D12GraphicsCommandList* cl, ID3D12PipelineState* pso) {
-    if (t_in_openrr_record) {
-        if (!t_record_target) t_record_target = cl;
-    } else if (cl) {
+    if (cl && !t_in_openrr_record) {
         direct_state_of(cl)->clear_state(pso);
     }
     real_cl_clear_state(cl, pso);
 }
 
 void STDMETHODCALLTYPE hk_cl_set_pso(ID3D12GraphicsCommandList* cl, ID3D12PipelineState* pso) {
-    if (t_in_openrr_record) {
-        if (!t_record_target) t_record_target = cl;
-    } else if (cl) {
+    if (cl && !t_in_openrr_record) {
         DirectListState* s = direct_state_of(cl);
         s->pso = pso;
         s->pso_set = true;
@@ -502,9 +533,7 @@ void STDMETHODCALLTYPE hk_cl_set_pso(ID3D12GraphicsCommandList* cl, ID3D12Pipeli
 }
 
 void STDMETHODCALLTYPE hk_cl_set_pso1(ID3D12GraphicsCommandList* cl, ID3D12StateObject* so) {
-    if (t_in_openrr_record) {
-        if (!t_record_target) t_record_target = cl;
-    } else if (cl) {
+    if (cl && !t_in_openrr_record) {
         DirectListState* s = direct_state_of(cl);
         s->state_object = so;
         s->so_set = true;
@@ -514,9 +543,7 @@ void STDMETHODCALLTYPE hk_cl_set_pso1(ID3D12GraphicsCommandList* cl, ID3D12State
 }
 
 void STDMETHODCALLTYPE hk_cl_exec_bundle(ID3D12GraphicsCommandList* cl, ID3D12GraphicsCommandList* bundle) {
-    if (t_in_openrr_record) {
-        if (!t_record_target) t_record_target = cl;
-    } else if (cl) {
+    if (cl && !t_in_openrr_record) {
         DirectListState* s = direct_state_of(cl);
         const DirectListState* bs = (bundle && bundle != cl) ? direct_state_of(bundle) : nullptr;
         // Point the thread-local cache back at the primary command list (Item #1).
@@ -544,9 +571,7 @@ void STDMETHODCALLTYPE hk_cl_exec_bundle(ID3D12GraphicsCommandList* cl, ID3D12Gr
 }
 
 void STDMETHODCALLTYPE hk_cl_set_heaps(ID3D12GraphicsCommandList* cl, UINT count, ID3D12DescriptorHeap* const* heaps) {
-    if (t_in_openrr_record) {
-        if (!t_record_target) t_record_target = cl;
-    } else if (cl) {
+    if (cl && !t_in_openrr_record) {
         DirectListState* s = direct_state_of(cl);
         const UINT n = std::min<UINT>(count, 2u);
         bool same = (n == s->heap_count);
@@ -563,37 +588,67 @@ void STDMETHODCALLTYPE hk_cl_set_heaps(ID3D12GraphicsCommandList* cl, UINT count
     real_cl_set_heaps(cl, count, heaps);
 }
 
+using LegacyBarrierFn = void(STDMETHODCALLTYPE*)(ID3D12GraphicsCommandList*, UINT, const D3D12_RESOURCE_BARRIER*);
+using EnhancedBarrierFn = void(STDMETHODCALLTYPE*)(ID3D12GraphicsCommandList7*, UINT32, const D3D12_BARRIER_GROUP*);
+LegacyBarrierFn real_cl_barrier = nullptr;
+EnhancedBarrierFn real_cl_barrier7 = nullptr;
+
+void STDMETHODCALLTYPE hk_cl_barrier(ID3D12GraphicsCommandList* cl, UINT count, const D3D12_RESOURCE_BARRIER* barriers) {
+    if (cl && barriers && !t_in_openrr_record) {
+        auto* state = direct_state_of(cl);
+        for (UINT i = 0; i < count; ++i) {
+            const auto& b = barriers[i];
+            if (b.Type == D3D12_RESOURCE_BARRIER_TYPE_TRANSITION) {
+                const auto& t = b.Transition;
+                state->note_barrier({t.pResource, false, UINT(t.StateBefore), UINT(t.StateAfter),
+                                     0, 0, UINT(b.Flags), {t.Subresource}});
+            } else if (b.Type == D3D12_RESOURCE_BARRIER_TYPE_ALIASING) {
+                state->clear_barriers();
+            }
+        }
+    }
+    real_cl_barrier(cl, count, barriers);
+}
+
+void STDMETHODCALLTYPE hk_cl_barrier7(ID3D12GraphicsCommandList7* cl, UINT32 count, const D3D12_BARRIER_GROUP* groups) {
+    if (cl && groups && !t_in_openrr_record) {
+        auto* state = direct_state_of(static_cast<ID3D12GraphicsCommandList*>(cl));
+        for (UINT32 i = 0; i < count; ++i) {
+            const auto& group = groups[i];
+            if (group.Type != D3D12_BARRIER_TYPE_TEXTURE || !group.pTextureBarriers) continue;
+            for (UINT32 j = 0; j < group.NumBarriers; ++j) {
+                const auto& b = group.pTextureBarriers[j];
+                state->note_barrier({b.pResource, true, UINT(b.LayoutBefore), UINT(b.LayoutAfter),
+                                     UINT(b.AccessBefore), UINT(b.AccessAfter), UINT(b.Flags), b.Subresources});
+            }
+        }
+    }
+    real_cl_barrier7(cl, count, groups);
+}
+
 void STDMETHODCALLTYPE hk_cl_set_compute_rs(ID3D12GraphicsCommandList* cl, ID3D12RootSignature* rs) {
-    if (t_in_openrr_record) {
-        if (!t_record_target) t_record_target = cl;
-    } else if (cl) {
+    if (cl && !t_in_openrr_record) {
         direct_state_of(cl)->compute_root.set_rs(rs);
     }
     real_cl_set_compute_rs(cl, rs);
 }
 
 void STDMETHODCALLTYPE hk_cl_set_compute_table(ID3D12GraphicsCommandList* cl, UINT index, D3D12_GPU_DESCRIPTOR_HANDLE h) {
-    if (t_in_openrr_record) {
-        if (!t_record_target) t_record_target = cl;
-    } else if (cl) {
+    if (cl && !t_in_openrr_record) {
         direct_state_of(cl)->compute_root.set(index, 1, h.ptr);
     }
     real_cl_set_compute_table(cl, index, h);
 }
 
 void STDMETHODCALLTYPE hk_cl_set_compute_const(ID3D12GraphicsCommandList* cl, UINT index, UINT val, UINT offset) {
-    if (t_in_openrr_record) {
-        if (!t_record_target) t_record_target = cl;
-    } else if (cl) {
+    if (cl && !t_in_openrr_record) {
         direct_state_of(cl)->compute_root.constant(index, offset, val);
     }
     real_cl_set_compute_const(cl, index, val, offset);
 }
 
 void STDMETHODCALLTYPE hk_cl_set_compute_consts(ID3D12GraphicsCommandList* cl, UINT index, UINT count, const void* data, UINT offset) {
-    if (t_in_openrr_record) {
-        if (!t_record_target) t_record_target = cl;
-    } else if (cl && data) {
+    if (cl && data && !t_in_openrr_record) {
         DirectRootArgs& r = direct_state_of(cl)->compute_root;
         const auto* v = static_cast<const uint32_t*>(data);
         for (UINT i = 0; i < count; ++i) r.constant(index, offset + i, v[i]);
@@ -602,27 +657,21 @@ void STDMETHODCALLTYPE hk_cl_set_compute_consts(ID3D12GraphicsCommandList* cl, U
 }
 
 void STDMETHODCALLTYPE hk_cl_set_compute_cbv(ID3D12GraphicsCommandList* cl, UINT index, D3D12_GPU_VIRTUAL_ADDRESS va) {
-    if (t_in_openrr_record) {
-        if (!t_record_target) t_record_target = cl;
-    } else if (cl) {
+    if (cl && !t_in_openrr_record) {
         direct_state_of(cl)->compute_root.set(index, 2, va);
     }
     real_cl_set_compute_cbv(cl, index, va);
 }
 
 void STDMETHODCALLTYPE hk_cl_set_compute_srv(ID3D12GraphicsCommandList* cl, UINT index, D3D12_GPU_VIRTUAL_ADDRESS va) {
-    if (t_in_openrr_record) {
-        if (!t_record_target) t_record_target = cl;
-    } else if (cl) {
+    if (cl && !t_in_openrr_record) {
         direct_state_of(cl)->compute_root.set(index, 3, va);
     }
     real_cl_set_compute_srv(cl, index, va);
 }
 
 void STDMETHODCALLTYPE hk_cl_set_compute_uav(ID3D12GraphicsCommandList* cl, UINT index, D3D12_GPU_VIRTUAL_ADDRESS va) {
-    if (t_in_openrr_record) {
-        if (!t_record_target) t_record_target = cl;
-    } else if (cl) {
+    if (cl && !t_in_openrr_record) {
         direct_state_of(cl)->compute_root.set(index, 4, va);
     }
     real_cl_set_compute_uav(cl, index, va);
@@ -631,9 +680,7 @@ void STDMETHODCALLTYPE hk_cl_set_compute_uav(ID3D12GraphicsCommandList* cl, UINT
 void STDMETHODCALLTYPE hk_cl_exec_indirect(ID3D12GraphicsCommandList* cl, ID3D12CommandSignature* sig,
                                            UINT max_count, ID3D12Resource* arg_buf, UINT64 arg_offset,
                                            ID3D12Resource* count_buf, UINT64 count_offset) {
-    if (t_in_openrr_record) {
-        if (!t_record_target) t_record_target = cl;
-    } else if (cl) {
+    if (cl && !t_in_openrr_record) {
         apply_direct_execute_indirect(direct_state_of(cl), sig);
     }
     real_cl_exec_indirect(cl, sig, max_count, arg_buf, arg_offset, count_buf, count_offset);
@@ -661,7 +708,9 @@ HRESULT STDMETHODCALLTYPE hk_dev_create_cl(ID3D12Device* dev, UINT mask, D3D12_C
         ID3D12GraphicsCommandList* list = nullptr;
         if (SUCCEEDED(static_cast<IUnknown*>(*out)->QueryInterface(IID_PPV_ARGS(&list))) && list) {
             OnrRrNotifyD3d12ListReset(list, alloc);
-            direct_state_of(list)->reset(pso);
+            DirectListState* state = direct_state_of(list);
+            state->reset(pso);
+            state->clear_barriers();
             list->Release();
         }
     }
@@ -675,7 +724,9 @@ HRESULT STDMETHODCALLTYPE hk_dev4_create_cl1(void* dev4, UINT mask, D3D12_COMMAN
         ID3D12GraphicsCommandList* list = nullptr;
         if (SUCCEEDED(static_cast<IUnknown*>(*out)->QueryInterface(IID_PPV_ARGS(&list))) && list) {
             OnrRrNotifyD3d12ListReset(list, nullptr);
-            direct_state_of(list)->reset(nullptr);
+            DirectListState* state = direct_state_of(list);
+            state->reset(nullptr);
+            state->clear_barriers();
             list->Release();
         }
     }
@@ -800,6 +851,24 @@ bool ensure_direct_state_hooks(ID3D12Device* dev, ID3D12GraphicsCommandList* cl 
             MH_EnableHook(vt[2]);
     }
 
+    if (openrr::pe::d3d12_diagnostics_enabled()) {
+        auto install_barrier = [](void* fn, void* detour, void** original) {
+            return in_d3d12_core_module(fn) && MH_CreateHook(fn, detour, original) == MH_OK &&
+                   MH_EnableHook(fn) == MH_OK;
+        };
+        const bool legacy = install_barrier(vt[26], reinterpret_cast<void*>(&hk_cl_barrier),
+                                            reinterpret_cast<void**>(&real_cl_barrier));
+        ID3D12GraphicsCommandList7* cl7 = nullptr;
+        bool enhanced = false;
+        if (SUCCEEDED(cl->QueryInterface(IID_PPV_ARGS(&cl7)))) {
+            void** vt7 = *reinterpret_cast<void***>(cl7);
+            enhanced = install_barrier(vt7[80], reinterpret_cast<void*>(&hk_cl_barrier7),
+                                       reinterpret_cast<void**>(&real_cl_barrier7));
+            cl7->Release();
+        }
+        log("[d3d12 diag] host barrier hooks legacy=%d enhanced=%d", int(legacy), int(enhanced));
+    }
+
     IUnknown* cl4 = nullptr;
     if (SUCCEEDED(cl->QueryInterface(kIID_List4, reinterpret_cast<void**>(&cl4))) && cl4) {
         void** vt4 = *reinterpret_cast<void***>(cl4);
@@ -841,11 +910,35 @@ bool ensure_direct_state_hooks(ID3D12Device* dev, ID3D12GraphicsCommandList* cl 
     return all_ok;
 }
 
-void restore_direct_state(ID3D12GraphicsCommandList* cmd, ID3D12GraphicsCommandList* target) {
-    if (!cmd) return;
-    ID3D12GraphicsCommandList* key = target ? target : cmd;
-    const DirectListState* s = direct_state_of(key);
-    if (!s || !s->valid || s->unknown) return;
+void log_direct_texture_barriers(ID3D12GraphicsCommandList* cmd, const OnrRrFrame& frame) {
+    const auto* state = direct_state_of(cmd);
+    const std::pair<const char*, const OnrRrTexture*> inputs[] = {
+        {"Color", &frame.color}, {"Output", &frame.output}, {"Depth", &frame.depth}, {"MV", &frame.motion},
+        {"DiffuseAlbedo", &frame.diffuse_albedo}, {"SpecularAlbedo", &frame.specular_albedo},
+        {"Normals", &frame.normals}, {"Roughness", &frame.roughness},
+        {"HitDistance", &frame.specular_hit_distance}, {"DisocclusionMask", &frame.disocclusion_mask},
+    };
+    for (const auto& [name, tex] : inputs) {
+        if (!tex->resource) continue;
+        const auto* b = state->last_barrier(tex->resource);
+        if (!b) {
+            log("[d3d12 diag] %s resource=%p declared=0x%X last_host_barrier=unknown", name, tex->resource, tex->state);
+        } else if (b->enhanced) {
+            log("[d3d12 diag] %s resource=%p declared=0x%X enhanced layout=%u->%u access=0x%X->0x%X"
+                " flags=0x%X range=%u,%u,%u,%u,%u,%u",
+                name, tex->resource, tex->state, b->before, b->after, b->access_before, b->access_after, b->flags,
+                b->range.IndexOrFirstMipLevel, b->range.NumMipLevels, b->range.FirstArraySlice,
+                b->range.NumArraySlices, b->range.FirstPlane, b->range.NumPlanes);
+        } else {
+            log("[d3d12 diag] %s resource=%p declared=0x%X legacy state=0x%X->0x%X flags=0x%X subresource=%u",
+                name, tex->resource, tex->state, b->before, b->after, b->flags, b->range.IndexOrFirstMipLevel);
+        }
+    }
+}
+
+bool restore_direct_state(ID3D12GraphicsCommandList* cmd) {
+    const DirectListState* s = direct_state_of(cmd);
+    if (!s || !s->valid || s->unknown) return false;
 
     ++t_in_openrr_record;
     const DirectRootArgs& r = s->compute_root;
@@ -884,6 +977,7 @@ void restore_direct_state(ID3D12GraphicsCommandList* cmd, ID3D12GraphicsCommandL
         cmd->SetPipelineState(s->pso);
     }
     --t_in_openrr_record;
+    return true;
 }
 
 // ---- Runtime API & nvngx_dlssd.dll discovery ----
@@ -1350,7 +1444,8 @@ void read_ini_barriers() {
     };
     g_barrier_color = get("ColorResourceBarrier");
     g_barrier_depth = get("DepthResourceBarrier");
-    g_barrier_mv = get("MVResourceBarrier");
+    g_barrier_mv = get("MotionVectorResourceBarrier");
+    if (g_barrier_mv < 0) g_barrier_mv = get("MVResourceBarrier");
     g_barrier_output = get("OutputResourceBarrier");
 }
 
@@ -1524,11 +1619,10 @@ NVSDK_NGX_Resource_VK* get_vk_res(const NVSDK_NGX_Parameter& p, const char* k1, 
 void read_create_sizes(const NVSDK_NGX_Parameter* p, uint32_t& rw, uint32_t& rh, uint32_t& ow, uint32_t& oh) {
     rw = rh = ow = oh = 0;
     if (!p) return;
-    unsigned int w = 0, h = 0, sub_w = 0, sub_h = 0, out_w = 0, out_h = 0;
+    unsigned int w = 0, h = 0, out_w = 0, out_h = 0;
     p->Get(NVSDK_NGX_Parameter_Width, &w);
     p->Get(NVSDK_NGX_Parameter_Height, &h);
-    p->Get(NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Width, &sub_w);
-    p->Get(NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Height, &sub_h);
+    // Render.Subrect.Dimensions belongs to Evaluate and can still describe the previous feature after a resize.
     p->Get(NVSDK_NGX_Parameter_OutWidth, &out_w);
     p->Get(NVSDK_NGX_Parameter_OutHeight, &out_h);
 
@@ -1540,11 +1634,11 @@ void read_create_sizes(const NVSDK_NGX_Parameter* p, uint32_t& rw, uint32_t& rh,
     if (w && h && out_w && out_h) {
         ow = std::max(w, out_w);
         oh = std::max(h, out_h);
-        rw = sub_w ? sub_w : std::min(w, out_w);
-        rh = sub_h ? sub_h : std::min(h, out_h);
+        rw = std::min(w, out_w);
+        rh = std::min(h, out_h);
     } else {
-        rw = sub_w ? sub_w : (w ? w : out_w);
-        rh = sub_h ? sub_h : (h ? h : out_h);
+        rw = w ? w : out_w;
+        rh = h ? h : out_h;
         ow = out_w ? out_w : rw;
         oh = out_h ? out_h : rh;
     }
@@ -2542,21 +2636,32 @@ NVSDK_NGX_Result evaluate_d3d12_rr(ID3D12GraphicsCommandList* cmd, const NVSDK_N
             openrr::pe::flush_log();
         }
         const auto state = split_ok ? openrr::pe::split::snapshot(cmd) : nullptr;
-        void* job = nullptr;
-        t_record_target = nullptr;
+        bool host_bound = false;
+        const bool trace = openrr::pe::d3d12_diagnostics_enabled() && (ctx.frame_count < 4 || just_became_ready);
+        if (trace) {
+            log("[d3d12 diag] Evaluate list=%p next_frame=%llu", static_cast<void*>(cmd),
+                static_cast<unsigned long long>(ctx.frame_count + 1));
+            log_direct_texture_barriers(cmd, frame);
+        }
         ++t_in_openrr_record;
-        const int32_t rc = g_api4.Record(ctx.runtime_ctx, &frame, cmd, ONR_RR_EDIT_OFF, nullptr, &job);
+        const int32_t rc = openrr::pe::record_d3d12(ctx.runtime_ctx, &frame, cmd, host_bound, trace);
         --t_in_openrr_record;
-        if (just_became_ready || ctx.frame_count < 4) {
-            openrr::pe::flush_log();
+        const bool device_removed = (rc != ONR_RR_OK && rc != ONR_RR_BUSY) &&
+                                    openrr::pe::log_d3d12_device_removed(ctx.d3d12_device, "Record");
+        bool restored = false;
+        if (host_bound && !device_removed) {
+            if (split_ok && state) {
+                openrr::pe::split::restore(cmd, state);
+                restored = true;
+            } else {
+                restored = restore_direct_state(cmd);
+            }
         }
-        ID3D12GraphicsCommandList* target = t_record_target;
-        t_record_target = nullptr;
-        if (split_ok && state) {
-            openrr::pe::split::restore(cmd, state);
-        } else {
-            restore_direct_state(cmd, target);
+        if (trace) {
+            log("[d3d12 diag] list=%p Record rc=%d host_bound=%d restore=%d",
+                static_cast<void*>(cmd), rc, int(host_bound), int(restored));
         }
+        if (trace || just_became_ready || ctx.frame_count < 4) openrr::pe::flush_log();
         if (rc == ONR_RR_BUSY) {
             const uint64_t skip_n = ++g_d3d_skipped_frames;
             if (skip_n == 1 || (skip_n & (skip_n - 1)) == 0) {
@@ -3839,6 +3944,7 @@ extern "C" __declspec(dllexport) void InitializeASI() {
     g_self_range = range_of(g_self);
 
     openrr::pe::set_module(g_opti);
+    openrr::pe::enable_d3d12_dred();
     openrr::pe::install_crash_watch();
     std::set_terminate([] {
         log("[openrr] std::terminate: an unhandled exception terminated an OpenRR thread");
