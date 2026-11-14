@@ -2,8 +2,8 @@
 # What the user's "Fast mode" changes, per shader source: the defines of its _lt kernels. docs/FASE24-FASTMODE.md has the
 # ladder. A kernel left out here stays on its _f file in that mode.
 set(LT_DEFS_enc0_stage_32_64 LT_FAR=2 LT_FAR1=2 LT_Q16=1 LT_VO=1 LT_SYM=1 LT_EXP=1 LT_RCP=1 LT_HM=1)
-set(LT_DEFS_dec_up_32_64_64 LT_FAR=3 LT_FAR1=3 LT_Q16=1 LT_VO=1 LT_SYM=1 LT_UP8=1 LT_EXP=1 LT_RCP=1 LT_HM=1)
-set(LT_DEFS_dec_head_32_64 LT_FAR=3 LT_FAR1=3 LT_Q16=1 LT_VO=1 LT_SYM=1 LT_EXP=1 LT_RCP=1 LT_HM=1)
+set(LT_DEFS_dec_up_32_64_64 LT_FAR=3 LT_FAR1=3 LT_Q16=1 LT_VO=1 LT_SYM=1 LT_UP8=1 LT_EXP=1 LT_RCP=1 LT_HM=1 LT_MLP8=1)
+set(LT_DEFS_dec_head_32_64 LT_FAR=3 LT_FAR1=3 LT_Q16=1 LT_VO=1 LT_SYM=1 LT_EXP=1 LT_RCP=1 LT_HM=1 LT_MLP8=1)
 set(LT_DEFS_enc0_attr LT_ATTR_TAB=1 LT_ATTR_LATE=1 LT_ATTR_D9=1 LT_ATTR_RO=1)
 set(LT_DEFS_post LT_POST_PAIR=1 LT_POST_HW=1 LT_POST_LDS=1 LT_POST_EXPO=1)
 set(LT_DEFS_post_dlt LT_POST_PAIR=1 LT_DLT_PAIR=1 LT_POST_HW=1 LT_POST_LDS=1 LT_POST_EXPO=1)

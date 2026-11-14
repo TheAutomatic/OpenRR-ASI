@@ -252,6 +252,50 @@ void main() {
         precise f16vec2 v = fma(f16vec2(a16[i], a16[i + 1]), f16vec2(l), f16vec2(xn[i], xn[i + 1])); xn[i] = v.x, xn[i + 1] = v.y; } }
     RESID1(c00, x00, ls1) RESID1(c01, x01, ls1) RESID1(c10, x10, ls1) RESID1(c11, x11, ls1)
     RESID1(c20, x20, ls1) RESID1(c21, x21, ls1) RESID1(c30, x30, ls1) RESID1(c31, x31, ls1)
+#ifdef LT_MLP8
+    // Native-FP8 MLP, decoder-only shape: enc0 keeps its fp16 path (the input layer's
+    // activation noise does not clear the quality gate); here each token tile runs the
+    // whole slice chain in its own scope, so only its own quantized x, its own two f32
+    // output accumulators and the slice's hidden state are ever live (2 QC8 + 4 QC8 +
+    // 2 QB8 + the streamed weight tiles - no 8-tile accumulator bank, no preload bank).
+#define W1_FC1_W8 E4View(uint64_t(pc.fc1) + uint64_t(4u * HID * ENC_C)).v
+#define W1_FC2_W8 E4View(uint64_t(pc.fc2) + uint64_t(4u * HID * ENC_C)).v
+#define W1_GELU8(g8, h) { for (int i_ = 0; i_ < g8.length(); i_ += 2) { fe4m3vec2 q_ = qe4_pair32(vec2(gelu_f32(h[i_]), gelu_f32(h[i_ + 1]))); g8[i_] = q_.x, g8[i_ + 1] = q_.y; } }
+#define W1_M8_TT(xa, xb) { \
+        QB8 x8a, x8b; \
+        [[unroll]] for (int i_ = 0; i_ < x8a.length(); i_ += 2) { \
+            fe4m3vec2 qa_ = qe4_pair32(vec2(xa[i_], xa[i_ + 1])), qb_ = qe4_pair32(vec2(xb[i_], xb[i_ + 1])); \
+            x8a[i_] = qa_.x, x8a[i_ + 1] = qa_.y, x8b[i_] = qb_.x, x8b[i_ + 1] = qb_.y; } \
+        QC8 mc0 = QC8(bias_acc_t(pc.fc2_b, 0u)), mc1 = QC8(bias_acc_t(pc.fc2_b, 16u)); \
+        MLP_SLICE_LOOP for (uint j = 0u; j < LT_HID; j += 64u) { \
+            QC8 h0 = QC8(bias_acc_t(pc.fc1_b, j)), h1 = QC8(bias_acc_t(pc.fc1_b, j + 16u)); \
+            QC8 h2 = QC8(bias_acc_t(pc.fc1_b, j + 32u)), h3 = QC8(bias_acc_t(pc.fc1_b, j + 48u)); \
+            QA8 w_; \
+            coopMatLoad(w_, W1_FC1_W8, j * ENC_C, ENC_C, ROW);               h0 = coopMatMulAdd(w_, x8a, h0); \
+            coopMatLoad(w_, W1_FC1_W8, j * ENC_C + 16u, ENC_C, ROW);         h0 = coopMatMulAdd(w_, x8b, h0); \
+            coopMatLoad(w_, W1_FC1_W8, (j + 16u) * ENC_C, ENC_C, ROW);       h1 = coopMatMulAdd(w_, x8a, h1); \
+            coopMatLoad(w_, W1_FC1_W8, (j + 16u) * ENC_C + 16u, ENC_C, ROW); h1 = coopMatMulAdd(w_, x8b, h1); \
+            coopMatLoad(w_, W1_FC1_W8, (j + 32u) * ENC_C, ENC_C, ROW);       h2 = coopMatMulAdd(w_, x8a, h2); \
+            coopMatLoad(w_, W1_FC1_W8, (j + 32u) * ENC_C + 16u, ENC_C, ROW); h2 = coopMatMulAdd(w_, x8b, h2); \
+            coopMatLoad(w_, W1_FC1_W8, (j + 48u) * ENC_C, ENC_C, ROW);       h3 = coopMatMulAdd(w_, x8a, h3); \
+            coopMatLoad(w_, W1_FC1_W8, (j + 48u) * ENC_C + 16u, ENC_C, ROW); h3 = coopMatMulAdd(w_, x8b, h3); \
+            QB8 g0_, g1_, g2_, g3_; \
+            W1_GELU8(g0_, h0) W1_GELU8(g1_, h1) W1_GELU8(g2_, h2) W1_GELU8(g3_, h3) \
+            coopMatLoad(w_, W1_FC2_W8, j, HID, ROW);                 mc0 = coopMatMulAdd(w_, g0_, mc0); \
+            coopMatLoad(w_, W1_FC2_W8, j + 16u, HID, ROW);           mc0 = coopMatMulAdd(w_, g1_, mc0); \
+            coopMatLoad(w_, W1_FC2_W8, j + 32u, HID, ROW);           mc0 = coopMatMulAdd(w_, g2_, mc0); \
+            coopMatLoad(w_, W1_FC2_W8, j + 48u, HID, ROW);           mc0 = coopMatMulAdd(w_, g3_, mc0); \
+            coopMatLoad(w_, W1_FC2_W8, 16u * HID + j, HID, ROW);     mc1 = coopMatMulAdd(w_, g0_, mc1); \
+            coopMatLoad(w_, W1_FC2_W8, 16u * HID + j + 16u, HID, ROW); mc1 = coopMatMulAdd(w_, g1_, mc1); \
+            coopMatLoad(w_, W1_FC2_W8, 16u * HID + j + 32u, HID, ROW); mc1 = coopMatMulAdd(w_, g2_, mc1); \
+            coopMatLoad(w_, W1_FC2_W8, 16u * HID + j + 48u, HID, ROW); mc1 = coopMatMulAdd(w_, g3_, mc1); } \
+        MH r0_ = MH(mc0), r1_ = MH(mc1); \
+        for (int i_ = 0; i_ < r0_.length(); i_ += 2) { \
+            precise f16vec2 va_ = fma(f16vec2(r0_[i_], r0_[i_ + 1]), f16vec2(ls2), f16vec2(xa[i_], xa[i_ + 1])); \
+            precise f16vec2 vb_ = fma(f16vec2(r1_[i_], r1_[i_ + 1]), f16vec2(ls2), f16vec2(xb[i_], xb[i_ + 1])); \
+            xa[i_] = va_.x, xa[i_ + 1] = va_.y, xb[i_] = vb_.x, xb[i_ + 1] = vb_.y; } }
+    if (lv0) W1_M8_TT(x00, x01) if (lv1) W1_M8_TT(x10, x11) if (lv2) W1_M8_TT(x20, x21) if (lv3) W1_M8_TT(x30, x31)
+#else
     c00 = bias_acc_t(pc.fc2_b, 0u), c01 = bias_acc_t(pc.fc2_b, 16u);
     c10 = c00, c11 = c01, c20 = c00, c21 = c01, c30 = c00, c31 = c01;
     // MLP in 64-neuron slices: h^T = gelu(fc1 x1^T + b), m^T += fc2 h^T (K order of the fc2 chain unchanged)
@@ -280,6 +324,7 @@ void main() {
     }
     RESID1(c00, x00, ls2) RESID1(c01, x01, ls2) RESID1(c10, x10, ls2) RESID1(c11, x11, ls2)
     RESID1(c20, x20, ls2) RESID1(c21, x21, ls2) RESID1(c30, x30, ls2) RESID1(c31, x31, ls2)
+#endif
 #if ENC_STAGE
     // DFN head: d^T = dfn x2^T + b per token tile (3 rows used); then two token tiles at once (lane half 0: tile a,
     // half 1: tile b, its d moved across the halves), gains and DFNOutput per lane, the 2x2 pooling by shuffles
