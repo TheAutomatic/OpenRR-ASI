@@ -369,3 +369,42 @@ post_f_lt 采样/调度与 enc0_attr（ACO 调度器策略，源码不可达）�
   +2.58/+2.72% → **+2.21/+2.35%**。
 - 遗留：W2 体 FP8 MLP 根因未明（重开条件：先在 W2 体上做单 tile e4m3 B 操作数微基准）；
   post_f_lt 差距依旧（编译器侧）。
+
+## 13. Stage 6：Wave 2 抢救、Wave 3 共享权重优化与终局再战（`term3`）
+
+起点 `eab495e` / `4332470`（工具链 Mesa 26.3.0，`ONR_ACO_MIMG_CLAUSE=0`、`ONR_ACO_SHARED_CMAT` 与 `elem_bytes` hooks=2，未触碰 `post_f_lt` 与 `d3d_enc0_attr_f_lt`）。
+
+### 13.1 Wave 2 抢救晋级（`6a30425`）：W2 五核 `LT_MLP8` + mode-4 配对量化
+
+- **根因澄清**：Stage 5 Wave 2（`s5-wave2-w2-mlp8/my-w2-block-paired.glsl`）并非“双 token-tile FP8 交互墙”。真正故障是 `gpu/shaders/include/onr_block_w2.glsl` 中的 `#ifdef LT_MLP8` 提前闭合于第 401 行 `W2T(RES_A2) W2T(RES_B2)` 之前，使 FP8 路径在写出 `x0*/x1*` 后继续跌落并叠加 stale `c0*/c1*`（将输出破坏至 `30.39 dB`），且迫使 `c00..c05, c10..c15` 跨 MLP 循环保活，导致 `enc_stage_96_128_128_f_lt` 溢出 `scratch=24`。
+- **正式补丁**：
+  - `gpu/fastmode.cmake` 仅对 W2 五核追加 `LT_MLP8=1`（`enc_stage_64_64_96`、`enc_stage_96_128_128`、`dec_dfn_96_128`、`dec_up_64_64_96`、`dec_dfn_64_64`）。
+  - `dec_dfn_64_64.comp`、`dec_up_64_64_96.comp`、`enc_stage_64_64_96.comp`（`W2_SL=64`）在 `#ifdef LT_MLP8` 下设置 `#define MLP_SLICE_LOOP [[dont_unroll]]`。
+  - `enc_stage_96_128_128.comp` 在 `ENC_F32 && FLOW && ...` 分支中 `#undef LT_MLP8`，锁定 `_fl_lt` 保持 fp16 MLP（与 `frozen-4332470` 0 diff）。
+  - `gpu/shaders/include/onr_block_w2.glsl` 将 `W2T(RES_A2) W2T(RES_B2)` 整体纳入 `#else` 分支，并在 `#ifdef LT_MLP8` 中使用 `qe4_pair32` + `gelu_f32`（`GELUQ8`）+ `QC8` 累加。
+- **静态与 ISA（`scan_isa.py`，`4332470` → `6a30425`）**：仅 W2 `_lt` 核变更，非 `_lt` 核 0 字节差异，全量 112 条 manifest 记录 `scratch=0`、`maxmin32=0`、`maxmin16=0`、`cvt_pk8=64`；`enc_stage_64_64_96_f_lt` `exec 33032→28224`、`dec_up_64_64_96_f_lt` `25744→22632`、`dec_dfn_64_64_f_lt` `27016→22636`（VGPR 维持 240/256）。
+- **门禁与质量**：`test_asi_units.exe` 全绿；Anchor #1（`1080p` / `4K` vs `frozen-d3229e9`）100% 0-ULP `999.00 dB`；Fast Parity（vs `frozen-4332470`）`1080p` 稳态 `57.78 dB` / DRS `60.25 dB`、`4K` 稳态 `59.54 dB` / DRS `56.71 dB`，`non_finite=0`；Anchor #2 `v1`（76 哈希门 `0` 失败、`Q_S0_1080p_dlaa min=34.1554`、`Q_S0_4k_perf min=48.2634`）与 `v2_motion`（44 哈希门 `0` 失败）全绿；Anchor #4（同构 LLPC vs ACO）`1080-g0` `58.31 dB / DRS 999 dB`、`1080-g1` `128.72 / 122.48 dB`、`4k-g0` `59.42 / 57.79 dB`、`4k-g1` `127.17 / 122.59 dB` 全部 `passed=True`。
+- **性能（vs `frozen-4332470`）**：4K `@idx` 三个 4K 命中 W2 核 `enc_stage_64_64_96_f_lt` **−52.27µs（−5.14%）**、`dec_up_64_64_96_f_lt` **−51.70µs（−6.07%）**、`dec_dfn_64_64_f_lt` **−65.85µs（−8.38%）**，target 合计 **−169.83µs（−6.39%）**（ALL-21 −1.47%）；3×ABBA（48/240/64）`1080p` **d_med = −1.717%**（`3.1194 → 3.0638 ms`，三组 −1.717%/−1.682%/−1.815%，6/6 call 全负）、`4K` **d_med = −2.349%**（`12.3604 → 12.1099 ms`，前两组 −2.349%/−2.540%，第 3 组末尾单次波动 +5.886%）。
+
+### 13.2 Wave 3 优化晋级（`e1af0d5`）：`W1` 解码双核共享权重外循环
+
+- **方案选型**：在 `gpu/shaders/include/onr_block_w1.glsl` 的 `#ifdef LT_MLP8` 路径中对比 4 种循环分块/预取方案（`j+=32u`、`j+=16u` lazy `w0_,w1_`、`j+=64u`、`j+=16u` preloaded `w0_,w1_`）：
+  - `@idx` 初筛四者结合节省分别为 −70.58µs（Cand A）、**−82.95µs**（Cand B）、−79.34µs（Cand C）、−74.64µs（Cand D）。
+  - 最终采用 **Cand B（`j+=16u`、lazy `w0_,w1_`）**：4 个 active token tile 一次配对量化并驻留 `x8a/x8b`，每个隐藏切片 `jr` 仅加载一次 `f0_, f1_` 并跨 4 个 tile 复用（共用单个 `QC8 h_`），随后按需加载 `w0_, w1_` 写入 `mc0n/mc1n`。
+- **静态与 ISA（`6a30425` → `e1af0d5`）**：仅 `dec_head_32_64_f_lt` 与 `dec_up_32_64_64_f_lt` 变更，非 `_lt`/`_lx` 0 diff，全量 `scratch=0`；`dec_head_32_64_f_lt` `exec 28048→21804`（VGPR 192、`cvt_pk8 96→48`、`fma32 256→64`、`setreg 13→4`），`dec_up_32_64_64_f_lt` `[0]` `exec 25564→18908`（VGPR 192）、`[1]` `exec 25584→18800`（VGPR 256、`cvt_pk8 96→48`、`fma32 256→64`）。
+- **门禁与质量**：`test_asi_units.exe` 全绿；Fast Parity（vs `frozen-w2-stage` `6a30425`）`1080p` & `4K` 稳态/DRS **100.00% 0-ULP `999.00 dB`**；Anchor #1（vs `frozen-d3229e9`）双分辨率 **100.00% 0-ULP `999.00 dB`**；Anchor #2 `v1`（76 哈希门 `0` 失败）与 `v2_motion`（44 哈希门 `0` 失败）全绿（`ANCHOR2 VERIFIED GREEN`）；Anchor #4（同构 LLPC vs ACO）`1080-g0` `56.59 dB / DRS 999 dB`、`1080-g1` `134.16 / 120.27 dB`、`4k-g0` `59.44 / 57.77 dB`、`4k-g1` `126.29 / 122.39 dB` 全绿（注：交叉对照 `frozen-d3229e9` 非 FP8 LLPC 时 `1080-g0` 通过但 `1080-g1` 因小分辨率 DRS 叠加 W1+W2+W3 FP8 误差为 `47.15–49.19 dB`，而同构编译器间 `120.27–134.16 dB` 零退化）。
+- **性能（vs `6a30425`）**：4K `@idx` 复测 `dec_up_32_64_64_f_lt` **−52.06µs（−4.24%）**、`dec_head_32_64_f_lt` **−27.15µs（−2.22%）**，target 合计 **−79.21µs（−3.23%）**（ALL-21 −0.70%；`idx_drift.py` 单核净值 −48.91µs / −20.98µs，`CLEAN`）；3×ABBA（48/240/64）`1080p` **d_med = −0.716%**（`3.0700 → 3.0588 ms`，三组 −0.520%/−0.747%/−0.716%）、`4K` **d_med = −1.972%**（`11.7856 → 11.5555 ms`，三组 −2.142%/−0.818%/−1.972%，6/6 call −0.553%~−3.274% 全负）。
+
+### 13.3 终局再战 `term3`：ACO（`e1af0d5`）vs LLPC（`frozen-d3229e9`，驱动原生）
+
+3×ABBA（48/240/64），全组 `g*c0` 日志确认 `dec_head_32_64_f_lt` 为 `LLPC (spv=9a3ee271bb7b5d53, m=0)` → `ACO (spv=bdf472e1540dd0d9, m=130)`、`g*c1` 完全对调 `ACO → LLPC`（零混编）：
+
+| 分辨率 | ACO vs LLPC (`term3`) | 三组组中位 | 基线 → 候选 | 较 §12.4（`+2.214/+2.347%`） |
+|---|---|---|---|---|
+| 1080p | **−0.121%** | −0.022% / −0.121% / −0.235% | `3.0518 → 3.0481 ms` | 收窄并反超 **2.335pp** |
+| 4K | **−0.744%** | −0.774% / −0.553% / −0.744% | `11.7057 → 11.6195 ms` | 收窄并反超 **3.091pp** |
+
+4K 600 帧 `@idx`（`frozen-d3229e9` LLPC vs `e1af0d5` ACO，summary steady median `11.720 → 11.630 ms` / `−89.7µs`，`−0.77%`，`PSNR_01=59.89 dB`，`non_finite=0`；ALL-22 stamped dispatches raw 合计 `11.3303 → 11.2594 ms` / `−70.90µs`，以下单核差值为 `cand_raw - base_ms` raw 口径）：
+- ACO 优势核：`dec_dfn_128_128_fl_lt` **−103.60µs（−37.80%）**、`dec_dfn_64_64_f_lt` **−66.70µs（−8.56%）**、`dec_dfn_96_128_fl_lt` **−55.70µs（−13.17%）**、`enc_stage_64_64_96_f_lt` **−52.10µs（−5.19%）**、`dec_up_64_64_96_f_lt` **−44.40µs（−5.31%）**、`dec_up_32_64_64_f_lt` **−32.80µs（−2.73%）**、`enc_stage_160_256_160_fl_lt` −20.30µs（−15.23%）。
+- 残余驱动差距：`post_f_lt` **+172.20µs（+15.18%）**、`d3d_enc0_attr_f_lt` **+71.80µs（+8.46%）**、`dec_up_128_128_160_fl_lt` +36.00µs（+18.93%）、`enc0_stage_32_64_f_lt` +26.20µs（+1.89%）、`dec_up_96_128_128_fl_lt` +26.00µs（+5.20%）。
+- **总结**：在 `post_f_lt` 与 `d3d_enc0_attr_f_lt` 零修改前提下，Wave 2 抢救与 Wave 3 外循环权重共享将整体端到端 ACO 性能推进至 `1080p` **−0.121%**、`4K` **−0.744%**，双分辨率全面反超原生驱动 LLPC。
