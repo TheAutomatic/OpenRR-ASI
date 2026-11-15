@@ -25,9 +25,11 @@ capture/build/
 __pycache__/
 *.pyc
 
-# Local tooling
+# Local tooling and temporary scratch directories
 .claude/
 snippets/
+.tmp-*/
+.tmp-stage8/
 
 # Derived arrays from analysis runs
 *.npy
