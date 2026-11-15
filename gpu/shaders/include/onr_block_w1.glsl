@@ -306,7 +306,16 @@ void main() {
     // so no 2^k compensation exists to apply - the B tiles are the once-quantized x1.
 #define W1_FC1_W8 E4View(uint64_t(pc.fc1) + uint64_t(4u * HID * ENC_C)).v
 #define W1_FC2_W8 E4View(uint64_t(pc.fc2) + uint64_t(4u * HID * ENC_C)).v
+#if defined(LT_GELU) && (!defined(LT_GELU_PART) || LT_GELU_PART == 1)
+// the linear gate straight in f32 (the fp16 fast path's gelu_lin2 semantics), 2 VALU less
+// per element than gelu_f32's polynomial, feeding the paired quantizer directly
+#define W1_GELU8(g8, h) { for (int i_ = 0; i_ < g8.length(); i_ += 2) { \
+        vec2 x_ = vec2(h[i_], h[i_ + 1]); \
+        vec2 g_ = min(max(fma(x_, vec2(float(LT_GELU)), vec2(0.5)), vec2(0.0)), vec2(1.0)); \
+        fe4m3vec2 q_ = qe4_pair32(x_ * g_); g8[i_] = q_.x, g8[i_ + 1] = q_.y; } }
+#else
 #define W1_GELU8(g8, h) { for (int i_ = 0; i_ < g8.length(); i_ += 2) { fe4m3vec2 q_ = qe4_pair32(vec2(gelu_f32(h[i_]), gelu_f32(h[i_ + 1]))); g8[i_] = q_.x, g8[i_ + 1] = q_.y; } }
+#endif
 #define W1_XQ8(n, xa, xb) QB8 x8a##n, x8b##n; \
     if (lv##n) { [[unroll]] for (int i_ = 0; i_ < x8a##n.length(); i_ += 2) { \
         fe4m3vec2 qa_ = qe4_pair32(vec2(xa[i_], xa[i_ + 1])), qb_ = qe4_pair32(vec2(xb[i_], xb[i_ + 1])); \
