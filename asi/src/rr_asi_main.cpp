@@ -63,17 +63,6 @@ HMODULE g_opti = nullptr;
 struct Range { uintptr_t begin = 0, end = 0; };
 Range g_opti_range{}, g_self_range{};
 
-// Mode = new / fast / legacy (upstream v0.1.5 names). "fast" is the experimental
-// level (OnrRrSetFastMode 2; a runtime or shader set without it runs that as 1).
-// Unknown values default to "new" instead of silently dropping fast mode.
-int rr_mode_level(const std::string& mode) {
-    if (mode == "legacy" || mode == "0") return 0;
-    if (mode == "fast" || mode == "2") return 2;
-    if (mode != "new" && mode != "1")
-        log("OpenRR: unknown Mode '%s', using new (fast level 1)", mode.c_str());
-    return 1;
-}
-
 Range range_of(HMODULE m) {
     if (!m) return {};
     const auto base = reinterpret_cast<uintptr_t>(m);
@@ -1747,7 +1736,7 @@ struct RrContext {
     bool has_ngx_depth_type = false;
     bool ngx_hw_depth = true;
     int roughness_packed = -1;
-    std::string mode_applied;
+    int mode_applied = -1;
     uint64_t frame_count = 0;
     uint32_t unknown_streak = 0;
     ULONGLONG last_eval_tick = 0;
@@ -2496,7 +2485,7 @@ NVSDK_NGX_Result create_d3d12_rr(ID3D12GraphicsCommandList* cmd, NVSDK_NGX_Featu
     ctx->holder->ctx = ctx->runtime_ctx;
 
     ctx->mode_applied = cfg.mode;
-    OnrRrSetFastMode(ctx->runtime_ctx, rr_mode_level(cfg.mode));
+    OnrRrSetFastMode(ctx->runtime_ctx, cfg.mode);
 
     const unsigned int id = g_next_rr_handle.fetch_add(1);
     ctx->handle_id = id;
@@ -2558,7 +2547,7 @@ NVSDK_NGX_Result evaluate_d3d12_rr(ID3D12GraphicsCommandList* cmd, const NVSDK_N
     const openrr::pe::Config cfg = openrr::pe::current_config();
     if (cfg.mode != ctx.mode_applied) {
         ctx.mode_applied = cfg.mode;
-        OnrRrSetFastMode(ctx.runtime_ctx, rr_mode_level(cfg.mode));
+        OnrRrSetFastMode(ctx.runtime_ctx, cfg.mode);
     }
 
     OnrRrFrame frame{};
@@ -2998,7 +2987,7 @@ NVSDK_NGX_Result create_vk_rr_feature(VkDevice dev, const RrCreateParams& create
 
     const openrr::pe::Config cfg = openrr::pe::current_config();
     ctx->mode_applied = cfg.mode;
-    OnrRrSetFastMode(ctx->runtime_ctx, rr_mode_level(cfg.mode));
+    OnrRrSetFastMode(ctx->runtime_ctx, cfg.mode);
 
     const unsigned int id = g_next_rr_handle.fetch_add(1);
     ctx->handle_id = id;
@@ -3066,7 +3055,7 @@ NVSDK_NGX_Result RR_NGX_MSABI hk_vk_evaluate(VkCommandBuffer cmd, const NVSDK_NG
     const openrr::pe::Config cfg = openrr::pe::current_config();
     if (cfg.mode != ctx.mode_applied) {
         ctx.mode_applied = cfg.mode;
-        OnrRrSetFastMode(ctx.runtime_ctx, rr_mode_level(cfg.mode));
+        OnrRrSetFastMode(ctx.runtime_ctx, cfg.mode);
     }
 
     OnrRrFrame frame{};

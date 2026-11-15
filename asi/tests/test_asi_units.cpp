@@ -135,13 +135,21 @@ static int test_key_parsing() {
         const std::string en_after = ini2.get("OpenRR", "Enabled", "true");
         const std::string mode_after = ini2.get("OpenRR", "Mode", "");
         const openrr::pe::Config cfg_after = openrr::pe::load_config_file(openrr::u8::text(tmp_ini));
+        ini2.set("OpenRR", "Mode", "Fast");
+        ini2.save();
+        const auto experimental = openrr::pe::load_config_file(openrr::u8::text(tmp_ini));
         std::error_code ec;
         std::filesystem::remove(tmp_ini, ec);
+        if (experimental.mode != 2 || openrr::pe::network_mode_level("2") != 2 ||
+            openrr::pe::network_mode_level("new") != 1) {
+            std::fprintf(stderr, "FAIL: OpenRR experimental mode was not preserved by the INI parser\n");
+            return 1;
+        }
         if (std::string(prof_buf) != "false" || en_before != "false" || en_after != "false" || mode_after != "legacy" ||
-            cfg_before.enabled || cfg_after.enabled || cfg_after.mode != "legacy") {
-            std::fprintf(stderr, "FAIL: R7/R8 BOM/newline test failed (prof='%s' before='%s' after='%s' mode='%s' cfg_en=%d/%d cfg_mode='%s')\n",
+            cfg_before.enabled || cfg_after.enabled || cfg_after.mode != 0) {
+            std::fprintf(stderr, "FAIL: R7/R8 BOM/newline test failed (prof='%s' before='%s' after='%s' mode='%s' cfg_en=%d/%d cfg_mode=%d)\n",
                          prof_buf, en_before.c_str(), en_after.c_str(), mode_after.c_str(),
-                         int(cfg_before.enabled), int(cfg_after.enabled), cfg_after.mode.c_str());
+                         int(cfg_before.enabled), int(cfg_after.enabled), cfg_after.mode);
             return 1;
         }
         std::printf("[PASS] Item R7/R8 (UTF-8 BOM & missing trailing newline in load_config_file + Ini): Enabled='%s', appended Mode='%s'\n",
