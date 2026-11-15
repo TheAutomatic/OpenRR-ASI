@@ -317,6 +317,8 @@ typedef struct NVSDK_NGX_Resource_VK
 #define NVSDK_NGX_Parameter_SpecularAlbedo "DLSS.Input.SpecularAlbedo"
 #define NVSDK_NGX_Parameter_DLSS_Input_Color_Subrect_Base_X "DLSS.Input.Color.Subrect.Base.X"
 #define NVSDK_NGX_Parameter_DLSS_Input_Color_Subrect_Base_Y "DLSS.Input.Color.Subrect.Base.Y"
+#define NVSDK_NGX_Parameter_DLSS_Output_Subrect_Base_X "DLSS.Output.Subrect.Base.X"
+#define NVSDK_NGX_Parameter_DLSS_Output_Subrect_Base_Y "DLSS.Output.Subrect.Base.Y"
 #define NVSDK_NGX_Parameter_DLSS_Input_Depth_Subrect_Base_X "DLSS.Input.Depth.Subrect.Base.X"
 #define NVSDK_NGX_Parameter_DLSS_Input_Depth_Subrect_Base_Y "DLSS.Input.Depth.Subrect.Base.Y"
 #define NVSDK_NGX_Parameter_DLSS_Input_MV_SubrectBase_X "DLSS.Input.MV.Subrect.Base.X"

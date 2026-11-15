@@ -125,8 +125,10 @@ Config g_cfg{};
 
 const char kDefaultIni[] =
     "[OpenRR]\n"
-    "; Enable or disable OpenRR (DLSS Ray Reconstruction on AMD RX 9000 / RDNA4 GPUs).\n"
+    "; Enable or disable OpenRR (DLSS Ray Reconstruction on AMD RX 9000 / RDNA4 and experimental RX 7000 / RDNA3 GPUs).\n"
     "Enabled = true\n\n"
+    "; Experimental D3D12 OptiFG host bridge. Requires openrr-ngx-host.dll via NvngxPath and a restart.\n"
+    "OptiFGHost = false\n\n"
     "; Execution backend for D3D12 games:\n"
     ";   auto   = D3D12 Direct ELF into the game's command list (falls back to Vulkan interop bridge if unavailable)\n"
     ";   d3d12  = D3D12 Direct ELF\n"
@@ -205,8 +207,7 @@ Config load_file(const std::string& path) {
             else if (key == "menukey") c.menu_key = val;
             else if (key == "passoptiscalerkey") { if (auto b = parse_bool(val)) c.pass_optiscaler_key = *b; }
             else if (key == "mode") {
-                if (lval == "new" || lval == "fast" || lval == "1") c.mode = "new";
-                else if (lval == "legacy" || lval == "0") c.mode = "legacy";
+                c.mode = network_mode_level(lval);
             }
             else if (key == "vkinputlayout") {
                 if (lval == "general" || lval == "shader_read" || lval == "read")
@@ -235,6 +236,13 @@ Config load_file(const std::string& path) {
 }
 
 } // namespace
+
+int network_mode_level(const std::string& value) {
+    const auto mode = lower(trim(value));
+    if (mode == "legacy" || mode == "0") return 0;
+    if (mode == "fast" || mode == "experimental" || mode == "2") return 2;
+    return 1;
+}
 
 Config load_config_file(const std::string& path) {
     return load_file(path);

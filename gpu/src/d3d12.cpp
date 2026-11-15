@@ -323,6 +323,8 @@ bool D3dDevice::init(ID3D12Device* dev, Device* compiler, const std::wstring& ca
         check(dev_->CreateCommandQueue(&qd, IID_PPV_ARGS(&q_)), "CreateCommandQueue");
         check(dev_->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&ca_)), "CreateCommandAllocator");
         check(dev_->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, ca_, nullptr, IID_PPV_ARGS(&own_)), "CreateCommandList");
+        q_->SetName(L"OpenRR private queue");
+        own_->SetName(L"OpenRR private list");
         own_->Close();
         check(dev_->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence_)), "CreateFence");
         check(q_->GetTimestampFrequency(&ts_freq_), "GetTimestampFrequency");
@@ -589,7 +591,6 @@ uint64_t D3dDevice::bind(ID3D12GraphicsCommandList* cl, uint32_t slot) {
     }
     bound_ = nullptr;
     dirty_ = false;
-    if (heap_) cl_->SetDescriptorHeaps(1, &heap_);
     cl_->SetComputeRootSignature(rs_);
     return current_serial_;
 }
@@ -639,7 +640,8 @@ Buffer D3dDevice::create(VkDeviceSize size) {
 
 Buffer D3dDevice::create_unzeroed(VkDeviceSize size) {
     Buffer b;
-    ID3D12Resource* r = buffer(dev_, size, D3D12_HEAP_TYPE_DEFAULT, D3D12_RESOURCE_STATE_COMMON, true, true);
+    // Keep CREATE_NOT_ZEROED disabled so freshly allocated buffers are OS-zeroed without cross-queue races.
+    ID3D12Resource* r = buffer(dev_, size, D3D12_HEAP_TYPE_DEFAULT, D3D12_RESOURCE_STATE_COMMON, true, false);
     b.res = r;
     b.addr = r->GetGPUVirtualAddress();
     b.size = size;
@@ -662,9 +664,10 @@ void D3dDevice::staged(const Buffer& b, uint64_t off, uint64_t size, const void*
     if (!cl_ || !cur_ring_ || !cur_ring_map_) throw std::runtime_error("D3dDevice: recording outside bind()");
     const uint64_t at = (ring_off_ + 255) & ~uint64_t(255);
     if (at + size > ring_end_) throw std::runtime_error("D3dDevice: upload ring slot full");
-    if (is_fill)
-        for (uint64_t i = 0; i < size; i += 4) memcpy(cur_ring_map_ + at + i, &value, size_t(std::min<uint64_t>(4, size - i)));
-    else
+    if (is_fill) {
+        std::fill_n(reinterpret_cast<uint32_t*>(cur_ring_map_ + at), size_t(size / 4), value);
+        memcpy(cur_ring_map_ + at + (size & ~uint64_t(3)), &value, size_t(size & 3));
+    } else
         memcpy(cur_ring_map_ + at, data, size_t(size));
     ring_off_ = at + size;
     auto* r = static_cast<ID3D12Resource*>(b.res);
@@ -975,6 +978,13 @@ Kernel D3dDevice::load(const std::string& spv_path, uint32_t subgroup) {
         patched = patch_elf(elf);
     } catch (const std::exception& x) {
         throw std::runtime_error(stem + ": " + x.what());
+    }
+    // the C = 160 levels run fewer windows than there are CUs: WGP mode gives each workgroup all four SIMDs of a WGP, same code
+    // (not on the RX 7000 set: measured there in CU mode)
+    if (std::filesystem::path(spv_path).stem().string().find("160_256") != std::string::npos && spv_path.find("-gfx11") == std::string::npos) {
+        const uint8_t* key = reinterpret_cast<const uint8_t*>("\xa9.wgp_mode");
+        auto it = std::search(patched.begin(), patched.end(), key, key + 10);
+        if (it != patched.end() && it[10] == 0xc2) it[10] = 0xc3;
     }
     AmdElfInfo info;
     info.elf = patched.data();

@@ -8,12 +8,15 @@
 #include "rr_pe_control.hpp"
 #include "rr_pe_crash.hpp"
 #include "rr_pe_d3d12split.hpp"
+#include "rr_d3d12_record.hpp"
+#include "rr_data_paths.hpp"
 #include "rr_pe_log.hpp"
 #include "rr_pe_menu.hpp"
 #include "rr_pe_vkdevice.hpp"
 #include "rr_pe_watchdog.hpp"
 #include "camera_and_sl.hpp"
 #include "opennr_rr_api.h"
+#include "opennr_rr/vk.hpp"
 
 #include <windows.h>
 #include <d3d11.h>
@@ -59,17 +62,6 @@ HMODULE g_opti = nullptr;
 
 struct Range { uintptr_t begin = 0, end = 0; };
 Range g_opti_range{}, g_self_range{};
-
-// Mode = new / fast / legacy (upstream v0.1.5 names). "fast" is the experimental
-// level (OnrRrSetFastMode 2; a runtime or shader set without it runs that as 1).
-// Unknown values default to "new" instead of silently dropping fast mode.
-int rr_mode_level(const std::string& mode) {
-    if (mode == "legacy" || mode == "0") return 0;
-    if (mode == "fast" || mode == "2") return 2;
-    if (mode != "new" && mode != "1")
-        log("OpenRR: unknown Mode '%s', using new (fast level 1)", mode.c_str());
-    return 1;
-}
 
 Range range_of(HMODULE m) {
     if (!m) return {};
@@ -226,13 +218,44 @@ void apply_cmd_sig_to_root(DirectRootArgs& r, const DirectCmdSigInfo* sig) {
     }
 }
 
+struct ObservedTextureBarrier {
+    ID3D12Resource* resource;
+    bool enhanced;
+    UINT before, after;
+    UINT access_before, access_after;
+    UINT flags;
+    D3D12_BARRIER_SUBRESOURCE_RANGE range;
+};
+
 struct DirectListState {
+    // Diagnostic history only. A command list can inherit states from earlier submissions.
+    std::vector<ObservedTextureBarrier> barriers;
+    size_t barrier_cursor = 0;
+
+    void note_barrier(const ObservedTextureBarrier& b) {
+        constexpr size_t capacity = 128;
+        if (barriers.size() < capacity) barriers.push_back(b);
+        else barriers[barrier_cursor] = b;
+        barrier_cursor = (barrier_cursor + 1) % capacity;
+    }
+
+    void clear_barriers() {
+        barriers.clear();
+        barrier_cursor = 0;
+    }
+
+    const ObservedTextureBarrier* last_barrier(const void* resource) const {
+        for (size_t i = 0; i < barriers.size(); ++i) {
+            const size_t pos = (barrier_cursor + barriers.size() - i - 1) % barriers.size();
+            if (barriers[pos].resource == resource) return &barriers[pos];
+        }
+        return nullptr;
+    }
     bool valid = false;
     bool unknown = false;
     UINT heap_count = 0;
     ID3D12DescriptorHeap* heaps[2]{};
     DirectRootArgs compute_root{};
-    DirectRootArgs graphics_root{};
     ID3D12PipelineState* pso = nullptr;
     bool pso_set = false;
     ID3D12StateObject* state_object = nullptr;
@@ -247,9 +270,6 @@ struct DirectListState {
         compute_root.rs = nullptr;
         compute_root.rs_set = false;
         compute_root.clear_bindings();
-        graphics_root.rs = nullptr;
-        graphics_root.rs_set = false;
-        graphics_root.clear_bindings();
         pso = initial;
         pso_set = (initial != nullptr);
         state_object = nullptr;
@@ -300,6 +320,7 @@ void direct_forget_list(void* list) {
     auto it = shard.map.find(list);
     if (it != shard.map.end() && it->second) {
         it->second->reset(nullptr);
+        it->second->clear_barriers();
         it->second->valid = false;
     }
 }
@@ -389,8 +410,6 @@ void apply_direct_execute_indirect(DirectListState* s, void* sig) {
     }
     if (info.pipeline_kind == 2) {
         apply_cmd_sig_to_root(s->compute_root, &info);
-    } else if (info.pipeline_kind == 1) {
-        apply_cmd_sig_to_root(s->graphics_root, &info);
     }
 }
 
@@ -401,7 +420,12 @@ std::atomic<bool> g_alloc_hook_installed{false};
 std::atomic<bool> g_cmd_sig_hook_installed{false};
 std::atomic<bool> g_cmd_sig_hook_ok{false};
 thread_local int t_in_openrr_record = 0;
-thread_local ID3D12GraphicsCommandList* t_record_target = nullptr;
+thread_local int t_in_internal_vk = 0;
+
+struct InternalVkScope {
+    InternalVkScope() { ++t_in_internal_vk; }
+    ~InternalVkScope() { --t_in_internal_vk; }
+};
 
 const GUID kIID_List4 = {0x8754318e, 0xd3a9, 0x4541, {0x98, 0xcf, 0x64, 0x5b, 0x50, 0xdc, 0x48, 0x74}};
 const GUID kIID_Dev4  = {0xe865df17, 0xa9ee, 0x46f9, {0xa4, 0x63, 0x30, 0x98, 0x31, 0x5a, 0xa2, 0xe5}};
@@ -430,19 +454,12 @@ PFN_CL_SetPipelineState real_cl_set_pso = nullptr;
 PFN_CL_ExecuteBundle real_cl_exec_bundle = nullptr;
 PFN_CL_SetDescriptorHeaps real_cl_set_heaps = nullptr;
 PFN_CL_SetComputeRootSignature real_cl_set_compute_rs = nullptr;
-PFN_CL_SetComputeRootSignature real_cl_set_graphics_rs = nullptr;
 PFN_CL_SetComputeRootDescriptorTable real_cl_set_compute_table = nullptr;
-PFN_CL_SetComputeRootDescriptorTable real_cl_set_graphics_table = nullptr;
 PFN_CL_SetComputeRoot32BitConstant real_cl_set_compute_const = nullptr;
-PFN_CL_SetComputeRoot32BitConstant real_cl_set_graphics_const = nullptr;
 PFN_CL_SetComputeRoot32BitConstants real_cl_set_compute_consts = nullptr;
-PFN_CL_SetComputeRoot32BitConstants real_cl_set_graphics_consts = nullptr;
 PFN_CL_SetComputeRootView real_cl_set_compute_cbv = nullptr;
-PFN_CL_SetComputeRootView real_cl_set_graphics_cbv = nullptr;
 PFN_CL_SetComputeRootView real_cl_set_compute_srv = nullptr;
-PFN_CL_SetComputeRootView real_cl_set_graphics_srv = nullptr;
 PFN_CL_SetComputeRootView real_cl_set_compute_uav = nullptr;
-PFN_CL_SetComputeRootView real_cl_set_graphics_uav = nullptr;
 PFN_CL_ExecuteIndirect real_cl_exec_indirect = nullptr;
 PFN_CL_SetPipelineState1 real_cl_set_pso1 = nullptr;
 PFN_Dev_CreateCommandList real_dev_create_cl = nullptr;
@@ -480,24 +497,22 @@ HRESULT STDMETHODCALLTYPE hk_cl_reset(ID3D12GraphicsCommandList* cl, ID3D12Comma
     const HRESULT hr = real_cl_reset(cl, alloc, pso);
     if (SUCCEEDED(hr) && cl && !t_in_openrr_record) {
         OnrRrNotifyD3d12ListReset(cl, alloc);
-        direct_state_of(cl)->reset(pso);
+        DirectListState* state = direct_state_of(cl);
+        state->reset(pso);
+        state->clear_barriers();
     }
     return hr;
 }
 
 void STDMETHODCALLTYPE hk_cl_clear_state(ID3D12GraphicsCommandList* cl, ID3D12PipelineState* pso) {
-    if (t_in_openrr_record) {
-        if (!t_record_target) t_record_target = cl;
-    } else if (cl) {
+    if (cl && !t_in_openrr_record) {
         direct_state_of(cl)->clear_state(pso);
     }
     real_cl_clear_state(cl, pso);
 }
 
 void STDMETHODCALLTYPE hk_cl_set_pso(ID3D12GraphicsCommandList* cl, ID3D12PipelineState* pso) {
-    if (t_in_openrr_record) {
-        if (!t_record_target) t_record_target = cl;
-    } else if (cl) {
+    if (cl && !t_in_openrr_record) {
         DirectListState* s = direct_state_of(cl);
         s->pso = pso;
         s->pso_set = true;
@@ -507,9 +522,7 @@ void STDMETHODCALLTYPE hk_cl_set_pso(ID3D12GraphicsCommandList* cl, ID3D12Pipeli
 }
 
 void STDMETHODCALLTYPE hk_cl_set_pso1(ID3D12GraphicsCommandList* cl, ID3D12StateObject* so) {
-    if (t_in_openrr_record) {
-        if (!t_record_target) t_record_target = cl;
-    } else if (cl) {
+    if (cl && !t_in_openrr_record) {
         DirectListState* s = direct_state_of(cl);
         s->state_object = so;
         s->so_set = true;
@@ -519,9 +532,7 @@ void STDMETHODCALLTYPE hk_cl_set_pso1(ID3D12GraphicsCommandList* cl, ID3D12State
 }
 
 void STDMETHODCALLTYPE hk_cl_exec_bundle(ID3D12GraphicsCommandList* cl, ID3D12GraphicsCommandList* bundle) {
-    if (t_in_openrr_record) {
-        if (!t_record_target) t_record_target = cl;
-    } else if (cl) {
+    if (cl && !t_in_openrr_record) {
         DirectListState* s = direct_state_of(cl);
         const DirectListState* bs = (bundle && bundle != cl) ? direct_state_of(bundle) : nullptr;
         // Point the thread-local cache back at the primary command list (Item #1).
@@ -540,16 +551,6 @@ void STDMETHODCALLTYPE hk_cl_exec_bundle(ID3D12GraphicsCommandList* cl, ID3D12Gr
                             if (dm & (1ull << off)) s->compute_root.constant(i, off, (*br.const_vals[i])[off]);
                     }
                 }
-                const DirectRootArgs& bgr = bs->graphics_root;
-                if (bgr.rs_set) s->graphics_root.set_rs(bgr.rs);
-                for (UINT i = 0; i < 64; ++i) {
-                    if (bgr.mask & (1ull << i)) s->graphics_root.set(i, bgr.kind[i], bgr.value[i]);
-                    if ((bgr.const_param_mask & (1ull << i)) && bgr.const_vals[i]) {
-                        uint64_t dm = bgr.const_dword_mask[i];
-                        for (UINT off = 0; off < 64; ++off)
-                            if (dm & (1ull << off)) s->graphics_root.constant(i, off, (*bgr.const_vals[i])[off]);
-                    }
-                }
                 if (bs->pso_set) { s->pso = bs->pso; s->pso_set = true; s->so_last = false; }
                 if (bs->so_set) { s->state_object = bs->state_object; s->so_set = true; s->so_last = bs->so_last; }
             }
@@ -559,9 +560,7 @@ void STDMETHODCALLTYPE hk_cl_exec_bundle(ID3D12GraphicsCommandList* cl, ID3D12Gr
 }
 
 void STDMETHODCALLTYPE hk_cl_set_heaps(ID3D12GraphicsCommandList* cl, UINT count, ID3D12DescriptorHeap* const* heaps) {
-    if (t_in_openrr_record) {
-        if (!t_record_target) t_record_target = cl;
-    } else if (cl) {
+    if (cl && !t_in_openrr_record) {
         DirectListState* s = direct_state_of(cl);
         const UINT n = std::min<UINT>(count, 2u);
         bool same = (n == s->heap_count);
@@ -570,8 +569,6 @@ void STDMETHODCALLTYPE hk_cl_set_heaps(ID3D12GraphicsCommandList* cl, UINT count
             for (UINT i = 0; i < 64; ++i) {
                 if ((s->compute_root.mask & (1ull << i)) && s->compute_root.kind[i] == 1)
                     s->compute_root.mask &= ~(1ull << i);
-                if ((s->graphics_root.mask & (1ull << i)) && s->graphics_root.kind[i] == 1)
-                    s->graphics_root.mask &= ~(1ull << i);
             }
         }
         s->heap_count = n;
@@ -580,64 +577,67 @@ void STDMETHODCALLTYPE hk_cl_set_heaps(ID3D12GraphicsCommandList* cl, UINT count
     real_cl_set_heaps(cl, count, heaps);
 }
 
+using LegacyBarrierFn = void(STDMETHODCALLTYPE*)(ID3D12GraphicsCommandList*, UINT, const D3D12_RESOURCE_BARRIER*);
+using EnhancedBarrierFn = void(STDMETHODCALLTYPE*)(ID3D12GraphicsCommandList7*, UINT32, const D3D12_BARRIER_GROUP*);
+LegacyBarrierFn real_cl_barrier = nullptr;
+EnhancedBarrierFn real_cl_barrier7 = nullptr;
+
+void STDMETHODCALLTYPE hk_cl_barrier(ID3D12GraphicsCommandList* cl, UINT count, const D3D12_RESOURCE_BARRIER* barriers) {
+    if (cl && barriers && !t_in_openrr_record) {
+        auto* state = direct_state_of(cl);
+        for (UINT i = 0; i < count; ++i) {
+            const auto& b = barriers[i];
+            if (b.Type == D3D12_RESOURCE_BARRIER_TYPE_TRANSITION) {
+                const auto& t = b.Transition;
+                state->note_barrier({t.pResource, false, UINT(t.StateBefore), UINT(t.StateAfter),
+                                     0, 0, UINT(b.Flags), {t.Subresource}});
+            } else if (b.Type == D3D12_RESOURCE_BARRIER_TYPE_ALIASING) {
+                state->clear_barriers();
+            }
+        }
+    }
+    real_cl_barrier(cl, count, barriers);
+}
+
+void STDMETHODCALLTYPE hk_cl_barrier7(ID3D12GraphicsCommandList7* cl, UINT32 count, const D3D12_BARRIER_GROUP* groups) {
+    if (cl && groups && !t_in_openrr_record) {
+        auto* state = direct_state_of(static_cast<ID3D12GraphicsCommandList*>(cl));
+        for (UINT32 i = 0; i < count; ++i) {
+            const auto& group = groups[i];
+            if (group.Type != D3D12_BARRIER_TYPE_TEXTURE || !group.pTextureBarriers) continue;
+            for (UINT32 j = 0; j < group.NumBarriers; ++j) {
+                const auto& b = group.pTextureBarriers[j];
+                state->note_barrier({b.pResource, true, UINT(b.LayoutBefore), UINT(b.LayoutAfter),
+                                     UINT(b.AccessBefore), UINT(b.AccessAfter), UINT(b.Flags), b.Subresources});
+            }
+        }
+    }
+    real_cl_barrier7(cl, count, groups);
+}
+
 void STDMETHODCALLTYPE hk_cl_set_compute_rs(ID3D12GraphicsCommandList* cl, ID3D12RootSignature* rs) {
-    if (t_in_openrr_record) {
-        if (!t_record_target) t_record_target = cl;
-    } else if (cl) {
+    if (cl && !t_in_openrr_record) {
         direct_state_of(cl)->compute_root.set_rs(rs);
     }
     real_cl_set_compute_rs(cl, rs);
 }
 
-void STDMETHODCALLTYPE hk_cl_set_graphics_rs(ID3D12GraphicsCommandList* cl, ID3D12RootSignature* rs) {
-    if (t_in_openrr_record) {
-        if (!t_record_target) t_record_target = cl;
-    } else if (cl) {
-        direct_state_of(cl)->graphics_root.set_rs(rs);
-    }
-    real_cl_set_graphics_rs(cl, rs);
-}
-
 void STDMETHODCALLTYPE hk_cl_set_compute_table(ID3D12GraphicsCommandList* cl, UINT index, D3D12_GPU_DESCRIPTOR_HANDLE h) {
-    if (t_in_openrr_record) {
-        if (!t_record_target) t_record_target = cl;
-    } else if (cl) {
+    if (cl && !t_in_openrr_record) {
         direct_state_of(cl)->compute_root.set(index, 1, h.ptr);
     }
     real_cl_set_compute_table(cl, index, h);
 }
 
-void STDMETHODCALLTYPE hk_cl_set_graphics_table(ID3D12GraphicsCommandList* cl, UINT index, D3D12_GPU_DESCRIPTOR_HANDLE h) {
-    if (t_in_openrr_record) {
-        if (!t_record_target) t_record_target = cl;
-    } else if (cl) {
-        direct_state_of(cl)->graphics_root.set(index, 1, h.ptr);
-    }
-    real_cl_set_graphics_table(cl, index, h);
-}
-
 void STDMETHODCALLTYPE hk_cl_set_compute_const(ID3D12GraphicsCommandList* cl, UINT index, UINT val, UINT offset) {
-    if (t_in_openrr_record) {
-        if (!t_record_target) t_record_target = cl;
-    } else if (cl) {
+    if (cl && !t_in_openrr_record) {
         direct_state_of(cl)->compute_root.constant(index, offset, val);
     }
     real_cl_set_compute_const(cl, index, val, offset);
 }
 
-void STDMETHODCALLTYPE hk_cl_set_graphics_const(ID3D12GraphicsCommandList* cl, UINT index, UINT val, UINT offset) {
-    if (t_in_openrr_record) {
-        if (!t_record_target) t_record_target = cl;
-    } else if (cl) {
-        direct_state_of(cl)->graphics_root.constant(index, offset, val);
-    }
-    real_cl_set_graphics_const(cl, index, val, offset);
-}
-
 void STDMETHODCALLTYPE hk_cl_set_compute_consts(ID3D12GraphicsCommandList* cl, UINT index, UINT count, const void* data, UINT offset) {
-    if (t_in_openrr_record) {
-        if (!t_record_target) t_record_target = cl;
-    } else if (cl && data) {
+    if (cl && data && !t_in_openrr_record) {
         DirectRootArgs& r = direct_state_of(cl)->compute_root;
         const auto* v = static_cast<const uint32_t*>(data);
         for (UINT i = 0; i < count; ++i) r.constant(index, offset + i, v[i]);
@@ -645,77 +645,31 @@ void STDMETHODCALLTYPE hk_cl_set_compute_consts(ID3D12GraphicsCommandList* cl, U
     real_cl_set_compute_consts(cl, index, count, data, offset);
 }
 
-void STDMETHODCALLTYPE hk_cl_set_graphics_consts(ID3D12GraphicsCommandList* cl, UINT index, UINT count, const void* data, UINT offset) {
-    if (t_in_openrr_record) {
-        if (!t_record_target) t_record_target = cl;
-    } else if (cl && data) {
-        DirectRootArgs& r = direct_state_of(cl)->graphics_root;
-        const auto* v = static_cast<const uint32_t*>(data);
-        for (UINT i = 0; i < count; ++i) r.constant(index, offset + i, v[i]);
-    }
-    real_cl_set_graphics_consts(cl, index, count, data, offset);
-}
-
 void STDMETHODCALLTYPE hk_cl_set_compute_cbv(ID3D12GraphicsCommandList* cl, UINT index, D3D12_GPU_VIRTUAL_ADDRESS va) {
-    if (t_in_openrr_record) {
-        if (!t_record_target) t_record_target = cl;
-    } else if (cl) {
+    if (cl && !t_in_openrr_record) {
         direct_state_of(cl)->compute_root.set(index, 2, va);
     }
     real_cl_set_compute_cbv(cl, index, va);
 }
 
-void STDMETHODCALLTYPE hk_cl_set_graphics_cbv(ID3D12GraphicsCommandList* cl, UINT index, D3D12_GPU_VIRTUAL_ADDRESS va) {
-    if (t_in_openrr_record) {
-        if (!t_record_target) t_record_target = cl;
-    } else if (cl) {
-        direct_state_of(cl)->graphics_root.set(index, 2, va);
-    }
-    real_cl_set_graphics_cbv(cl, index, va);
-}
-
 void STDMETHODCALLTYPE hk_cl_set_compute_srv(ID3D12GraphicsCommandList* cl, UINT index, D3D12_GPU_VIRTUAL_ADDRESS va) {
-    if (t_in_openrr_record) {
-        if (!t_record_target) t_record_target = cl;
-    } else if (cl) {
+    if (cl && !t_in_openrr_record) {
         direct_state_of(cl)->compute_root.set(index, 3, va);
     }
     real_cl_set_compute_srv(cl, index, va);
 }
 
-void STDMETHODCALLTYPE hk_cl_set_graphics_srv(ID3D12GraphicsCommandList* cl, UINT index, D3D12_GPU_VIRTUAL_ADDRESS va) {
-    if (t_in_openrr_record) {
-        if (!t_record_target) t_record_target = cl;
-    } else if (cl) {
-        direct_state_of(cl)->graphics_root.set(index, 3, va);
-    }
-    real_cl_set_graphics_srv(cl, index, va);
-}
-
 void STDMETHODCALLTYPE hk_cl_set_compute_uav(ID3D12GraphicsCommandList* cl, UINT index, D3D12_GPU_VIRTUAL_ADDRESS va) {
-    if (t_in_openrr_record) {
-        if (!t_record_target) t_record_target = cl;
-    } else if (cl) {
+    if (cl && !t_in_openrr_record) {
         direct_state_of(cl)->compute_root.set(index, 4, va);
     }
     real_cl_set_compute_uav(cl, index, va);
 }
 
-void STDMETHODCALLTYPE hk_cl_set_graphics_uav(ID3D12GraphicsCommandList* cl, UINT index, D3D12_GPU_VIRTUAL_ADDRESS va) {
-    if (t_in_openrr_record) {
-        if (!t_record_target) t_record_target = cl;
-    } else if (cl) {
-        direct_state_of(cl)->graphics_root.set(index, 4, va);
-    }
-    real_cl_set_graphics_uav(cl, index, va);
-}
-
 void STDMETHODCALLTYPE hk_cl_exec_indirect(ID3D12GraphicsCommandList* cl, ID3D12CommandSignature* sig,
                                            UINT max_count, ID3D12Resource* arg_buf, UINT64 arg_offset,
                                            ID3D12Resource* count_buf, UINT64 count_offset) {
-    if (t_in_openrr_record) {
-        if (!t_record_target) t_record_target = cl;
-    } else if (cl) {
+    if (cl && !t_in_openrr_record) {
         apply_direct_execute_indirect(direct_state_of(cl), sig);
     }
     real_cl_exec_indirect(cl, sig, max_count, arg_buf, arg_offset, count_buf, count_offset);
@@ -743,7 +697,9 @@ HRESULT STDMETHODCALLTYPE hk_dev_create_cl(ID3D12Device* dev, UINT mask, D3D12_C
         ID3D12GraphicsCommandList* list = nullptr;
         if (SUCCEEDED(static_cast<IUnknown*>(*out)->QueryInterface(IID_PPV_ARGS(&list))) && list) {
             OnrRrNotifyD3d12ListReset(list, alloc);
-            direct_state_of(list)->reset(pso);
+            DirectListState* state = direct_state_of(list);
+            state->reset(pso);
+            state->clear_barriers();
             list->Release();
         }
     }
@@ -757,7 +713,9 @@ HRESULT STDMETHODCALLTYPE hk_dev4_create_cl1(void* dev4, UINT mask, D3D12_COMMAN
         ID3D12GraphicsCommandList* list = nullptr;
         if (SUCCEEDED(static_cast<IUnknown*>(*out)->QueryInterface(IID_PPV_ARGS(&list))) && list) {
             OnrRrNotifyD3d12ListReset(list, nullptr);
-            direct_state_of(list)->reset(nullptr);
+            DirectListState* state = direct_state_of(list);
+            state->reset(nullptr);
+            state->clear_barriers();
             list->Release();
         }
     }
@@ -850,19 +808,12 @@ bool ensure_direct_state_hooks(ID3D12Device* dev, ID3D12GraphicsCommandList* cl 
         {"ExecuteBundle",                     27, reinterpret_cast<void*>(&hk_cl_exec_bundle),       reinterpret_cast<void**>(&real_cl_exec_bundle)},
         {"SetDescriptorHeaps",                28, reinterpret_cast<void*>(&hk_cl_set_heaps),          reinterpret_cast<void**>(&real_cl_set_heaps)},
         {"SetComputeRootSignature",           29, reinterpret_cast<void*>(&hk_cl_set_compute_rs),     reinterpret_cast<void**>(&real_cl_set_compute_rs)},
-        {"SetGraphicsRootSignature",          30, reinterpret_cast<void*>(&hk_cl_set_graphics_rs),    reinterpret_cast<void**>(&real_cl_set_graphics_rs)},
         {"SetComputeRootDescriptorTable",     31, reinterpret_cast<void*>(&hk_cl_set_compute_table),  reinterpret_cast<void**>(&real_cl_set_compute_table)},
-        {"SetGraphicsRootDescriptorTable",    32, reinterpret_cast<void*>(&hk_cl_set_graphics_table), reinterpret_cast<void**>(&real_cl_set_graphics_table)},
         {"SetComputeRoot32BitConstant",       33, reinterpret_cast<void*>(&hk_cl_set_compute_const),  reinterpret_cast<void**>(&real_cl_set_compute_const)},
-        {"SetGraphicsRoot32BitConstant",      34, reinterpret_cast<void*>(&hk_cl_set_graphics_const), reinterpret_cast<void**>(&real_cl_set_graphics_const)},
         {"SetComputeRoot32BitConstants",      35, reinterpret_cast<void*>(&hk_cl_set_compute_consts), reinterpret_cast<void**>(&real_cl_set_compute_consts)},
-        {"SetGraphicsRoot32BitConstants",     36, reinterpret_cast<void*>(&hk_cl_set_graphics_consts),reinterpret_cast<void**>(&real_cl_set_graphics_consts)},
         {"SetComputeRootConstantBufferView",  37, reinterpret_cast<void*>(&hk_cl_set_compute_cbv),    reinterpret_cast<void**>(&real_cl_set_compute_cbv)},
-        {"SetGraphicsRootConstantBufferView", 38, reinterpret_cast<void*>(&hk_cl_set_graphics_cbv),   reinterpret_cast<void**>(&real_cl_set_graphics_cbv)},
         {"SetComputeRootShaderResourceView",  39, reinterpret_cast<void*>(&hk_cl_set_compute_srv),    reinterpret_cast<void**>(&real_cl_set_compute_srv)},
-        {"SetGraphicsRootShaderResourceView", 40, reinterpret_cast<void*>(&hk_cl_set_graphics_srv),   reinterpret_cast<void**>(&real_cl_set_graphics_srv)},
         {"SetComputeRootUnorderedAccessView", 41, reinterpret_cast<void*>(&hk_cl_set_compute_uav),    reinterpret_cast<void**>(&real_cl_set_compute_uav)},
-        {"SetGraphicsRootUnorderedAccessView",42, reinterpret_cast<void*>(&hk_cl_set_graphics_uav),   reinterpret_cast<void**>(&real_cl_set_graphics_uav)},
         {"ExecuteIndirect",                   59, reinterpret_cast<void*>(&hk_cl_exec_indirect),      reinterpret_cast<void**>(&real_cl_exec_indirect)},
     };
 
@@ -887,6 +838,24 @@ bool ensure_direct_state_hooks(ID3D12Device* dev, ID3D12GraphicsCommandList* cl 
     if (vt[2] != g_hooked_ca_release_fn && in_d3d12_core_module(vt[2])) {
         if (MH_CreateHook(vt[2], reinterpret_cast<void*>(&hk_cl_release), reinterpret_cast<void**>(&real_cl_release)) == MH_OK)
             MH_EnableHook(vt[2]);
+    }
+
+    if (openrr::pe::d3d12_diagnostics_enabled()) {
+        auto install_barrier = [](void* fn, void* detour, void** original) {
+            return in_d3d12_core_module(fn) && MH_CreateHook(fn, detour, original) == MH_OK &&
+                   MH_EnableHook(fn) == MH_OK;
+        };
+        const bool legacy = install_barrier(vt[26], reinterpret_cast<void*>(&hk_cl_barrier),
+                                            reinterpret_cast<void**>(&real_cl_barrier));
+        ID3D12GraphicsCommandList7* cl7 = nullptr;
+        bool enhanced = false;
+        if (SUCCEEDED(cl->QueryInterface(IID_PPV_ARGS(&cl7)))) {
+            void** vt7 = *reinterpret_cast<void***>(cl7);
+            enhanced = install_barrier(vt7[80], reinterpret_cast<void*>(&hk_cl_barrier7),
+                                       reinterpret_cast<void**>(&real_cl_barrier7));
+            cl7->Release();
+        }
+        log("[d3d12 diag] host barrier hooks legacy=%d enhanced=%d", int(legacy), int(enhanced));
     }
 
     IUnknown* cl4 = nullptr;
@@ -930,16 +899,37 @@ bool ensure_direct_state_hooks(ID3D12Device* dev, ID3D12GraphicsCommandList* cl 
     return all_ok;
 }
 
-void restore_direct_state(ID3D12GraphicsCommandList* cmd, ID3D12GraphicsCommandList* target) {
-    if (!cmd) return;
-    ID3D12GraphicsCommandList* key = target ? target : cmd;
-    const DirectListState* s = direct_state_of(key);
-    if (!s || !s->valid || s->unknown) return;
+void log_direct_texture_barriers(ID3D12GraphicsCommandList* cmd, const OnrRrFrame& frame) {
+    const auto* state = direct_state_of(cmd);
+    const std::pair<const char*, const OnrRrTexture*> inputs[] = {
+        {"Color", &frame.color}, {"Output", &frame.output}, {"Depth", &frame.depth}, {"MV", &frame.motion},
+        {"DiffuseAlbedo", &frame.diffuse_albedo}, {"SpecularAlbedo", &frame.specular_albedo},
+        {"Normals", &frame.normals}, {"Roughness", &frame.roughness},
+        {"HitDistance", &frame.specular_hit_distance}, {"DisocclusionMask", &frame.disocclusion_mask},
+    };
+    for (const auto& [name, tex] : inputs) {
+        if (!tex->resource) continue;
+        const auto* b = state->last_barrier(tex->resource);
+        if (!b) {
+            log("[d3d12 diag] %s resource=%p declared=0x%X last_host_barrier=unknown", name, tex->resource, tex->state);
+        } else if (b->enhanced) {
+            log("[d3d12 diag] %s resource=%p declared=0x%X enhanced layout=%u->%u access=0x%X->0x%X"
+                " flags=0x%X range=%u,%u,%u,%u,%u,%u",
+                name, tex->resource, tex->state, b->before, b->after, b->access_before, b->access_after, b->flags,
+                b->range.IndexOrFirstMipLevel, b->range.NumMipLevels, b->range.FirstArraySlice,
+                b->range.NumArraySlices, b->range.FirstPlane, b->range.NumPlanes);
+        } else {
+            log("[d3d12 diag] %s resource=%p declared=0x%X legacy state=0x%X->0x%X flags=0x%X subresource=%u",
+                name, tex->resource, tex->state, b->before, b->after, b->flags, b->range.IndexOrFirstMipLevel);
+        }
+    }
+}
+
+bool restore_direct_state(ID3D12GraphicsCommandList* cmd) {
+    const DirectListState* s = direct_state_of(cmd);
+    if (!s || !s->valid || s->unknown) return false;
 
     ++t_in_openrr_record;
-    if (s->heap_count > 0 && s->heaps[0]) {
-        cmd->SetDescriptorHeaps(s->heap_count, s->heaps);
-    }
     const DirectRootArgs& r = s->compute_root;
     if (r.rs_set && r.rs) {
         cmd->SetComputeRootSignature(r.rs);
@@ -966,16 +956,6 @@ void restore_direct_state(ID3D12GraphicsCommandList* cmd, ID3D12GraphicsCommandL
             }
         }
     }
-    const DirectRootArgs& gr = s->graphics_root;
-    // OpenRR never touches graphics root signature, graphics root constants, or graphics root CBV/SRV/UAVs;
-    // only SetDescriptorHeaps invalidates bound graphics descriptor tables (kind == 1).
-    if (s->heap_count > 0 && s->heaps[0] && gr.mask) {
-        for (UINT i = 0; i < 64; ++i) {
-            if ((gr.mask & (1ull << i)) && gr.kind[i] == 1) {
-                cmd->SetGraphicsRootDescriptorTable(i, {gr.value[i]});
-            }
-        }
-    }
     if (s->so_last && s->so_set && s->state_object) {
         ID3D12GraphicsCommandList4* cl4 = nullptr;
         if (SUCCEEDED(cmd->QueryInterface(kIID_List4, reinterpret_cast<void**>(&cl4))) && cl4) {
@@ -986,6 +966,7 @@ void restore_direct_state(ID3D12GraphicsCommandList* cmd, ID3D12GraphicsCommandL
         cmd->SetPipelineState(s->pso);
     }
     --t_in_openrr_record;
+    return true;
 }
 
 // ---- Runtime API & nvngx_dlssd.dll discovery ----
@@ -1035,12 +1016,15 @@ std::wstring find_dlssd_locked(const char** out_source) {
     std::error_code ec;
     const std::filesystem::path opti_dir = wide_from_utf8(openrr::pe::module_folder());
 
-    for (const wchar_t* sub : {L"openrr-amd", L"."}) {
-        const auto cand = opti_dir / sub / L"nvngx_dlssd.dll";
-        if (std::filesystem::exists(cand, ec)) {
-            if (out_source) *out_source = "OptiScaler folder";
-            return cand.wstring();
-        }
+    const auto data_dir = openrr::pe::installed_data_dir(opti_dir, L"nvngx_dlssd.dll");
+    if (!data_dir.empty()) {
+        if (out_source) *out_source = "installed OpenRR data folder";
+        return (data_dir / L"nvngx_dlssd.dll").wstring();
+    }
+    const auto beside_host = opti_dir / L"nvngx_dlssd.dll";
+    if (std::filesystem::exists(beside_host, ec)) {
+        if (out_source) *out_source = "OptiScaler folder";
+        return beside_host.wstring();
     }
 
     if (HMODULE loaded = GetModuleHandleW(L"nvngx_dlssd.dll")) {
@@ -1101,8 +1085,8 @@ std::wstring resolve_data_dir() {
             log("[openrr] note: legacy %ls\\ directory detected and ignored; using openrr-amd\\", legacy_name);
         }
     }
-    if (std::filesystem::exists(opti_dir / L"openrr-amd" / L"shaders", ec))
-        return (opti_dir / L"openrr-amd").wstring();
+    const auto data_dir = openrr::pe::installed_data_dir(opti_dir, L"shaders");
+    if (!data_dir.empty()) return data_dir.wstring();
 
     wchar_t self_buf[MAX_PATH]{};
     if (g_self && GetModuleFileNameW(g_self, self_buf, MAX_PATH) != 0) {
@@ -1177,15 +1161,10 @@ bool check_dlssd_version_310_9_1(const std::wstring& path, std::string& why) {
 
 } // namespace
 
-namespace onr {
-VkPhysicalDevice pick_vk_physical_device(const std::vector<VkPhysicalDevice>& devs, const uint8_t* luid,
-                                         std::string* out_name = nullptr, uint32_t* out_api_version = nullptr,
-                                         bool* out_is_amd = nullptr);
-} // namespace onr
-
 namespace {
 
 bool check_gpu_cheap_vulkan(const LUID* luid, std::string& out_gpu_name, std::string& why) {
+    InternalVkScope vk_scope;
     openrr::pe::vulkan_entry_points();
     VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
     app.apiVersion = VK_API_VERSION_1_3;
@@ -1232,26 +1211,34 @@ bool check_gpu_cheap_vulkan(const LUID* luid, std::string& out_gpu_name, std::st
             return std::strcmp(x.extensionName, name) == 0;
         });
     };
-    if (!has_ext(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME)) {
-        why = picked_name + (picked_is_amd ? ": no cooperative matrices (needs an RDNA4 GPU)" : ": not an AMD GPU");
+    const bool has_cm = has_ext(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME);
+    if (!has_cm) {
+        why = picked_name + (picked_is_amd ? ": no cooperative matrices (needs an RDNA4 or RDNA3 GPU)" : ": not an AMD GPU");
         return false;
     }
-    if (!has_ext(VK_EXT_SHADER_FLOAT8_EXTENSION_NAME)) {
-        why = picked_name + (picked_is_amd ? ": not an RDNA4 GPU (RX 7000 and RX 6000 support comes later)" : ": not an AMD GPU");
-        return false;
-    }
+    const bool has_f8 = has_ext(VK_EXT_SHADER_FLOAT8_EXTENSION_NAME);
 
     VkPhysicalDeviceShaderFloat8FeaturesEXT f8{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT8_FEATURES_EXT};
-    VkPhysicalDeviceCooperativeMatrixFeaturesKHR cm{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR, &f8};
+    VkPhysicalDeviceCooperativeMatrixFeaturesKHR cm{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR,
+                                                    has_f8 ? &f8 : nullptr};
     VkPhysicalDeviceFeatures2 f2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &cm};
     vkGetPhysicalDeviceFeatures2(picked, &f2);
     if (!cm.cooperativeMatrix) {
-        why = picked_name + ": no cooperative matrices (needs an RDNA4 GPU)";
+        why = picked_name + ": no cooperative matrices (needs an RDNA4 or RDNA3 GPU)";
         return false;
     }
-    if (!f8.shaderFloat8 || !f8.shaderFloat8CooperativeMatrix) {
-        why = picked_name + ": not an RDNA4 GPU (RX 7000 and RX 6000 support comes later)";
-        return false;
+    const bool fp8_coopmat = has_f8 && f8.shaderFloat8 && f8.shaderFloat8CooperativeMatrix;
+    if (!fp8_coopmat) {
+        if (!picked_is_amd) {
+            why = picked_name + ": not an AMD GPU";
+            return false;
+        }
+        std::error_code ec;
+        const std::filesystem::path gfx11_dir = std::filesystem::path(resolve_data_dir()) / L"shaders-gfx11";
+        if (!std::filesystem::is_directory(gfx11_dir, ec)) {
+            why = picked_name + ": not an RDNA4 GPU, and no RDNA3 kernels (openrr-amd\\shaders-gfx11)";
+            return false;
+        }
     }
     return true;
 }
@@ -1446,7 +1433,8 @@ void read_ini_barriers() {
     };
     g_barrier_color = get("ColorResourceBarrier");
     g_barrier_depth = get("DepthResourceBarrier");
-    g_barrier_mv = get("MVResourceBarrier");
+    g_barrier_mv = get("MotionVectorResourceBarrier");
+    if (g_barrier_mv < 0) g_barrier_mv = get("MVResourceBarrier");
     g_barrier_output = get("OutputResourceBarrier");
 }
 
@@ -1620,11 +1608,10 @@ NVSDK_NGX_Resource_VK* get_vk_res(const NVSDK_NGX_Parameter& p, const char* k1, 
 void read_create_sizes(const NVSDK_NGX_Parameter* p, uint32_t& rw, uint32_t& rh, uint32_t& ow, uint32_t& oh) {
     rw = rh = ow = oh = 0;
     if (!p) return;
-    unsigned int w = 0, h = 0, sub_w = 0, sub_h = 0, out_w = 0, out_h = 0;
+    unsigned int w = 0, h = 0, out_w = 0, out_h = 0;
     p->Get(NVSDK_NGX_Parameter_Width, &w);
     p->Get(NVSDK_NGX_Parameter_Height, &h);
-    p->Get(NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Width, &sub_w);
-    p->Get(NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Height, &sub_h);
+    // Render.Subrect.Dimensions belongs to Evaluate and can still describe the previous feature after a resize.
     p->Get(NVSDK_NGX_Parameter_OutWidth, &out_w);
     p->Get(NVSDK_NGX_Parameter_OutHeight, &out_h);
 
@@ -1636,14 +1623,36 @@ void read_create_sizes(const NVSDK_NGX_Parameter* p, uint32_t& rw, uint32_t& rh,
     if (w && h && out_w && out_h) {
         ow = std::max(w, out_w);
         oh = std::max(h, out_h);
-        rw = sub_w ? sub_w : std::min(w, out_w);
-        rh = sub_h ? sub_h : std::min(h, out_h);
+        rw = std::min(w, out_w);
+        rh = std::min(h, out_h);
     } else {
-        rw = sub_w ? sub_w : (w ? w : out_w);
-        rh = sub_h ? sub_h : (h ? h : out_h);
+        rw = w ? w : out_w;
+        rh = h ? h : out_h;
         ow = out_w ? out_w : rw;
         oh = out_h ? out_h : rh;
     }
+}
+
+struct RrCreateParams {
+    uint32_t max_render_w = 0, max_render_h = 0;
+    uint32_t output_w = 0, output_h = 0;
+    uint32_t flags = 0;
+    int hw_depth = -1;
+    int roughness_packed = -1;
+};
+
+RrCreateParams read_create_params(const NVSDK_NGX_Parameter& params) {
+    // Streamline can reuse the parameter table for settings queries while RR is initializing.
+    RrCreateParams create;
+    read_create_sizes(&params, create.max_render_w, create.max_render_h, create.output_w, create.output_h);
+    int value = 0;
+    if (params.Get(NVSDK_NGX_Parameter_DLSS_Feature_Create_Flags, &value) == NVSDK_NGX_Result_Success)
+        create.flags = uint32_t(value);
+    if (params.Get(NVSDK_NGX_Parameter_Use_HW_Depth, &value) == NVSDK_NGX_Result_Success)
+        create.hw_depth = value == NVSDK_NGX_DLSS_Depth_Type_HW;
+    if (params.Get(NVSDK_NGX_Parameter_DLSS_Roughness_Mode, &value) == NVSDK_NGX_Result_Success)
+        create.roughness_packed = value == NVSDK_NGX_DLSS_Roughness_Mode_Packed;
+    return create;
 }
 
 // Read per-frame render resolution matching OptiScaler's IFeature::GetRenderResolution.
@@ -1727,10 +1736,15 @@ struct RrContext {
     bool has_ngx_depth_type = false;
     bool ngx_hw_depth = true;
     int roughness_packed = -1;
-    std::string mode_applied;
+    int mode_applied = -1;
     uint64_t frame_count = 0;
     uint32_t unknown_streak = 0;
     ULONGLONG last_eval_tick = 0;
+    bool guides_logged = false;
+    int logged_hw_depth = -1;
+    uint32_t ngx_log_count = 0;
+    uint64_t ngx_log_sig = ~0ull;
+    bool ready_logged = false;
     OnrRrVkImage vk_images[24]{};
     int num_vk_images = 0;
 };
@@ -1738,27 +1752,121 @@ struct RrContext {
 std::mutex g_ctx_mutex;
 std::unordered_map<unsigned int, std::unique_ptr<RrContext>> g_d3d12_rr;
 std::unordered_map<unsigned int, std::unique_ptr<RrContext>> g_vk_rr;
-bool g_ngx_depth_seen = false;
-bool g_ngx_depth_hw = true;
-bool g_ngx_roughness_seen = false;
-int g_ngx_roughness_packed = -1;
+std::atomic<int> g_ngx_hw_depth{-1};
+std::atomic<int> g_ngx_roughness_packed{-1};
+
+void apply_create_params(RrContext& ctx, const RrCreateParams& create) {
+    ctx.max_render_w = create.max_render_w;
+    ctx.max_render_h = create.max_render_h;
+    ctx.output_w = create.output_w;
+    ctx.output_h = create.output_h;
+    ctx.create_flags = create.flags;
+    if (create.hw_depth >= 0) g_ngx_hw_depth.store(create.hw_depth);
+    const int hw_depth = create.hw_depth >= 0 ? create.hw_depth : g_ngx_hw_depth.load();
+    ctx.has_ngx_depth_type = hw_depth >= 0;
+    ctx.ngx_hw_depth = hw_depth != 0;
+    if (create.roughness_packed >= 0) g_ngx_roughness_packed.store(create.roughness_packed);
+    ctx.roughness_packed = create.roughness_packed >= 0 ? create.roughness_packed : g_ngx_roughness_packed.load();
+}
+
+void log_d3d12_ngx_inputs(RrContext& ctx, const NVSDK_NGX_Parameter& params, const OnrRrFrame& frame) {
+    if (ctx.ngx_log_count >= 16) return;
+
+    struct KeyInfo {
+        const char* name;
+        bool ignored;
+    };
+    static constexpr KeyInfo kKeys[] = {
+        {NVSDK_NGX_Parameter_Color, false},
+        {NVSDK_NGX_Parameter_Output, false},
+        {NVSDK_NGX_Parameter_Depth, false},
+        {NVSDK_NGX_Parameter_MotionVectors, false},
+        {NVSDK_NGX_Parameter_DiffuseAlbedo, false},
+        {NVSDK_NGX_Parameter_SpecularAlbedo, false},
+        {NVSDK_NGX_Parameter_GBuffer_Normals, false},
+        {NVSDK_NGX_Parameter_GBuffer_Roughness, false},
+        {NVSDK_NGX_Parameter_DLSSD_SpecularHitDistance, false},
+        {NVSDK_NGX_Parameter_DLSSD_SpecularRayDirectionHitDistance, false},
+        {NVSDK_NGX_Parameter_DLSSD_ColorBeforeParticles, false},
+        {"DLSS.TransparencyLayer", false},
+        {"DLSS.TransparencyLayerOpacity", false},
+        {"DLSS.TransparencyLayerMvecs", false},
+        {"DLSS.DisocclusionMask", false},
+        {NVSDK_NGX_Parameter_DLSSD_ColorBeforeFog, false},
+        {NVSDK_NGX_Parameter_DLSSD_ScreenSpaceSubsurfaceScatteringGuide, false},
+        {"DLSSD.ResponsivityMask", false},
+        {NVSDK_NGX_Parameter_DLSSD_ColorBeforeTransparency, false},
+        {NVSDK_NGX_Parameter_DLSSD_DepthOfFieldGuide, false},
+        {NVSDK_NGX_Parameter_GBuffer_SpecularMvec, false},
+        {"RayTracingHitDistance", true},
+        {"MotionVectorsReflection", true},
+    };
+
+    uint64_t sig = 14695981039346656037ull;
+    auto mix = [&](uint64_t v) {
+        for (int i = 0; i < 8; ++i) {
+            sig ^= (v >> (i * 8)) & 0xFFu;
+            sig *= 1099511628211ull;
+        }
+    };
+
+    std::string detail;
+    int present_count = 0;
+    for (size_t i = 0; i < std::size(kKeys); ++i) {
+        ID3D12Resource* res = get_d3d12_res(params, kKeys[i].name, nullptr);
+        if (!res) continue;
+        ++present_count;
+        const D3D12_RESOURCE_DESC d = res->GetDesc();
+        mix(uint64_t(i + 1));
+        mix(uint64_t(d.Width));
+        mix(uint64_t(d.Height));
+        mix(uint64_t(d.Format));
+        mix(uint64_t(d.Flags));
+        char buf[160];
+        std::snprintf(buf, sizeof(buf), "%s%s=%p(%llux%u fmt=%d flags=0x%X)%s",
+                      detail.empty() ? "" : ", ",
+                      kKeys[i].name,
+                      static_cast<void*>(res),
+                      static_cast<unsigned long long>(d.Width),
+                      static_cast<unsigned int>(d.Height),
+                      static_cast<int>(d.Format),
+                      static_cast<unsigned int>(d.Flags),
+                      kKeys[i].ignored ? "[ignored]" : "");
+        detail += buf;
+    }
+
+    if (sig == ctx.ngx_log_sig) return;
+    ctx.ngx_log_sig = sig;
+    ++ctx.ngx_log_count;
+    log("[openrr] NGX D3D12 inputs (#%u, count=%d, render=%ux%u, jitter=(%.4f,%.4f), mv_scale=(%.4f,%.4f), sub_col=(%u,%u), sub_out=(%u,%u), flags=0x%X): %s",
+        ctx.ngx_log_count, present_count,
+        frame.render_width, frame.render_height,
+        frame.jitter_x, frame.jitter_y,
+        frame.mv_scale_x, frame.mv_scale_y,
+        frame.color.x, frame.color.y,
+        frame.output.x, frame.output.y,
+        ctx.create_flags,
+        detail.c_str());
+    openrr::pe::flush_log();
+}
 
 bool fill_d3d12_frame(RrContext& ctx, const NVSDK_NGX_Parameter& params, OnrRrFrame& frame, bool host_owned) {
+    (void)host_owned;
     const openrr::pe::Config cfg = openrr::pe::current_config();
     frame = {};
     frame.size = sizeof(frame);
 
     read_eval_render_size(&params, ctx.max_render_w, ctx.max_render_h, frame.render_width, frame.render_height);
 
-    get_param_2(params, "DLSSD.Jitter.Offset.X", NVSDK_NGX_Parameter_Jitter_Offset_X, frame.jitter_x);
-    get_param_2(params, "DLSSD.Jitter.Offset.Y", NVSDK_NGX_Parameter_Jitter_Offset_Y, frame.jitter_y);
+    params.Get(NVSDK_NGX_Parameter_Jitter_Offset_X, &frame.jitter_x);
+    params.Get(NVSDK_NGX_Parameter_Jitter_Offset_Y, &frame.jitter_y);
     if (!std::isfinite(frame.jitter_x)) frame.jitter_x = 0.0f;
     if (!std::isfinite(frame.jitter_y)) frame.jitter_y = 0.0f;
 
-    if (!get_param_2(params, "DLSSD.MV.Scale.X", NVSDK_NGX_Parameter_MV_Scale_X, frame.mv_scale_x) ||
+    if (params.Get(NVSDK_NGX_Parameter_MV_Scale_X, &frame.mv_scale_x) != NVSDK_NGX_Result_Success ||
         !std::isfinite(frame.mv_scale_x) || frame.mv_scale_x == 0.0f)
         frame.mv_scale_x = 1.0f;
-    if (!get_param_2(params, "DLSSD.MV.Scale.Y", NVSDK_NGX_Parameter_MV_Scale_Y, frame.mv_scale_y) ||
+    if (params.Get(NVSDK_NGX_Parameter_MV_Scale_Y, &frame.mv_scale_y) != NVSDK_NGX_Result_Success ||
         !std::isfinite(frame.mv_scale_y) || frame.mv_scale_y == 0.0f)
         frame.mv_scale_y = 1.0f;
 
@@ -1776,98 +1884,86 @@ bool fill_d3d12_frame(RrContext& ctx, const NVSDK_NGX_Parameter& params, OnrRrFr
     const uint32_t depth_state = g_barrier_depth >= 0 ? uint32_t(g_barrier_depth) : read_state;
     const uint32_t output_state = g_barrier_output >= 0 ? uint32_t(g_barrier_output) : D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
 
-    auto tex = [&](const char* k1, const char* k2, const char* bx1, const char* bx2, const char* by1, const char* by2, uint32_t st) {
+    auto tex = [&](const char* key, const char* bx, const char* by, uint32_t st) {
         OnrRrTexture t{};
-        if (ID3D12Resource* r = get_d3d12_res(params, k1, k2)) {
+        if (ID3D12Resource* r = get_d3d12_res(params, key, nullptr)) {
             t.resource = r;
             t.state = st;
-            get_param_2(params, bx1, bx2, t.x);
-            get_param_2(params, by1, by2, t.y);
+            if (bx) params.Get(bx, &t.x);
+            if (by) params.Get(by, &t.y);
         }
         return t;
     };
 
-    frame.color = tex(NVSDK_NGX_Parameter_Color, "DLSSD.Color",
-                      NVSDK_NGX_Parameter_DLSS_Input_Color_Subrect_Base_X, "DLSSD.Input.Color.Subrect.Base.X",
-                      NVSDK_NGX_Parameter_DLSS_Input_Color_Subrect_Base_Y, "DLSSD.Input.Color.Subrect.Base.Y", color_state);
-    frame.diffuse_albedo = tex("DLSSD.DiffuseAlbedo", NVSDK_NGX_Parameter_DiffuseAlbedo,
-                               "DLSSD.Input.DiffuseAlbedo.Subrect.Base.X", NVSDK_NGX_Parameter_DLSS_Input_DiffuseAlbedo_Subrect_Base_X,
-                               "DLSSD.Input.DiffuseAlbedo.Subrect.Base.Y", NVSDK_NGX_Parameter_DLSS_Input_DiffuseAlbedo_Subrect_Base_Y, read_state);
-    if (!frame.diffuse_albedo.resource)
-        frame.diffuse_albedo = tex("GBuffer.DiffuseAlbedo", "GBuffer.Albedo", nullptr, nullptr, nullptr, nullptr, read_state);
+    // Exact NGX parameter keys & subrects matching OpenNrRrFeature_Dx12.cpp (nvngx_dlssd.dll 310.9.1).
+    frame.color = tex(NVSDK_NGX_Parameter_Color,
+                      NVSDK_NGX_Parameter_DLSS_Input_Color_Subrect_Base_X,
+                      NVSDK_NGX_Parameter_DLSS_Input_Color_Subrect_Base_Y, color_state);
+    frame.diffuse_albedo = tex(NVSDK_NGX_Parameter_DiffuseAlbedo,
+                               NVSDK_NGX_Parameter_DLSS_Input_DiffuseAlbedo_Subrect_Base_X,
+                               NVSDK_NGX_Parameter_DLSS_Input_DiffuseAlbedo_Subrect_Base_Y, read_state);
+    frame.specular_albedo = tex(NVSDK_NGX_Parameter_SpecularAlbedo,
+                                NVSDK_NGX_Parameter_DLSS_Input_SpecularAlbedo_Subrect_Base_X,
+                                NVSDK_NGX_Parameter_DLSS_Input_SpecularAlbedo_Subrect_Base_Y, read_state);
+    frame.normals = tex(NVSDK_NGX_Parameter_GBuffer_Normals,
+                        NVSDK_NGX_Parameter_DLSS_Input_Normals_Subrect_Base_X,
+                        NVSDK_NGX_Parameter_DLSS_Input_Normals_Subrect_Base_Y, read_state);
+    frame.roughness = tex(NVSDK_NGX_Parameter_GBuffer_Roughness,
+                          NVSDK_NGX_Parameter_DLSS_Input_Roughness_Subrect_Base_X,
+                          NVSDK_NGX_Parameter_DLSS_Input_Roughness_Subrect_Base_Y, read_state);
+    frame.depth = tex(NVSDK_NGX_Parameter_Depth,
+                      NVSDK_NGX_Parameter_DLSS_Input_Depth_Subrect_Base_X,
+                      NVSDK_NGX_Parameter_DLSS_Input_Depth_Subrect_Base_Y, depth_state);
+    frame.motion = tex(NVSDK_NGX_Parameter_MotionVectors,
+                       NVSDK_NGX_Parameter_DLSS_Input_MV_SubrectBase_X,
+                       NVSDK_NGX_Parameter_DLSS_Input_MV_SubrectBase_Y, mv_state);
+    frame.specular_hit_distance = tex(NVSDK_NGX_Parameter_DLSSD_SpecularHitDistance,
+                                      NVSDK_NGX_Parameter_DLSSD_SpecularHitDistance_Subrect_Base_X,
+                                      NVSDK_NGX_Parameter_DLSSD_SpecularHitDistance_Subrect_Base_Y, read_state);
+    frame.specular_ray_direction_hit_distance = tex(NVSDK_NGX_Parameter_DLSSD_SpecularRayDirectionHitDistance,
+                                                    NVSDK_NGX_Parameter_DLSSD_SpecularRayDirectionHitDistance_Subrect_Base_X,
+                                                    NVSDK_NGX_Parameter_DLSSD_SpecularRayDirectionHitDistance_Subrect_Base_Y, read_state);
+    frame.output = tex(NVSDK_NGX_Parameter_Output,
+                       NVSDK_NGX_Parameter_DLSS_Output_Subrect_Base_X,
+                       NVSDK_NGX_Parameter_DLSS_Output_Subrect_Base_Y, output_state);
 
-    frame.specular_albedo = tex("DLSSD.SpecularAlbedo", NVSDK_NGX_Parameter_SpecularAlbedo,
-                                "DLSSD.Input.SpecularAlbedo.Subrect.Base.X", NVSDK_NGX_Parameter_DLSS_Input_SpecularAlbedo_Subrect_Base_X,
-                                "DLSSD.Input.SpecularAlbedo.Subrect.Base.Y", NVSDK_NGX_Parameter_DLSS_Input_SpecularAlbedo_Subrect_Base_Y, read_state);
-    if (!frame.specular_albedo.resource)
-        frame.specular_albedo = tex("GBuffer.SpecularAlbedo", "GBuffer.Specular", nullptr, nullptr, nullptr, nullptr, read_state);
+    frame.transparency_layer = tex(NVSDK_NGX_Parameter_DLSSD_ColorBeforeParticles,
+                                   "DLSS.TransparencyLayer.Subrect.Base.X",
+                                   "DLSS.TransparencyLayer.Subrect.Base.Y", read_state);
+    if (!frame.transparency_layer.resource)
+        frame.transparency_layer = tex("DLSS.TransparencyLayer",
+                                       "DLSS.TransparencyLayer.Subrect.Base.X",
+                                       "DLSS.TransparencyLayer.Subrect.Base.Y", read_state);
+    frame.transparency_opacity = tex("DLSS.TransparencyLayerOpacity",
+                                     "DLSS.TransparencyLayerOpacity.Subrect.Base.X",
+                                     "DLSS.TransparencyLayerOpacity.Subrect.Base.Y", read_state);
+    frame.disocclusion_mask = tex("DLSS.DisocclusionMask",
+                                  "DLSS.DisocclusionMask.Subrect.Base.X",
+                                  "DLSS.DisocclusionMask.Subrect.Base.Y", read_state);
+    frame.sss_guide = tex(NVSDK_NGX_Parameter_DLSSD_ColorBeforeFog, nullptr, nullptr, read_state);
+    if (!frame.sss_guide.resource)
+        frame.sss_guide = tex(NVSDK_NGX_Parameter_DLSSD_ScreenSpaceSubsurfaceScatteringGuide, nullptr, nullptr, read_state);
+    frame.sss_guide.x = frame.color.x;
+    frame.sss_guide.y = frame.color.y;
 
-    frame.normals = tex("DLSSD.Normals", NVSDK_NGX_Parameter_GBuffer_Normals,
-                        "DLSSD.Input.Normals.Subrect.Base.X", NVSDK_NGX_Parameter_DLSS_Input_Normals_Subrect_Base_X,
-                        "DLSSD.Input.Normals.Subrect.Base.Y", NVSDK_NGX_Parameter_DLSS_Input_Normals_Subrect_Base_Y, read_state);
-    frame.roughness = tex("DLSSD.Roughness", NVSDK_NGX_Parameter_GBuffer_Roughness,
-                          "DLSSD.Input.Roughness.Subrect.Base.X", NVSDK_NGX_Parameter_DLSS_Input_Roughness_Subrect_Base_X,
-                          "DLSSD.Input.Roughness.Subrect.Base.Y", NVSDK_NGX_Parameter_DLSS_Input_Roughness_Subrect_Base_Y, read_state);
-    frame.depth = tex("DLSSD.Depth", NVSDK_NGX_Parameter_Depth,
-                      "DLSSD.Input.Depth.Subrect.Base.X", NVSDK_NGX_Parameter_DLSS_Input_Depth_Subrect_Base_X,
-                      "DLSSD.Input.Depth.Subrect.Base.Y", NVSDK_NGX_Parameter_DLSS_Input_Depth_Subrect_Base_Y, depth_state);
-    frame.motion = tex("DLSSD.MotionVectors", NVSDK_NGX_Parameter_MotionVectors,
-                       "DLSSD.Input.MV.Subrect.Base.X", NVSDK_NGX_Parameter_DLSS_Input_MV_SubrectBase_X,
-                       "DLSSD.Input.MV.Subrect.Base.Y", NVSDK_NGX_Parameter_DLSS_Input_MV_SubrectBase_Y, mv_state);
-    frame.specular_hit_distance = tex(NVSDK_NGX_Parameter_DLSSD_SpecularHitDistance, "RayTracingHitDistance",
-                                      NVSDK_NGX_Parameter_DLSSD_SpecularHitDistance_Subrect_Base_X, nullptr,
-                                      NVSDK_NGX_Parameter_DLSSD_SpecularHitDistance_Subrect_Base_Y, nullptr, read_state);
-    frame.specular_ray_direction_hit_distance = tex(NVSDK_NGX_Parameter_DLSSD_SpecularRayDirectionHitDistance, nullptr,
-                                                    NVSDK_NGX_Parameter_DLSSD_SpecularRayDirectionHitDistance_Subrect_Base_X, nullptr,
-                                                    NVSDK_NGX_Parameter_DLSSD_SpecularRayDirectionHitDistance_Subrect_Base_Y, nullptr, read_state);
-    // Preserve ordinary output priority; only the host prefers generic Output.
-    frame.output = tex(host_owned ? NVSDK_NGX_Parameter_Output : "DLSSD.Output",
-                       host_owned ? "DLSSD.Output" : NVSDK_NGX_Parameter_Output,
-                       "DLSS.Output.Subrect.Base.X", nullptr,
-                       "DLSS.Output.Subrect.Base.Y", nullptr, output_state);
+    frame.responsivity_mask = tex("DLSSD.ResponsivityMask",
+                                  "DLSSD.ResponsivityMask.Subrect.Base.X",
+                                  "DLSSD.ResponsivityMask.Subrect.Base.Y", read_state);
+    frame.color_before_transparency = tex(NVSDK_NGX_Parameter_DLSSD_ColorBeforeTransparency, nullptr, nullptr, read_state);
+    frame.color_before_transparency.x = frame.color.x;
+    frame.color_before_transparency.y = frame.color.y;
 
-    frame.transparency_layer = tex(NVSDK_NGX_Parameter_DLSSD_ColorBeforeParticles, "DLSS.TransparencyLayer",
-                                   "DLSS.TransparencyLayer.Subrect.Base.X", nullptr,
-                                   "DLSS.TransparencyLayer.Subrect.Base.Y", nullptr, read_state);
-    frame.transparency_opacity = tex("DLSS.TransparencyLayerOpacity", nullptr,
-                                     "DLSS.TransparencyLayerOpacity.Subrect.Base.X", nullptr,
-                                     "DLSS.TransparencyLayerOpacity.Subrect.Base.Y", nullptr, read_state);
-    frame.disocclusion_mask = tex("DLSS.DisocclusionMask", "GBuffer.DisocclusionMask",
-                                  "DLSS.DisocclusionMask.Subrect.Base.X", nullptr,
-                                  "DLSS.DisocclusionMask.Subrect.Base.Y", nullptr, read_state);
-    frame.sss_guide = tex(NVSDK_NGX_Parameter_DLSSD_ColorBeforeFog, NVSDK_NGX_Parameter_DLSSD_ScreenSpaceSubsurfaceScatteringGuide,
-                          nullptr, nullptr, nullptr, nullptr, read_state);
-    // its own subrect; ColorBeforeFog is read at the colour's, then the colour's as the last resort
-    if (!get_param_2(params, "DLSSD.ColorBeforeFog.Subrect.Base.X", "DLSSD.ScreenSpaceSubsurfaceScatteringGuide.Subrect.Base.X", frame.sss_guide.x))
-        frame.sss_guide.x = frame.color.x;
-    if (!get_param_2(params, "DLSSD.ColorBeforeFog.Subrect.Base.Y", "DLSSD.ScreenSpaceSubsurfaceScatteringGuide.Subrect.Base.Y", frame.sss_guide.y))
-        frame.sss_guide.y = frame.color.y;
+    frame.depth_of_field_guide = tex(NVSDK_NGX_Parameter_DLSSD_DepthOfFieldGuide, nullptr, nullptr, read_state);
+    frame.depth_of_field_guide.x = frame.color.x;
+    frame.depth_of_field_guide.y = frame.color.y;
 
-    frame.responsivity_mask = tex("DLSSD.ResponsivityMask", nullptr,
-                                  "DLSSD.ResponsivityMask.Subrect.Base.X", nullptr,
-                                  "DLSSD.ResponsivityMask.Subrect.Base.Y", nullptr, read_state);
-    frame.color_before_transparency = tex(NVSDK_NGX_Parameter_DLSSD_ColorBeforeTransparency, nullptr,
-                                          nullptr, nullptr, nullptr, nullptr, read_state);
-    if (!get_param_2(params, "DLSSD.ColorBeforeTransparency.Subrect.Base.X", nullptr, frame.color_before_transparency.x))
-        frame.color_before_transparency.x = frame.color.x;
-    if (!get_param_2(params, "DLSSD.ColorBeforeTransparency.Subrect.Base.Y", nullptr, frame.color_before_transparency.y))
-        frame.color_before_transparency.y = frame.color.y;
-
-    frame.depth_of_field_guide = tex(NVSDK_NGX_Parameter_DLSSD_DepthOfFieldGuide, nullptr,
-                                     nullptr, nullptr, nullptr, nullptr, read_state);
-    if (!get_param_2(params, "DLSSD.DepthOfFieldGuide.Subrect.Base.X", nullptr, frame.depth_of_field_guide.x))
-        frame.depth_of_field_guide.x = frame.color.x;
-    if (!get_param_2(params, "DLSSD.DepthOfFieldGuide.Subrect.Base.Y", nullptr, frame.depth_of_field_guide.y))
-        frame.depth_of_field_guide.y = frame.color.y;
-
-    frame.specular_motion = tex(NVSDK_NGX_Parameter_GBuffer_SpecularMvec, "MotionVectorsReflection",
-                                nullptr, nullptr, nullptr, nullptr, read_state);
+    frame.specular_motion = tex(NVSDK_NGX_Parameter_GBuffer_SpecularMvec, nullptr, nullptr, read_state);
     frame.specular_motion.x = frame.motion.x;
     frame.specular_motion.y = frame.motion.y;
 
-    frame.transparency_motion = tex("DLSS.TransparencyLayerMvecs", nullptr,
-                                    "DLSS.TransparencyLayerMvecs.Subrect.Base.X", nullptr,
-                                    "DLSS.TransparencyLayerMvecs.Subrect.Base.Y", nullptr, read_state);
+    frame.transparency_motion = tex("DLSS.TransparencyLayerMvecs",
+                                    "DLSS.TransparencyLayerMvecs.Subrect.Base.X",
+                                    "DLSS.TransparencyLayerMvecs.Subrect.Base.Y", read_state);
 
     frame.disocclusion_mask_scale = cfg.disocclusion_mask_scale > 0.0f ? cfg.disocclusion_mask_scale : 1.0f;
     if (!cfg.use_disocclusion_mask) frame.disocclusion_mask = {};
@@ -1878,10 +1974,25 @@ bool fill_d3d12_frame(RrContext& ctx, const NVSDK_NGX_Parameter& params, OnrRrFr
     if (!cfg.use_reflection_motion_vectors) frame.specular_motion = {};
     if (!cfg.use_layer_opacity_and_motion) frame.transparency_opacity = frame.transparency_motion = {};
 
+    log_d3d12_ngx_inputs(ctx, params, frame);
+
     if (!frame.color.resource || !frame.depth.resource || !frame.motion.resource || !frame.output.resource) {
         log("[openrr] D3D12 evaluate missing required resource (color=%p depth=%p motion=%p output=%p)",
             frame.color.resource, frame.depth.resource, frame.motion.resource, frame.output.resource);
         return false;
+    }
+
+    if (!ctx.guides_logged) {
+        ctx.guides_logged = true;
+        log("[openrr] guides diffuse_albedo=%d specular_albedo=%d normals=%d roughness=%d hit=%d dir_hit=%d(not read) tl=%d tl_op=%d tl_mv=%d dm=%d sss=%d resp=%d cbt=%d dof=%d smv=%d",
+            int(frame.diffuse_albedo.resource != nullptr), int(frame.specular_albedo.resource != nullptr),
+            int(frame.normals.resource != nullptr), int(frame.roughness.resource != nullptr),
+            int(frame.specular_hit_distance.resource != nullptr), int(frame.specular_ray_direction_hit_distance.resource != nullptr),
+            int(frame.transparency_layer.resource != nullptr), int(frame.transparency_opacity.resource != nullptr),
+            int(frame.transparency_motion.resource != nullptr), int(frame.disocclusion_mask.resource != nullptr),
+            int(frame.sss_guide.resource != nullptr), int(frame.responsivity_mask.resource != nullptr),
+            int(frame.color_before_transparency.resource != nullptr), int(frame.depth_of_field_guide.resource != nullptr),
+            int(frame.specular_motion.resource != nullptr));
     }
 
     int rough_mode = -1;
@@ -1903,6 +2014,14 @@ bool fill_d3d12_frame(RrContext& ctx, const NVSDK_NGX_Parameter& params, OnrRrFr
     else if (dkind == DepthKind::Hardware) hw_depth = true;
     else if (ctx.has_ngx_depth_type) hw_depth = ctx.ngx_hw_depth;
     else hw_depth = (dkind != DepthKind::GameWritten);
+
+    if (int(hw_depth) != ctx.logged_hw_depth) {
+        ctx.logged_hw_depth = int(hw_depth);
+        log("[openrr] depth is %s (%s), %s",
+            hw_depth ? "hardware" : "linear",
+            ctx.has_ngx_depth_type ? (ctx.ngx_hw_depth ? "NGX says hardware" : "NGX says linear") : "NGX says nothing",
+            depth_inverted ? "reversed Z" : "standard Z");
+    }
 
     const ULONGLONG now_tick = GetTickCount64();
     const bool stale_history = ctx.last_eval_tick != 0 && (now_tick - ctx.last_eval_tick) > 250;
@@ -1929,15 +2048,15 @@ bool fill_vk_frame(RrContext& ctx, const NVSDK_NGX_Parameter& params, OnrRrFrame
 
     read_eval_render_size(&params, ctx.max_render_w, ctx.max_render_h, frame.render_width, frame.render_height);
 
-    get_param_2(params, "DLSSD.Jitter.Offset.X", NVSDK_NGX_Parameter_Jitter_Offset_X, frame.jitter_x);
-    get_param_2(params, "DLSSD.Jitter.Offset.Y", NVSDK_NGX_Parameter_Jitter_Offset_Y, frame.jitter_y);
+    params.Get(NVSDK_NGX_Parameter_Jitter_Offset_X, &frame.jitter_x);
+    params.Get(NVSDK_NGX_Parameter_Jitter_Offset_Y, &frame.jitter_y);
     if (!std::isfinite(frame.jitter_x)) frame.jitter_x = 0.0f;
     if (!std::isfinite(frame.jitter_y)) frame.jitter_y = 0.0f;
 
-    if (!get_param_2(params, "DLSSD.MV.Scale.X", NVSDK_NGX_Parameter_MV_Scale_X, frame.mv_scale_x) ||
+    if (params.Get(NVSDK_NGX_Parameter_MV_Scale_X, &frame.mv_scale_x) != NVSDK_NGX_Result_Success ||
         !std::isfinite(frame.mv_scale_x) || frame.mv_scale_x == 0.0f)
         frame.mv_scale_x = 1.0f;
-    if (!get_param_2(params, "DLSSD.MV.Scale.Y", NVSDK_NGX_Parameter_MV_Scale_Y, frame.mv_scale_y) ||
+    if (params.Get(NVSDK_NGX_Parameter_MV_Scale_Y, &frame.mv_scale_y) != NVSDK_NGX_Result_Success ||
         !std::isfinite(frame.mv_scale_y) || frame.mv_scale_y == 0.0f)
         frame.mv_scale_y = 1.0f;
 
@@ -1949,9 +2068,9 @@ bool fill_vk_frame(RrContext& ctx, const NVSDK_NGX_Parameter& params, OnrRrFrame
                                      : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     const uint32_t output_layout = VK_IMAGE_LAYOUT_GENERAL;
 
-    auto tex = [&](const char* k1, const char* k2, const char* bx1, const char* bx2, const char* by1, const char* by2, uint32_t layout) {
+    auto tex = [&](const char* key, const char* bx, const char* by, uint32_t layout) {
         OnrRrTexture t{};
-        NVSDK_NGX_Resource_VK* res = get_vk_res(params, k1, k2);
+        NVSDK_NGX_Resource_VK* res = get_vk_res(params, key, nullptr);
         if (!res || res->Type != NVSDK_NGX_RESOURCE_VK_TYPE_VK_IMAGEVIEW ||
             !res->Resource.ImageViewInfo.Image || ctx.num_vk_images >= int(std::size(ctx.vk_images)))
             return t;
@@ -1967,89 +2086,79 @@ bool fill_vk_frame(RrContext& ctx, const NVSDK_NGX_Parameter& params, OnrRrFrame
                uint32_t(VK_IMAGE_USAGE_SAMPLED_BIT | (res->ReadWrite ? VK_IMAGE_USAGE_STORAGE_BIT : 0))};
         t.resource = &img;
         t.state = layout;
-        get_param_2(params, bx1, bx2, t.x);
-        get_param_2(params, by1, by2, t.y);
+        if (bx) params.Get(bx, &t.x);
+        if (by) params.Get(by, &t.y);
         return t;
     };
 
-    frame.color = tex(NVSDK_NGX_Parameter_Color, "DLSSD.Color",
-                      NVSDK_NGX_Parameter_DLSS_Input_Color_Subrect_Base_X, "DLSSD.Input.Color.Subrect.Base.X",
-                      NVSDK_NGX_Parameter_DLSS_Input_Color_Subrect_Base_Y, "DLSSD.Input.Color.Subrect.Base.Y", read_layout);
-    frame.diffuse_albedo = tex("DLSSD.DiffuseAlbedo", NVSDK_NGX_Parameter_DiffuseAlbedo,
-                               "DLSSD.Input.DiffuseAlbedo.Subrect.Base.X", NVSDK_NGX_Parameter_DLSS_Input_DiffuseAlbedo_Subrect_Base_X,
-                               "DLSSD.Input.DiffuseAlbedo.Subrect.Base.Y", NVSDK_NGX_Parameter_DLSS_Input_DiffuseAlbedo_Subrect_Base_Y, read_layout);
-    if (!frame.diffuse_albedo.resource)
-        frame.diffuse_albedo = tex("GBuffer.DiffuseAlbedo", "GBuffer.Albedo", nullptr, nullptr, nullptr, nullptr, read_layout);
+    frame.color = tex(NVSDK_NGX_Parameter_Color,
+                      NVSDK_NGX_Parameter_DLSS_Input_Color_Subrect_Base_X,
+                      NVSDK_NGX_Parameter_DLSS_Input_Color_Subrect_Base_Y, read_layout);
+    frame.diffuse_albedo = tex(NVSDK_NGX_Parameter_DiffuseAlbedo,
+                               NVSDK_NGX_Parameter_DLSS_Input_DiffuseAlbedo_Subrect_Base_X,
+                               NVSDK_NGX_Parameter_DLSS_Input_DiffuseAlbedo_Subrect_Base_Y, read_layout);
+    frame.specular_albedo = tex(NVSDK_NGX_Parameter_SpecularAlbedo,
+                                NVSDK_NGX_Parameter_DLSS_Input_SpecularAlbedo_Subrect_Base_X,
+                                NVSDK_NGX_Parameter_DLSS_Input_SpecularAlbedo_Subrect_Base_Y, read_layout);
+    frame.normals = tex(NVSDK_NGX_Parameter_GBuffer_Normals,
+                        NVSDK_NGX_Parameter_DLSS_Input_Normals_Subrect_Base_X,
+                        NVSDK_NGX_Parameter_DLSS_Input_Normals_Subrect_Base_Y, read_layout);
+    frame.roughness = tex(NVSDK_NGX_Parameter_GBuffer_Roughness,
+                          NVSDK_NGX_Parameter_DLSS_Input_Roughness_Subrect_Base_X,
+                          NVSDK_NGX_Parameter_DLSS_Input_Roughness_Subrect_Base_Y, read_layout);
+    frame.depth = tex(NVSDK_NGX_Parameter_Depth,
+                      NVSDK_NGX_Parameter_DLSS_Input_Depth_Subrect_Base_X,
+                      NVSDK_NGX_Parameter_DLSS_Input_Depth_Subrect_Base_Y, read_layout);
+    frame.motion = tex(NVSDK_NGX_Parameter_MotionVectors,
+                       NVSDK_NGX_Parameter_DLSS_Input_MV_SubrectBase_X,
+                       NVSDK_NGX_Parameter_DLSS_Input_MV_SubrectBase_Y, read_layout);
+    frame.specular_hit_distance = tex(NVSDK_NGX_Parameter_DLSSD_SpecularHitDistance,
+                                      NVSDK_NGX_Parameter_DLSSD_SpecularHitDistance_Subrect_Base_X,
+                                      NVSDK_NGX_Parameter_DLSSD_SpecularHitDistance_Subrect_Base_Y, read_layout);
+    frame.specular_ray_direction_hit_distance = tex(NVSDK_NGX_Parameter_DLSSD_SpecularRayDirectionHitDistance,
+                                                    NVSDK_NGX_Parameter_DLSSD_SpecularRayDirectionHitDistance_Subrect_Base_X,
+                                                    NVSDK_NGX_Parameter_DLSSD_SpecularRayDirectionHitDistance_Subrect_Base_Y, read_layout);
+    frame.output = tex(NVSDK_NGX_Parameter_Output,
+                       NVSDK_NGX_Parameter_DLSS_Output_Subrect_Base_X,
+                       NVSDK_NGX_Parameter_DLSS_Output_Subrect_Base_Y, output_layout);
 
-    frame.specular_albedo = tex("DLSSD.SpecularAlbedo", NVSDK_NGX_Parameter_SpecularAlbedo,
-                                "DLSSD.Input.SpecularAlbedo.Subrect.Base.X", NVSDK_NGX_Parameter_DLSS_Input_SpecularAlbedo_Subrect_Base_X,
-                                "DLSSD.Input.SpecularAlbedo.Subrect.Base.Y", NVSDK_NGX_Parameter_DLSS_Input_SpecularAlbedo_Subrect_Base_Y, read_layout);
-    if (!frame.specular_albedo.resource)
-        frame.specular_albedo = tex("GBuffer.SpecularAlbedo", "GBuffer.Specular", nullptr, nullptr, nullptr, nullptr, read_layout);
+    frame.transparency_layer = tex(NVSDK_NGX_Parameter_DLSSD_ColorBeforeParticles,
+                                   "DLSS.TransparencyLayer.Subrect.Base.X",
+                                   "DLSS.TransparencyLayer.Subrect.Base.Y", read_layout);
+    if (!frame.transparency_layer.resource)
+        frame.transparency_layer = tex("DLSS.TransparencyLayer",
+                                       "DLSS.TransparencyLayer.Subrect.Base.X",
+                                       "DLSS.TransparencyLayer.Subrect.Base.Y", read_layout);
+    frame.transparency_opacity = tex("DLSS.TransparencyLayerOpacity",
+                                     "DLSS.TransparencyLayerOpacity.Subrect.Base.X",
+                                     "DLSS.TransparencyLayerOpacity.Subrect.Base.Y", read_layout);
+    frame.disocclusion_mask = tex("DLSS.DisocclusionMask",
+                                  "DLSS.DisocclusionMask.Subrect.Base.X",
+                                  "DLSS.DisocclusionMask.Subrect.Base.Y", read_layout);
+    frame.sss_guide = tex(NVSDK_NGX_Parameter_DLSSD_ColorBeforeFog, nullptr, nullptr, read_layout);
+    if (!frame.sss_guide.resource)
+        frame.sss_guide = tex(NVSDK_NGX_Parameter_DLSSD_ScreenSpaceSubsurfaceScatteringGuide, nullptr, nullptr, read_layout);
+    frame.sss_guide.x = frame.color.x;
+    frame.sss_guide.y = frame.color.y;
 
-    frame.normals = tex("DLSSD.Normals", NVSDK_NGX_Parameter_GBuffer_Normals,
-                        "DLSSD.Input.Normals.Subrect.Base.X", NVSDK_NGX_Parameter_DLSS_Input_Normals_Subrect_Base_X,
-                        "DLSSD.Input.Normals.Subrect.Base.Y", NVSDK_NGX_Parameter_DLSS_Input_Normals_Subrect_Base_Y, read_layout);
-    frame.roughness = tex("DLSSD.Roughness", NVSDK_NGX_Parameter_GBuffer_Roughness,
-                          "DLSSD.Input.Roughness.Subrect.Base.X", NVSDK_NGX_Parameter_DLSS_Input_Roughness_Subrect_Base_X,
-                          "DLSSD.Input.Roughness.Subrect.Base.Y", NVSDK_NGX_Parameter_DLSS_Input_Roughness_Subrect_Base_Y, read_layout);
-    frame.depth = tex("DLSSD.Depth", NVSDK_NGX_Parameter_Depth,
-                      "DLSSD.Input.Depth.Subrect.Base.X", NVSDK_NGX_Parameter_DLSS_Input_Depth_Subrect_Base_X,
-                      "DLSSD.Input.Depth.Subrect.Base.Y", NVSDK_NGX_Parameter_DLSS_Input_Depth_Subrect_Base_Y, read_layout);
-    frame.motion = tex("DLSSD.MotionVectors", NVSDK_NGX_Parameter_MotionVectors,
-                       "DLSSD.Input.MV.Subrect.Base.X", NVSDK_NGX_Parameter_DLSS_Input_MV_SubrectBase_X,
-                       "DLSSD.Input.MV.Subrect.Base.Y", NVSDK_NGX_Parameter_DLSS_Input_MV_SubrectBase_Y, read_layout);
-    frame.specular_hit_distance = tex(NVSDK_NGX_Parameter_DLSSD_SpecularHitDistance, "RayTracingHitDistance",
-                                      NVSDK_NGX_Parameter_DLSSD_SpecularHitDistance_Subrect_Base_X, nullptr,
-                                      NVSDK_NGX_Parameter_DLSSD_SpecularHitDistance_Subrect_Base_Y, nullptr, read_layout);
-    frame.specular_ray_direction_hit_distance = tex(NVSDK_NGX_Parameter_DLSSD_SpecularRayDirectionHitDistance, nullptr,
-                                                    NVSDK_NGX_Parameter_DLSSD_SpecularRayDirectionHitDistance_Subrect_Base_X, nullptr,
-                                                    NVSDK_NGX_Parameter_DLSSD_SpecularRayDirectionHitDistance_Subrect_Base_Y, nullptr, read_layout);
-    frame.output = tex("DLSSD.Output", NVSDK_NGX_Parameter_Output,
-                       "DLSS.Output.Subrect.Base.X", nullptr,
-                       "DLSS.Output.Subrect.Base.Y", nullptr, output_layout);
+    frame.responsivity_mask = tex("DLSSD.ResponsivityMask",
+                                  "DLSSD.ResponsivityMask.Subrect.Base.X",
+                                  "DLSSD.ResponsivityMask.Subrect.Base.Y", read_layout);
+    frame.color_before_transparency = tex(NVSDK_NGX_Parameter_DLSSD_ColorBeforeTransparency, nullptr, nullptr, read_layout);
+    frame.color_before_transparency.x = frame.color.x;
+    frame.color_before_transparency.y = frame.color.y;
 
-    frame.transparency_layer = tex(NVSDK_NGX_Parameter_DLSSD_ColorBeforeParticles, "DLSS.TransparencyLayer",
-                                   "DLSS.TransparencyLayer.Subrect.Base.X", nullptr,
-                                   "DLSS.TransparencyLayer.Subrect.Base.Y", nullptr, read_layout);
-    frame.transparency_opacity = tex("DLSS.TransparencyLayerOpacity", nullptr,
-                                     "DLSS.TransparencyLayerOpacity.Subrect.Base.X", nullptr,
-                                     "DLSS.TransparencyLayerOpacity.Subrect.Base.Y", nullptr, read_layout);
-    frame.disocclusion_mask = tex("DLSS.DisocclusionMask", "GBuffer.DisocclusionMask",
-                                  "DLSS.DisocclusionMask.Subrect.Base.X", nullptr,
-                                  "DLSS.DisocclusionMask.Subrect.Base.Y", nullptr, read_layout);
-    frame.sss_guide = tex(NVSDK_NGX_Parameter_DLSSD_ColorBeforeFog, NVSDK_NGX_Parameter_DLSSD_ScreenSpaceSubsurfaceScatteringGuide,
-                          nullptr, nullptr, nullptr, nullptr, read_layout);
-    if (!get_param_2(params, "DLSSD.ColorBeforeFog.Subrect.Base.X", "DLSSD.ScreenSpaceSubsurfaceScatteringGuide.Subrect.Base.X", frame.sss_guide.x))
-        frame.sss_guide.x = frame.color.x;
-    if (!get_param_2(params, "DLSSD.ColorBeforeFog.Subrect.Base.Y", "DLSSD.ScreenSpaceSubsurfaceScatteringGuide.Subrect.Base.Y", frame.sss_guide.y))
-        frame.sss_guide.y = frame.color.y;
+    frame.depth_of_field_guide = tex(NVSDK_NGX_Parameter_DLSSD_DepthOfFieldGuide, nullptr, nullptr, read_layout);
+    frame.depth_of_field_guide.x = frame.color.x;
+    frame.depth_of_field_guide.y = frame.color.y;
 
-    frame.responsivity_mask = tex("DLSSD.ResponsivityMask", nullptr,
-                                  "DLSSD.ResponsivityMask.Subrect.Base.X", nullptr,
-                                  "DLSSD.ResponsivityMask.Subrect.Base.Y", nullptr, read_layout);
-    frame.color_before_transparency = tex(NVSDK_NGX_Parameter_DLSSD_ColorBeforeTransparency, nullptr,
-                                          nullptr, nullptr, nullptr, nullptr, read_layout);
-    if (!get_param_2(params, "DLSSD.ColorBeforeTransparency.Subrect.Base.X", nullptr, frame.color_before_transparency.x))
-        frame.color_before_transparency.x = frame.color.x;
-    if (!get_param_2(params, "DLSSD.ColorBeforeTransparency.Subrect.Base.Y", nullptr, frame.color_before_transparency.y))
-        frame.color_before_transparency.y = frame.color.y;
-
-    frame.depth_of_field_guide = tex(NVSDK_NGX_Parameter_DLSSD_DepthOfFieldGuide, nullptr,
-                                     nullptr, nullptr, nullptr, nullptr, read_layout);
-    if (!get_param_2(params, "DLSSD.DepthOfFieldGuide.Subrect.Base.X", nullptr, frame.depth_of_field_guide.x))
-        frame.depth_of_field_guide.x = frame.color.x;
-    if (!get_param_2(params, "DLSSD.DepthOfFieldGuide.Subrect.Base.Y", nullptr, frame.depth_of_field_guide.y))
-        frame.depth_of_field_guide.y = frame.color.y;
-
-    frame.specular_motion = tex(NVSDK_NGX_Parameter_GBuffer_SpecularMvec, "MotionVectorsReflection",
-                                nullptr, nullptr, nullptr, nullptr, read_layout);
+    frame.specular_motion = tex(NVSDK_NGX_Parameter_GBuffer_SpecularMvec, nullptr, nullptr, read_layout);
     frame.specular_motion.x = frame.motion.x;
     frame.specular_motion.y = frame.motion.y;
 
-    frame.transparency_motion = tex("DLSS.TransparencyLayerMvecs", nullptr,
-                                    "DLSS.TransparencyLayerMvecs.Subrect.Base.X", nullptr,
-                                    "DLSS.TransparencyLayerMvecs.Subrect.Base.Y", nullptr, read_layout);
+    frame.transparency_motion = tex("DLSS.TransparencyLayerMvecs",
+                                    "DLSS.TransparencyLayerMvecs.Subrect.Base.X",
+                                    "DLSS.TransparencyLayerMvecs.Subrect.Base.Y", read_layout);
 
     frame.disocclusion_mask_scale = cfg.disocclusion_mask_scale > 0.0f ? cfg.disocclusion_mask_scale : 1.0f;
     if (!cfg.use_disocclusion_mask) frame.disocclusion_mask = {};
@@ -2286,8 +2395,9 @@ NVSDK_NGX_Result create_d3d12_rr(ID3D12GraphicsCommandList* cmd, NVSDK_NGX_Featu
     if (feature != NVSDK_NGX_Feature_RayReconstruction) {
         return host_owned ? NVSDK_NGX_Result_FAIL_FeatureNotSupported : fallback();
     }
-    ensure_deferred_init();
     if (!cmd || !params || !out) return NVSDK_NGX_Result_FAIL_InvalidParameter;
+    const RrCreateParams create = read_create_params(*params);
+    ensure_deferred_init();
 
     const openrr::pe::Config cfg = openrr::pe::current_config();
     if (!cfg.enabled) {
@@ -2323,35 +2433,11 @@ NVSDK_NGX_Result create_d3d12_rr(ID3D12GraphicsCommandList* cmd, NVSDK_NGX_Featu
     ctx->is_vk = false;
     ctx->d3d12_device = dev;
 
-    read_create_sizes(params, ctx->max_render_w, ctx->max_render_h, ctx->output_w, ctx->output_h);
-    if (!ctx->max_render_w || !ctx->max_render_h) {
-        log("[openrr] D3D12 CreateFeature: invalid dimensions (%ux%u)", ctx->max_render_w, ctx->max_render_h);
+    if (!create.max_render_w || !create.max_render_h) {
+        log("[openrr] D3D12 CreateFeature: invalid dimensions (%ux%u)", create.max_render_w, create.max_render_h);
         return NVSDK_NGX_Result_FAIL_InvalidParameter;
     }
-
-    int flags = 0;
-    if (params->Get(NVSDK_NGX_Parameter_DLSS_Feature_Create_Flags, &flags) == NVSDK_NGX_Result_Success)
-        ctx->create_flags = uint32_t(flags);
-
-    int depth_val = 0;
-    if (params->Get(NVSDK_NGX_Parameter_Use_HW_Depth, &depth_val) == NVSDK_NGX_Result_Success) {
-        ctx->has_ngx_depth_type = true;
-        ctx->ngx_hw_depth = (depth_val == NVSDK_NGX_DLSS_Depth_Type_HW);
-        g_ngx_depth_seen = true;
-        g_ngx_depth_hw = ctx->ngx_hw_depth;
-    } else if (g_ngx_depth_seen) {
-        ctx->has_ngx_depth_type = true;
-        ctx->ngx_hw_depth = g_ngx_depth_hw;
-    }
-
-    int rough_val = 0;
-    if (params->Get(NVSDK_NGX_Parameter_DLSS_Roughness_Mode, &rough_val) == NVSDK_NGX_Result_Success) {
-        ctx->roughness_packed = (rough_val == NVSDK_NGX_DLSS_Roughness_Mode_Packed) ? 1 : 0;
-        g_ngx_roughness_seen = true;
-        g_ngx_roughness_packed = ctx->roughness_packed;
-    } else if (g_ngx_roughness_seen) {
-        ctx->roughness_packed = g_ngx_roughness_packed;
-    }
+    apply_create_params(*ctx, create);
 
     const std::wstring data_dir = resolve_data_dir();
     const std::wstring log_path = resolve_log_path();
@@ -2383,7 +2469,13 @@ NVSDK_NGX_Result create_d3d12_rr(ID3D12GraphicsCommandList* cmd, NVSDK_NGX_Featu
     ci.backend = backend_choice;
 
     openrr::pe::vulkan_entry_points();
-    const int32_t rc = g_api.Create(&ci, &ctx->runtime_ctx);
+    int32_t rc = ONR_RR_FAILED;
+    {
+        InternalVkScope vk_scope;
+        ++t_in_openrr_record;
+        rc = g_api.Create(&ci, &ctx->runtime_ctx);
+        --t_in_openrr_record;
+    }
     if (rc != ONR_RR_OK || !ctx->runtime_ctx) {
         const std::string err = runtime_last_error();
         log("[openrr] D3D12 Create failed (rc=%d): %s", rc, err.c_str());
@@ -2393,7 +2485,7 @@ NVSDK_NGX_Result create_d3d12_rr(ID3D12GraphicsCommandList* cmd, NVSDK_NGX_Featu
     ctx->holder->ctx = ctx->runtime_ctx;
 
     ctx->mode_applied = cfg.mode;
-    OnrRrSetFastMode(ctx->runtime_ctx, rr_mode_level(cfg.mode));
+    OnrRrSetFastMode(ctx->runtime_ctx, cfg.mode);
 
     const unsigned int id = g_next_rr_handle.fetch_add(1);
     ctx->handle_id = id;
@@ -2455,7 +2547,7 @@ NVSDK_NGX_Result evaluate_d3d12_rr(ID3D12GraphicsCommandList* cmd, const NVSDK_N
     const openrr::pe::Config cfg = openrr::pe::current_config();
     if (cfg.mode != ctx.mode_applied) {
         ctx.mode_applied = cfg.mode;
-        OnrRrSetFastMode(ctx.runtime_ctx, rr_mode_level(cfg.mode));
+        OnrRrSetFastMode(ctx.runtime_ctx, cfg.mode);
     }
 
     OnrRrFrame frame{};
@@ -2521,19 +2613,47 @@ NVSDK_NGX_Result evaluate_d3d12_rr(ID3D12GraphicsCommandList* cmd, const NVSDK_N
             }
             ctx.unknown_streak = 0;
         }
-        const auto state = split_ok ? openrr::pe::split::snapshot(cmd) : nullptr;
-        void* job = nullptr;
-        t_record_target = nullptr;
-        ++t_in_openrr_record;
-        const int32_t rc = g_api4.Record(ctx.runtime_ctx, &frame, cmd, ONR_RR_EDIT_OFF, nullptr, &job);
-        --t_in_openrr_record;
-        ID3D12GraphicsCommandList* target = t_record_target;
-        t_record_target = nullptr;
-        if (split_ok && state) {
-            openrr::pe::split::restore(cmd, state);
-        } else {
-            restore_direct_state(cmd, target);
+        bool just_became_ready = false;
+        if (!ctx.ready_logged && g_api.GetInfo) {
+            OnrRrInfo pre_info{};
+            pre_info.size = sizeof(pre_info);
+            if (g_api.GetInfo(ctx.runtime_ctx, &pre_info) == ONR_RR_OK && pre_info.state == ONR_RR_STATE_READY) {
+                ctx.ready_logged = true;
+                just_became_ready = true;
+                log("[openrr] D3D12 runtime transitioned to READY on frame %llu; recording first full network frame",
+                    static_cast<unsigned long long>(ctx.frame_count));
+            }
         }
+        if (just_became_ready || ctx.frame_count < 4) {
+            openrr::pe::flush_log();
+        }
+        const auto state = split_ok ? openrr::pe::split::snapshot(cmd) : nullptr;
+        bool host_bound = false;
+        const bool trace = openrr::pe::d3d12_diagnostics_enabled() && (ctx.frame_count < 4 || just_became_ready);
+        if (trace) {
+            log("[d3d12 diag] Evaluate list=%p next_frame=%llu", static_cast<void*>(cmd),
+                static_cast<unsigned long long>(ctx.frame_count + 1));
+            log_direct_texture_barriers(cmd, frame);
+        }
+        ++t_in_openrr_record;
+        const int32_t rc = openrr::pe::record_d3d12(ctx.runtime_ctx, &frame, cmd, host_bound, trace);
+        --t_in_openrr_record;
+        const bool device_removed = (rc != ONR_RR_OK && rc != ONR_RR_BUSY) &&
+                                    openrr::pe::log_d3d12_device_removed(ctx.d3d12_device, "Record");
+        bool restored = false;
+        if (host_bound && !device_removed) {
+            if (split_ok && state) {
+                openrr::pe::split::restore(cmd, state);
+                restored = true;
+            } else {
+                restored = restore_direct_state(cmd);
+            }
+        }
+        if (trace) {
+            log("[d3d12 diag] list=%p Record rc=%d host_bound=%d restore=%d",
+                static_cast<void*>(cmd), rc, int(host_bound), int(restored));
+        }
+        if (trace || just_became_ready || ctx.frame_count < 4) openrr::pe::flush_log();
         if (rc == ONR_RR_BUSY) {
             const uint64_t skip_n = ++g_d3d_skipped_frames;
             if (skip_n == 1 || (skip_n & (skip_n - 1)) == 0) {
@@ -2604,7 +2724,10 @@ void destroy_d3d12_rr_context(RrContext& ctx) {
         rt = ctx.runtime_ctx;
     }
     ctx.runtime_ctx = nullptr;
-    if (rt) g_api.Destroy(rt);
+    if (rt) {
+        InternalVkScope vk_scope;
+        g_api.Destroy(rt);
+    }
 }
 
 NVSDK_NGX_Result release_d3d12_rr(NVSDK_NGX_Handle* handle, bool host_owned) {
@@ -2794,10 +2917,8 @@ NVSDK_NGX_Result RR_NGX_MSABI hk_vk_get_scratch(NVSDK_NGX_Feature feat, const NV
     return real_vk_get_scratch ? real_vk_get_scratch(feat, params, out) : NVSDK_NGX_Result_Success;
 }
 
-NVSDK_NGX_Result create_vk_rr_feature(VkDevice dev, VkCommandBuffer cmd, NVSDK_NGX_Parameter* params, NVSDK_NGX_Handle** out) {
+NVSDK_NGX_Result create_vk_rr_feature(VkDevice dev, const RrCreateParams& create, NVSDK_NGX_Handle** out) {
     ensure_deferred_init();
-    (void)cmd;
-    if (!params || !out) return NVSDK_NGX_Result_FAIL_InvalidParameter;
 
     openrr::pe::vkdevice::DeviceInfo di{};
     if (!openrr::pe::vkdevice::get_device_info(dev, &di) || !di.prepared) {
@@ -2817,32 +2938,8 @@ NVSDK_NGX_Result create_vk_rr_feature(VkDevice dev, VkCommandBuffer cmd, NVSDK_N
     ctx->is_vk = true;
     ctx->vk_device = di.device;
 
-    read_create_sizes(params, ctx->max_render_w, ctx->max_render_h, ctx->output_w, ctx->output_h);
-    if (!ctx->max_render_w || !ctx->max_render_h) return NVSDK_NGX_Result_FAIL_InvalidParameter;
-
-    int flags = 0;
-    if (params->Get(NVSDK_NGX_Parameter_DLSS_Feature_Create_Flags, &flags) == NVSDK_NGX_Result_Success)
-        ctx->create_flags = uint32_t(flags);
-
-    int depth_val = 0;
-    if (params->Get(NVSDK_NGX_Parameter_Use_HW_Depth, &depth_val) == NVSDK_NGX_Result_Success) {
-        ctx->has_ngx_depth_type = true;
-        ctx->ngx_hw_depth = (depth_val == NVSDK_NGX_DLSS_Depth_Type_HW);
-        g_ngx_depth_seen = true;
-        g_ngx_depth_hw = ctx->ngx_hw_depth;
-    } else if (g_ngx_depth_seen) {
-        ctx->has_ngx_depth_type = true;
-        ctx->ngx_hw_depth = g_ngx_depth_hw;
-    }
-
-    int rough_val = 0;
-    if (params->Get(NVSDK_NGX_Parameter_DLSS_Roughness_Mode, &rough_val) == NVSDK_NGX_Result_Success) {
-        ctx->roughness_packed = (rough_val == NVSDK_NGX_DLSS_Roughness_Mode_Packed) ? 1 : 0;
-        g_ngx_roughness_seen = true;
-        g_ngx_roughness_packed = ctx->roughness_packed;
-    } else if (g_ngx_roughness_seen) {
-        ctx->roughness_packed = g_ngx_roughness_packed;
-    }
+    if (!create.max_render_w || !create.max_render_h) return NVSDK_NGX_Result_FAIL_InvalidParameter;
+    apply_create_params(*ctx, create);
 
     const std::wstring data_dir = resolve_data_dir();
     const std::wstring log_path = resolve_log_path();
@@ -2874,7 +2971,13 @@ NVSDK_NGX_Result create_vk_rr_feature(VkDevice dev, VkCommandBuffer cmd, NVSDK_N
     ci.vk_device = &vkd;
 
     openrr::pe::vulkan_entry_points();
-    const int32_t rc = g_api.Create(&ci, &ctx->runtime_ctx);
+    int32_t rc = ONR_RR_FAILED;
+    {
+        InternalVkScope vk_scope;
+        ++t_in_openrr_record;
+        rc = g_api.Create(&ci, &ctx->runtime_ctx);
+        --t_in_openrr_record;
+    }
     if (rc != ONR_RR_OK || !ctx->runtime_ctx) {
         const std::string err = runtime_last_error();
         log("[openrr] Vulkan Create failed (rc=%d): %s", rc, err.c_str());
@@ -2884,7 +2987,7 @@ NVSDK_NGX_Result create_vk_rr_feature(VkDevice dev, VkCommandBuffer cmd, NVSDK_N
 
     const openrr::pe::Config cfg = openrr::pe::current_config();
     ctx->mode_applied = cfg.mode;
-    OnrRrSetFastMode(ctx->runtime_ctx, rr_mode_level(cfg.mode));
+    OnrRrSetFastMode(ctx->runtime_ctx, cfg.mode);
 
     const unsigned int id = g_next_rr_handle.fetch_add(1);
     ctx->handle_id = id;
@@ -2908,23 +3011,29 @@ NVSDK_NGX_Result create_vk_rr_feature(VkDevice dev, VkCommandBuffer cmd, NVSDK_N
 
 NVSDK_NGX_Result RR_NGX_MSABI hk_vk_create1(VkDevice dev, VkCommandBuffer cmd, NVSDK_NGX_Feature feature,
                                             NVSDK_NGX_Parameter* params, NVSDK_NGX_Handle** out) {
-    if (feature == NVSDK_NGX_Feature_RayReconstruction && openrr::pe::current_config().enabled && vk_rr_capable()) {
-        const NVSDK_NGX_Result r = create_vk_rr_feature(dev, cmd, params, out);
-        if (r == NVSDK_NGX_Result_Success) return r;
+    if (feature == NVSDK_NGX_Feature_RayReconstruction && params && out) {
+        const RrCreateParams create = read_create_params(*params);
+        if (openrr::pe::current_config().enabled && vk_rr_capable()) {
+            const NVSDK_NGX_Result r = create_vk_rr_feature(dev, create, out);
+            if (r == NVSDK_NGX_Result_Success) return r;
+        }
     }
     return real_vk_create1 ? real_vk_create1(dev, cmd, feature, params, out) : NVSDK_NGX_Result_Fail;
 }
 
 NVSDK_NGX_Result RR_NGX_MSABI hk_vk_create(VkCommandBuffer cmd, NVSDK_NGX_Feature feature,
                                            NVSDK_NGX_Parameter* params, NVSDK_NGX_Handle** out) {
-    if (feature == NVSDK_NGX_Feature_RayReconstruction && openrr::pe::current_config().enabled && vk_rr_capable()) {
-        VkDevice dev = VK_NULL_HANDLE;
-        {
-            std::lock_guard<std::mutex> lock(g_vk_ngx_mutex);
-            dev = g_ngx_vk_device;
+    if (feature == NVSDK_NGX_Feature_RayReconstruction && params && out) {
+        const RrCreateParams create = read_create_params(*params);
+        if (openrr::pe::current_config().enabled && vk_rr_capable()) {
+            VkDevice dev = VK_NULL_HANDLE;
+            {
+                std::lock_guard<std::mutex> lock(g_vk_ngx_mutex);
+                dev = g_ngx_vk_device;
+            }
+            const NVSDK_NGX_Result r = create_vk_rr_feature(dev, create, out);
+            if (r == NVSDK_NGX_Result_Success) return r;
         }
-        const NVSDK_NGX_Result r = create_vk_rr_feature(dev, cmd, params, out);
-        if (r == NVSDK_NGX_Result_Success) return r;
     }
     return real_vk_create ? real_vk_create(cmd, feature, params, out) : NVSDK_NGX_Result_Fail;
 }
@@ -2946,7 +3055,7 @@ NVSDK_NGX_Result RR_NGX_MSABI hk_vk_evaluate(VkCommandBuffer cmd, const NVSDK_NG
     const openrr::pe::Config cfg = openrr::pe::current_config();
     if (cfg.mode != ctx.mode_applied) {
         ctx.mode_applied = cfg.mode;
-        OnrRrSetFastMode(ctx.runtime_ctx, rr_mode_level(cfg.mode));
+        OnrRrSetFastMode(ctx.runtime_ctx, cfg.mode);
     }
 
     OnrRrFrame frame{};
@@ -2986,7 +3095,10 @@ NVSDK_NGX_Result RR_NGX_MSABI hk_vk_release(NVSDK_NGX_Handle* handle) {
     }
     if (!gone) return real_vk_release(handle);
     log("[openrr] Vulkan Ray Reconstruction feature released (handle=0x%X)", gone->handle_id);
-    if (gone->runtime_ctx) g_api.Destroy(gone->runtime_ctx);
+    if (gone->runtime_ctx) {
+        InternalVkScope vk_scope;
+        g_api.Destroy(gone->runtime_ctx);
+    }
     if (gone->allocated_handle == handle) delete gone->allocated_handle;
     openrr::pe::control::Status st{};
     openrr::pe::control::report(st);
@@ -3012,7 +3124,10 @@ void destroy_all_vk_rr(VkDevice filter_dev = VK_NULL_HANDLE) {
             openrr::pe::vulkan_entry_points();
             vkDeviceWaitIdle(ctx->vk_device);
         }
-        if (ctx->runtime_ctx) g_api.Destroy(ctx->runtime_ctx);
+        if (ctx->runtime_ctx) {
+            InternalVkScope vk_scope;
+            g_api.Destroy(ctx->runtime_ctx);
+        }
         if (ctx->allocated_handle) delete ctx->allocated_handle;
     }
 }
@@ -3071,6 +3186,7 @@ std::vector<SeenVkDevice> g_seen_vk_devices;
 
 VKAPI_ATTR VkResult VKAPI_CALL hk_vk_create_instance(const VkInstanceCreateInfo* ci, const VkAllocationCallbacks* a, VkInstance* out) {
     const VkResult r = real_vk_create_instance(ci, a, out);
+    if (t_in_internal_vk > 0) return r;
     if (r == VK_SUCCESS && out && *out) {
         const uint32_t ver = (ci && ci->pApplicationInfo && ci->pApplicationInfo->apiVersion)
                                  ? ci->pApplicationInfo->apiVersion
@@ -3084,6 +3200,7 @@ VKAPI_ATTR VkResult VKAPI_CALL hk_vk_create_instance(const VkInstanceCreateInfo*
 
 VKAPI_ATTR VkResult VKAPI_CALL hk_vk_enum_phys(VkInstance instance, uint32_t* count, VkPhysicalDevice* list) {
     const VkResult r = real_vk_enum_phys(instance, count, list);
+    if (t_in_internal_vk > 0) return r;
     if ((r == VK_SUCCESS || r == VK_INCOMPLETE) && instance && list && count) {
         std::lock_guard<std::mutex> lock(g_vk_dev_mutex);
         g_last_vk_instance.store(instance);
@@ -3094,6 +3211,7 @@ VKAPI_ATTR VkResult VKAPI_CALL hk_vk_enum_phys(VkInstance instance, uint32_t* co
 
 VkResult do_vk_create_device(PFN_vkCreateDevice create, VkInstance inst, VkPhysicalDevice phys,
                              const VkDeviceCreateInfo* ci, const VkAllocationCallbacks* a, VkDevice* out) {
+    if (t_in_internal_vk > 0) return create(phys, ci, a, out);
     ensure_deferred_init();
     openrr::pe::watchdog::Phase phase("vkCreateDevice (OpenRR)");
     struct Inside { Inside() { ++t_in_vk_create_device; } ~Inside() { --t_in_vk_create_device; } } inside;
@@ -3132,7 +3250,7 @@ VKAPI_ATTR VkResult VKAPI_CALL hk_vk_create_device(VkPhysicalDevice phys, const 
 
 VKAPI_ATTR VkResult VKAPI_CALL hk_vk_export_create_device(VkPhysicalDevice phys, const VkDeviceCreateInfo* ci,
                                                           const VkAllocationCallbacks* a, VkDevice* out) {
-    if (t_in_vk_create_device) return real_vk_export_create_device(phys, ci, a, out);
+    if (t_in_vk_create_device || t_in_internal_vk > 0) return real_vk_export_create_device(phys, ci, a, out);
     return do_vk_create_device(real_vk_export_create_device, VK_NULL_HANDLE, phys, ci, a, out);
 }
 
@@ -3149,12 +3267,12 @@ void on_vk_device_destroying(VkDevice device) {
 }
 
 VKAPI_ATTR void VKAPI_CALL hk_vk_destroy_device(VkDevice device, const VkAllocationCallbacks* a) {
-    on_vk_device_destroying(device);
+    if (t_in_internal_vk == 0) on_vk_device_destroying(device);
     real_vk_destroy_device(device, a);
 }
 
 VKAPI_ATTR void VKAPI_CALL hk_vk_gdpa_destroy_device(VkDevice device, const VkAllocationCallbacks* a) {
-    on_vk_device_destroying(device);
+    if (t_in_internal_vk == 0) on_vk_device_destroying(device);
     if (auto fn = g_gdpa_destroy_device.load()) fn(device, a);
 }
 
@@ -3818,7 +3936,8 @@ extern "C" __declspec(dllexport) void InitializeASI() {
     g_self_range = range_of(g_self);
 
     openrr::pe::set_module(g_opti);
-    openrr::pe::install_crash_watch();
+    openrr::pe::enable_d3d12_dred();
+    openrr::pe::install_crash_watch(g_opti);
     std::set_terminate([] {
         log("[openrr] std::terminate: an unhandled exception terminated an OpenRR thread");
         std::abort();

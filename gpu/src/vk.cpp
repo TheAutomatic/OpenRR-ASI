@@ -12,6 +12,20 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#include <tlhelp32.h>
+#include <cwchar>
+#ifdef MemoryBarrier
+#undef MemoryBarrier
+#endif
+#endif
 
 namespace onr {
 
@@ -215,6 +229,135 @@ bool vk_device_is_destroyed(VkDevice dev) {
     return g_destroyed_vk_devices.count(dev) != 0;
 }
 
+#ifdef _WIN32
+struct CachedAmdProps {
+    VkPhysicalDeviceProperties props{};
+    VkPhysicalDeviceDriverProperties drv{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
+};
+std::mutex g_real_props_m;
+std::unordered_map<uint64_t, CachedAmdProps> g_real_props_cache;
+
+bool ask_amd_icd(HMODULE icd, const uint8_t* luid, VkPhysicalDeviceProperties& out_props,
+                 VkPhysicalDeviceDriverProperties& out_drv) {
+    // Compatibility caveat: this probes an AMD ICD already loaded by Vulkan without
+    // negotiating a new loader/driver interface. No failure has been reproduced in
+    // the tested configurations. If the probe fails, keep the loader's properties.
+    auto gipa = reinterpret_cast<PFN_vkGetInstanceProcAddr>(
+        reinterpret_cast<void*>(GetProcAddress(icd, "vk_icdGetInstanceProcAddr")));
+    auto create_inst = gipa ? reinterpret_cast<PFN_vkCreateInstance>(gipa(VK_NULL_HANDLE, "vkCreateInstance")) : nullptr;
+    if (!create_inst) return false;
+    VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
+    app.pApplicationName = "openrr real-props";
+    app.apiVersion = VK_API_VERSION_1_3;
+    VkInstanceCreateInfo ici{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
+    ici.pApplicationInfo = &app;
+    VkInstance inst = VK_NULL_HANDLE;
+    if (create_inst(&ici, nullptr, &inst) != VK_SUCCESS || !inst) return false;
+    auto destroy_inst = reinterpret_cast<PFN_vkDestroyInstance>(gipa(inst, "vkDestroyInstance"));
+    auto enum_devs = reinterpret_cast<PFN_vkEnumeratePhysicalDevices>(gipa(inst, "vkEnumeratePhysicalDevices"));
+    auto get_props2 = reinterpret_cast<PFN_vkGetPhysicalDeviceProperties2>(gipa(inst, "vkGetPhysicalDeviceProperties2"));
+    bool found = false;
+    uint32_t n = 0;
+    if (enum_devs && get_props2 && enum_devs(inst, &n, nullptr) == VK_SUCCESS && n) {
+        std::vector<VkPhysicalDevice> devs(n);
+        if (enum_devs(inst, &n, devs.data()) == VK_SUCCESS) {
+            for (uint32_t i = 0; i < n && !found; ++i) {
+                VkPhysicalDeviceDriverProperties d{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
+                VkPhysicalDeviceIDProperties di{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES, &d};
+                VkPhysicalDeviceProperties2 p{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &di};
+                get_props2(devs[i], &p);
+                if (di.deviceLUIDValid && std::memcmp(di.deviceLUID, luid, VK_LUID_SIZE) == 0) {
+                    out_props = p.properties;
+                    void* next = out_drv.pNext;
+                    out_drv = d;
+                    out_drv.pNext = next;
+                    found = true;
+                }
+            }
+        }
+    }
+    if (destroy_inst) destroy_inst(inst, nullptr);
+    return found;
+}
+
+bool query_amd_icd_by_luid(const uint8_t* luid, VkPhysicalDeviceProperties& out_props,
+                           VkPhysicalDeviceDriverProperties& out_drv) {
+    uint64_t luid_key = 0;
+    std::memcpy(&luid_key, luid, sizeof(luid_key));
+    {
+        std::lock_guard<std::mutex> lock(g_real_props_m);
+        auto it = g_real_props_cache.find(luid_key);
+        if (it != g_real_props_cache.end()) {
+            out_props = it->second.props;
+            void* next = out_drv.pNext;
+            out_drv = it->second.drv;
+            out_drv.pNext = next;
+            return true;
+        }
+    }
+    std::vector<HMODULE> icds;
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, GetCurrentProcessId());
+    if (snap != INVALID_HANDLE_VALUE) {
+        MODULEENTRY32W me{};
+        me.dwSize = sizeof(me);
+        for (BOOL more = Module32FirstW(snap, &me); more; more = Module32NextW(snap, &me)) {
+            if (_wcsnicmp(me.szModule, L"amdvlk", 6) == 0 && GetProcAddress(me.hModule, "vk_icdGetInstanceProcAddr")) {
+                icds.push_back(me.hModule);
+            }
+        }
+        CloseHandle(snap);
+    }
+    for (HMODULE icd : icds) {
+        if (ask_amd_icd(icd, luid, out_props, out_drv)) {
+            std::lock_guard<std::mutex> lock(g_real_props_m);
+            CachedAmdProps cached{};
+            cached.props = out_props;
+            cached.drv = out_drv;
+            cached.drv.pNext = nullptr;
+            g_real_props_cache[luid_key] = cached;
+            return true;
+        }
+    }
+    return false;
+}
+#endif
+
+bool has_amd_marker_ext(const std::vector<VkExtensionProperties>& exts) {
+    for (const auto& x : exts) {
+        if (!std::strcmp(x.extensionName, "VK_AMD_shader_core_properties") ||
+            !std::strcmp(x.extensionName, "VK_AMD_gcn_shader") ||
+            !std::strcmp(x.extensionName, "VK_AMD_buffer_marker")) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool query_real_vk_props(VkPhysicalDevice pd, VkPhysicalDeviceProperties& out_props,
+                         VkPhysicalDeviceDriverProperties& out_drv,
+                         VkPhysicalDeviceIDProperties* out_id) {
+    VkPhysicalDeviceIDProperties id{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES};
+    void* drv_next = out_drv.pNext;
+    out_drv = VkPhysicalDeviceDriverProperties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES, &id};
+    VkPhysicalDeviceProperties2 p2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &out_drv};
+    vkGetPhysicalDeviceProperties2(pd, &p2);
+    out_props = p2.properties;
+    out_drv.pNext = drv_next;
+    if (out_id) *out_id = id;
+#ifdef _WIN32
+    if (id.deviceLUIDValid) {
+        VkPhysicalDeviceProperties icd_props{};
+        VkPhysicalDeviceDriverProperties icd_drv{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES, drv_next};
+        if (query_amd_icd_by_luid(id.deviceLUID, icd_props, icd_drv)) {
+            out_props = icd_props;
+            out_drv = icd_drv;
+            return true;
+        }
+    }
+#endif
+    return out_props.vendorID == 0x1002;
+}
+
 VkPhysicalDevice pick_vk_physical_device(const std::vector<VkPhysicalDevice>& devs, const uint8_t* luid,
                                          std::string* out_name, uint32_t* out_api_version, bool* out_is_amd) {
     if (out_name) out_name->clear();
@@ -229,19 +372,16 @@ VkPhysicalDevice pick_vk_physical_device(const std::vector<VkPhysicalDevice>& de
         VkPhysicalDeviceType type = VK_PHYSICAL_DEVICE_TYPE_OTHER;
         bool luid_match = false;
         bool is_amd = false;
+        bool has_cm = false;
         bool has_f8_cm = false;
     };
     std::vector<Cand> cands;
     cands.reserve(devs.size());
     for (VkPhysicalDevice pd : devs) {
+        VkPhysicalDeviceProperties p_props{};
         VkPhysicalDeviceDriverProperties drv{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
-        VkPhysicalDeviceIDProperties id{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES, &drv};
-        VkPhysicalDeviceProperties2 p{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &id};
-        vkGetPhysicalDeviceProperties2(pd, &p);
-        const bool is_amd = (p.properties.vendorID == 0x1002) ||
-                            (drv.driverID == VK_DRIVER_ID_AMD_PROPRIETARY) ||
-                            (drv.driverID == VK_DRIVER_ID_AMD_OPEN_SOURCE) ||
-                            (drv.driverID == VK_DRIVER_ID_MESA_RADV);
+        VkPhysicalDeviceIDProperties id{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES};
+        query_real_vk_props(pd, p_props, drv, &id);
         const bool luid_match = luid && id.deviceLUIDValid && !std::memcmp(id.deviceLUID, luid, VK_LUID_SIZE);
         uint32_t ne = 0;
         vkEnumerateDeviceExtensionProperties(pd, nullptr, &ne, nullptr);
@@ -252,8 +392,14 @@ VkPhysicalDevice pick_vk_physical_device(const std::vector<VkPhysicalDevice>& de
             if (!std::strcmp(x.extensionName, VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME)) has_cm = true;
             else if (!std::strcmp(x.extensionName, VK_EXT_SHADER_FLOAT8_EXTENSION_NAME)) has_f8 = true;
         }
-        cands.push_back(Cand{pd, p.properties.deviceName, p.properties.apiVersion, p.properties.deviceType,
-                             luid_match, is_amd || (has_cm && has_f8), has_cm && has_f8});
+        const bool is_amd = (p_props.vendorID == 0x1002) ||
+                            (drv.driverID == VK_DRIVER_ID_AMD_PROPRIETARY) ||
+                            (drv.driverID == VK_DRIVER_ID_AMD_OPEN_SOURCE) ||
+                            (drv.driverID == VK_DRIVER_ID_MESA_RADV) ||
+                            has_amd_marker_ext(exts) ||
+                            (has_cm && has_f8);
+        cands.push_back(Cand{pd, p_props.deviceName, p_props.apiVersion, p_props.deviceType,
+                             luid_match, is_amd, has_cm, has_cm && has_f8});
     }
 
     const Cand* chosen = nullptr;
@@ -266,13 +412,31 @@ VkPhysicalDevice pick_vk_physical_device(const std::vector<VkPhysicalDevice>& de
         for (const auto& c : cands) {
             if (c.type == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU && c.is_amd && c.has_f8_cm) { chosen = &c; break; }
         }
-        // 2. Discrete GPU with AMD identity/driver (e.g. RDNA3 / RDNA2 discrete GPU)
+        // 2. Discrete GPU with AMD identity/driver and cooperative matrix (e.g. RDNA3 discrete GPU)
+        if (!chosen) {
+            for (const auto& c : cands) {
+                if (c.type == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU && c.is_amd && c.has_cm) { chosen = &c; break; }
+            }
+        }
+        // 3. Discrete GPU with AMD identity/driver
         if (!chosen) {
             for (const auto& c : cands) {
                 if (c.type == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU && c.is_amd) { chosen = &c; break; }
             }
         }
-        // 3. Fallback to first enumerated device only when no discrete candidate matched
+        // 4. Integrated/APU AMD GPU with cooperative matrix (e.g. Radeon 780M / 890M / 8060S)
+        if (!chosen) {
+            for (const auto& c : cands) {
+                if (c.is_amd && c.has_cm) { chosen = &c; break; }
+            }
+        }
+        // 5. Any remaining AMD device before non-AMD devices
+        if (!chosen) {
+            for (const auto& c : cands) {
+                if (c.is_amd) { chosen = &c; break; }
+            }
+        }
+        // 6. Fallback to first enumerated device only when no AMD candidate matched
         if (!chosen) chosen = &cands[0];
     }
 
@@ -347,13 +511,14 @@ bool Device::init(std::string& err, const DeviceOptions& opt) {
         phys_ = pick_vk_physical_device(devs, opt.luid);
         if (!phys_) throw std::runtime_error(opt.luid ? "no Vulkan device with the adapter's LUID" : "no Vulkan device");
 
+        VkPhysicalDeviceProperties props{};
         VkPhysicalDeviceDriverProperties drv{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
-        VkPhysicalDeviceProperties2 p2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &drv};
-        vkGetPhysicalDeviceProperties2(phys_, &p2);
-        info_.name = p2.properties.deviceName;
-        info_.driver_version = p2.properties.driverVersion;
+        query_real_vk_props(phys_, props, drv);
+        info_.name = props.deviceName;
+        info_.vendor = props.vendorID;
+        info_.driver_version = props.driverVersion;
         info_.driver_info = drv.driverInfo;
-        ts_period_ns_ = p2.properties.limits.timestampPeriod;
+        ts_period_ns_ = props.limits.timestampPeriod;
         vkGetPhysicalDeviceMemoryProperties(phys_, &memp_);
 
         // features we use
@@ -370,6 +535,7 @@ bool Device::init(std::string& err, const DeviceOptions& opt) {
         vkEnumerateDeviceExtensionProperties(phys_, nullptr, &ne, nullptr);
         std::vector<VkExtensionProperties> exts(ne);
         vkEnumerateDeviceExtensionProperties(phys_, nullptr, &ne, exts.data());
+        if (info_.vendor != 0x1002 && has_amd_marker_ext(exts)) info_.vendor = 0x1002;
         auto has = [&](const char* e) {
             return std::any_of(exts.begin(), exts.end(), [&](auto& x) { return !strcmp(x.extensionName, e); });
         };
@@ -514,29 +680,35 @@ bool Device::adopt(const HostDevice& h, std::string& err) {
         phys_ = h.physical;
         dev_ = h.device;
         qfam_ = h.queue_family;
+        VkPhysicalDeviceProperties props{};
         VkPhysicalDeviceDriverProperties drv{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
-        VkPhysicalDeviceProperties2 p2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &drv};
-        vkGetPhysicalDeviceProperties2(phys_, &p2);
-        info_.name = p2.properties.deviceName;
-        info_.driver_version = p2.properties.driverVersion;
+        query_real_vk_props(phys_, props, drv);
+        info_.name = props.deviceName;
+        info_.vendor = props.vendorID;
+        info_.driver_version = props.driverVersion;
         info_.driver_info = drv.driverInfo;
-        ts_period_ns_ = p2.properties.limits.timestampPeriod;
+        ts_period_ns_ = props.limits.timestampPeriod;
         vkGetPhysicalDeviceMemoryProperties(phys_, &memp_);
+        bool has_f8 = false;
         {
             uint32_t ne = 0;
             vkEnumerateDeviceExtensionProperties(phys_, nullptr, &ne, nullptr);
             std::vector<VkExtensionProperties> exts(ne);
             vkEnumerateDeviceExtensionProperties(phys_, nullptr, &ne, exts.data());
-            for (auto& e : exts) budget_ |= !strcmp(e.extensionName, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
+            if (info_.vendor != 0x1002 && has_amd_marker_ext(exts)) info_.vendor = 0x1002;
+            for (auto& e : exts) {
+                budget_ |= !strcmp(e.extensionName, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
+                has_f8 |= !strcmp(e.extensionName, VK_EXT_SHADER_FLOAT8_EXTENSION_NAME);
+            }
         }
         // the host enabled these through PrepareVkDevice, which asked the GPU the same
         VkPhysicalDeviceShaderFloat8FeaturesEXT f8{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT8_FEATURES_EXT};
-        VkPhysicalDeviceCooperativeMatrixFeaturesKHR cm{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR, &f8};
+        VkPhysicalDeviceCooperativeMatrixFeaturesKHR cm{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR, has_f8 ? &f8 : nullptr};
         VkPhysicalDeviceVulkan12Features v12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, &cm};
         VkPhysicalDeviceFeatures2 f2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &v12};
         vkGetPhysicalDeviceFeatures2(phys_, &f2);
         info_.coopmat = cm.cooperativeMatrix;
-        info_.fp8_coopmat = f8.shaderFloat8 && f8.shaderFloat8CooperativeMatrix;
+        info_.fp8_coopmat = has_f8 && f8.shaderFloat8 && f8.shaderFloat8CooperativeMatrix;
         info_.fp64 = f2.features.shaderFloat64;
         host_query_reset_ = v12.hostQueryReset != VK_FALSE;
         if (!host_query_reset_)
@@ -780,6 +952,7 @@ Kernel Device::load(const std::string& path, uint32_t subgroup) {
     const std::string stem = path_to_u8(fs_path.stem());
     k.views = stem.rfind("d3d_", 0) == 0;
     cpi.layout = k.views ? d3d_layout_ : layout_;
+    cpi.flags = pipeline_flags;
     if (stats_) cpi.flags |= VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR;
     const char* isa = stats_ ? getenv("ONR_ISA") : nullptr;   // directory: dump the driver's internal representations
     if (isa) cpi.flags |= VK_PIPELINE_CREATE_CAPTURE_INTERNAL_REPRESENTATIONS_BIT_KHR;

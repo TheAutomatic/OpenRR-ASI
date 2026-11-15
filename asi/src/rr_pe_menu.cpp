@@ -466,11 +466,16 @@ struct Menu {
                 ini.set("OpenRR", "Backend", be_idx == 1 ? "d3d12" : be_idx == 2 ? "vulkan" : "auto");
             }
 
-            const std::string mode = ini.get("OpenRR", "Mode", "new");
-            int mode_idx = (mode == "legacy" || mode == "0") ? 1 : 0;
-            const char* mode_items[] = {"Fast (_lt kernels, recommended)", "Legacy (full-precision _f kernels)"};
-            if (ImGui::Combo("Network Mode", &mode_idx, mode_items, 2)) {
-                ini.set("OpenRR", "Mode", mode_idx == 1 ? "legacy" : "new");
+            int mode_idx = openrr::pe::network_mode_level(ini.get("OpenRR", "Mode", "new"));
+            const char* mode_items[] = {"Legacy", "New (recommended)", "Fast (experimental)"};
+            const char* mode_values[] = {"legacy", "new", "fast"};
+            if (ImGui::Combo("Network Mode", &mode_idx, mode_items, IM_ARRAYSIZE(mode_items))) {
+                ini.set("OpenRR", "Mode", mode_values[mode_idx]);
+            }
+            if (s && s->rr_active) {
+                const char* active_modes[] = {"Legacy", "New", "Building fast kernels", "Fast kernels unavailable", "Fast (experimental)"};
+                if (s->fast_mode < IM_ARRAYSIZE(active_modes))
+                    ImGui::TextDisabled("Runtime: %s", active_modes[s->fast_mode]);
             }
 
             const std::string cs = ini.get("OpenRR", "CoexistSplit", "auto");
@@ -493,6 +498,10 @@ struct Menu {
             if (ImGui::Combo("Vulkan Input Layout", &vkl_idx, vkl_items, 2)) {
                 ini.set("OpenRR", "VkInputLayout", vkl_idx == 1 ? "general" : "shader_read");
             }
+#ifdef OPENRR_EXPERIMENTAL_OPTIFG_HOST
+            checkbox_ini("OptiFG Host Bridge (experimental)", "OptiFGHost", false);
+            ImGui::SetItemTooltip("Restart required. Set OptiScaler's [Libraries] NvngxPath to load openrr-ngx-host.dll.");
+#endif
         }
 
         ImGui::Spacing();
@@ -517,6 +526,16 @@ struct Menu {
 
         ImGui::Spacing();
         if (ImGui::CollapsingHeader("Menu & Hotkeys")) {
+            char menu_key_text[64];
+            std::snprintf(menu_key_text, sizeof menu_key_text, "%s", ini.get("OpenRR", "MenuKey", "optiscaler").c_str());
+            if (ImGui::InputText("Menu Key", menu_key_text, sizeof menu_key_text, ImGuiInputTextFlags_EnterReturnsTrue)) {
+                int vk = 0;
+                if (openrr::pe::parse_key(menu_key_text, &vk) && vk)
+                    ini.set("OpenRR", "MenuKey", menu_key_text);
+            }
+            ImGui::SetItemTooltip("Enter a key such as F7 or Ctrl+F7, then press Enter.");
+            if (ImGui::Button("Use OptiScaler Shortcut"))
+                ini.set("OpenRR", "MenuKey", "optiscaler");
             checkbox_ini("Pass OptiScaler Key (Insert) while open", "PassOptiScalerKey", true);
             float mscale = openrr::parse_float(ini.get("OpenRR", "MenuScale", "1.0"), 1.0f);
             if (ImGui::SliderFloat("Menu Size", &mscale, 0.75f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp)) {
@@ -1245,16 +1264,37 @@ template <int N> HRESULT STDMETHODCALLTYPE resize1_hook(IDXGISwapChain3* sc, UIN
     return hr;
 }
 
+void log_removed_at_present(IDXGISwapChain* sc, HRESULT hr) {
+    if (hr != DXGI_ERROR_DEVICE_REMOVED && hr != DXGI_ERROR_DEVICE_RESET && hr != DXGI_ERROR_DEVICE_HUNG) return;
+    if (!d3d12_diagnostics_enabled()) return;
+    ID3D12Device* device = nullptr;
+    if (FAILED(sc->GetDevice(IID_PPV_ARGS(&device))) || !device) {
+        ID3D12CommandQueue* queue = dxgi_queue::get(sc);
+        if (queue) {
+            queue->GetDevice(IID_PPV_ARGS(&device));
+            queue->Release();
+        }
+    }
+    if (device) {
+        log_d3d12_device_removed(device, "Present");
+        device->Release();
+    }
+}
+
 template <int N> HRESULT STDMETHODCALLTYPE present_hook(IDXGISwapChain* sc, UINT interval, UINT flags) {
     const PresentScope scope;
     if (scope.outermost()) draw_on(sc, flags);
-    return g_present[N](sc, interval, flags);
+    const HRESULT hr = g_present[N](sc, interval, flags);
+    if (scope.outermost()) log_removed_at_present(sc, hr);
+    return hr;
 }
 template <int N> HRESULT STDMETHODCALLTYPE present1_hook(IDXGISwapChain1* sc, UINT interval, UINT flags,
                                                          const DXGI_PRESENT_PARAMETERS* p) {
     const PresentScope scope;
     if (scope.outermost()) draw_on(sc, flags);
-    return g_present1[N](sc, interval, flags, p);
+    const HRESULT hr = g_present1[N](sc, interval, flags, p);
+    if (scope.outermost()) log_removed_at_present(sc, hr);
+    return hr;
 }
 template <int N> HRESULT STDMETHODCALLTYPE colour_space_hook(IDXGISwapChain3* sc, DXGI_COLOR_SPACE_TYPE space) {
     const HRESULT hr = g_colour_space[N](sc, space);

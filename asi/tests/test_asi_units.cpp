@@ -10,8 +10,11 @@
 #include "rr_pe_d3d12split.hpp"
 #include "rr_pe_vkdevice.hpp"
 #include "opennr_rr_api.h"
+#include "rr_d3d12_record.hpp"
+#include "rr_data_paths.hpp"
 #include "opennr_rr/d3d12.hpp"
 #include "opennr_rr/engine.hpp"
+#include "opennr_rr/vk.hpp"
 
 #include <windows.h>
 #include <d3d12.h>
@@ -28,6 +31,60 @@
 #include <thread>
 #include <vector>
 #include "aco_compare.hpp"
+
+// ---- R33: count-only probes for host-visible command-list state mutations ----
+// They deliberately do not forward: the D3D12 vtable entries they shadow are already MinHook-detoured by the split
+// hooks of this process, and the detour resolves "our" entry back to itself, so forwarding would re-enter the probe.
+// R33 asserts the counts stay 0, so the shadowed call never has to reach the driver.
+static int g_probe_set_heaps = 0;
+static int g_probe_set_graphics_rs = 0;
+static int g_probe_set_graphics_table = 0;
+using PFN_Probe_SetHeaps = void(STDMETHODCALLTYPE*)(ID3D12GraphicsCommandList*, UINT, ID3D12DescriptorHeap* const*);
+using PFN_Probe_SetGraphicsRs = void(STDMETHODCALLTYPE*)(ID3D12GraphicsCommandList*, ID3D12RootSignature*);
+using PFN_Probe_SetGraphicsTable = void(STDMETHODCALLTYPE*)(ID3D12GraphicsCommandList*, UINT, D3D12_GPU_DESCRIPTOR_HANDLE);
+
+static void STDMETHODCALLTYPE probe_set_heaps(ID3D12GraphicsCommandList*, UINT, ID3D12DescriptorHeap* const*) {
+    ++g_probe_set_heaps;
+}
+
+static void STDMETHODCALLTYPE probe_set_graphics_rs(ID3D12GraphicsCommandList*, ID3D12RootSignature*) {
+    ++g_probe_set_graphics_rs;
+}
+
+static void STDMETHODCALLTYPE probe_set_graphics_table(ID3D12GraphicsCommandList*, UINT, D3D12_GPU_DESCRIPTOR_HANDLE) {
+    ++g_probe_set_graphics_table;
+}
+
+static int test_installed_data_paths() {
+    namespace fs = std::filesystem;
+    const auto game = fs::temp_directory_path() /
+        (L"openrr-data-paths-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
+    const auto storage = game / L"_storage_";
+    const auto payload = game / L"openrr-amd";
+    const auto shaders = payload / L"shaders";
+    fs::create_directories(shaders);
+    fs::create_directory(storage);
+    std::ofstream(storage / L"nvngx_dlssd.dll").close();
+    std::ofstream(payload / L"nvngx_dlssd.dll").close();
+
+    using openrr::pe::installed_data_dir;
+    const bool ok = installed_data_dir(storage, L"nvngx_dlssd.dll") == payload &&
+                    installed_data_dir(storage, L"shaders") == payload &&
+                    installed_data_dir(game, L"nvngx_dlssd.dll") == payload &&
+                    installed_data_dir(storage, L"missing").empty();
+    fs::remove(payload / L"nvngx_dlssd.dll");
+    fs::remove(storage / L"nvngx_dlssd.dll");
+    fs::remove(shaders);
+    fs::remove(payload);
+    fs::remove(storage);
+    fs::remove(game);
+    if (!ok) {
+        std::fprintf(stderr, "FAIL: OpenRR installed data lookup under RE9 _storage_\n");
+        return 1;
+    }
+    std::printf("[PASS] RE9 _storage_ resolves the game-root OpenRR weights and shaders\n");
+    return 0;
+}
 
 static int test_key_parsing() {
     int vk = 0, mods = 0;
@@ -80,13 +137,21 @@ static int test_key_parsing() {
         const std::string en_after = ini2.get("OpenRR", "Enabled", "true");
         const std::string mode_after = ini2.get("OpenRR", "Mode", "");
         const openrr::pe::Config cfg_after = openrr::pe::load_config_file(openrr::u8::text(tmp_ini));
+        ini2.set("OpenRR", "Mode", "Fast");
+        ini2.save();
+        const auto experimental = openrr::pe::load_config_file(openrr::u8::text(tmp_ini));
         std::error_code ec;
         std::filesystem::remove(tmp_ini, ec);
+        if (experimental.mode != 2 || openrr::pe::network_mode_level("2") != 2 ||
+            openrr::pe::network_mode_level("new") != 1) {
+            std::fprintf(stderr, "FAIL: OpenRR experimental mode was not preserved by the INI parser\n");
+            return 1;
+        }
         if (std::string(prof_buf) != "false" || en_before != "false" || en_after != "false" || mode_after != "legacy" ||
-            cfg_before.enabled || cfg_after.enabled || cfg_after.mode != "legacy") {
-            std::fprintf(stderr, "FAIL: R7/R8 BOM/newline test failed (prof='%s' before='%s' after='%s' mode='%s' cfg_en=%d/%d cfg_mode='%s')\n",
+            cfg_before.enabled || cfg_after.enabled || cfg_after.mode != 0) {
+            std::fprintf(stderr, "FAIL: R7/R8 BOM/newline test failed (prof='%s' before='%s' after='%s' mode='%s' cfg_en=%d/%d cfg_mode=%d)\n",
                          prof_buf, en_before.c_str(), en_after.c_str(), mode_after.c_str(),
-                         int(cfg_before.enabled), int(cfg_after.enabled), cfg_after.mode.c_str());
+                         int(cfg_before.enabled), int(cfg_after.enabled), cfg_after.mode);
             return 1;
         }
         std::printf("[PASS] Item R7/R8 (UTF-8 BOM & missing trailing newline in load_config_file + Ini): Enabled='%s', appended Mode='%s'\n",
@@ -583,6 +648,86 @@ static int test_d3d12_gpu_and_engine() {
             }
             std::printf("[PASS] Item #2 (D3dDevice::fill 256 KB > 64 KB ring): unbound wrong=%zu, bound wrong=%zu\n",
                         wrong_unbound, wrong_bound);
+        }
+
+        // ---- R33: D3dDevice::bind()/dispatch() must leave host descriptor heaps and graphics root state untouched ----
+        {
+            ID3D12CommandAllocator* ca_probe = nullptr;
+            ID3D12GraphicsCommandList* cl_probe = nullptr;
+            ID3D12DescriptorHeap* host_heaps[2]{};
+            D3D12_DESCRIPTOR_HEAP_DESC hpd{};
+            hpd.NumDescriptors = 16;
+            hpd.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+            hpd.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+            const HRESULT hr_ca = dev->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&ca_probe));
+            const HRESULT hr_cl = SUCCEEDED(hr_ca)
+                ? dev->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, ca_probe, nullptr, IID_PPV_ARGS(&cl_probe))
+                : hr_ca;
+            const HRESULT hr_h0 = SUCCEEDED(hr_cl) ? dev->CreateDescriptorHeap(&hpd, IID_PPV_ARGS(&host_heaps[0])) : hr_cl;
+            hpd.Type = D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER;
+            const HRESULT hr_h1 = SUCCEEDED(hr_h0) ? dev->CreateDescriptorHeap(&hpd, IID_PPV_ARGS(&host_heaps[1])) : hr_h0;
+            if (FAILED(hr_h1) || !cl_probe || !host_heaps[0] || !host_heaps[1]) {
+                std::fprintf(stderr, "FAIL: R33 could not create host command list / descriptor heaps (0x%lX)\n",
+                             static_cast<unsigned long>(hr_h1));
+                dev->Release();
+                return 1;
+            }
+            // The host (RE9 D3D12 path tracing) binds [ResourceDescriptorHeap, SamplerDescriptorHeap].
+            cl_probe->SetDescriptorHeaps(2, host_heaps);
+
+            onr::Kernels k_probe;
+            k_probe.load(d3d, spv_dir, {"clear_range"});
+            onr::Buffer b_probe = d3d.create(4096);
+            onr::d3d12_note_list_reset(cl_probe, ca_probe);
+
+            void** vt_probe = *reinterpret_cast<void***>(cl_probe);
+            void* copied_probe_vt[86]{};
+            std::memcpy(copied_probe_vt, vt_probe, sizeof copied_probe_vt);
+            copied_probe_vt[28] = reinterpret_cast<void*>(&probe_set_heaps);
+            copied_probe_vt[30] = reinterpret_cast<void*>(&probe_set_graphics_rs);
+            copied_probe_vt[32] = reinterpret_cast<void*>(&probe_set_graphics_table);
+            *reinterpret_cast<void***>(cl_probe) = copied_probe_vt;
+
+            // Self-check: the probe is wired into the copied vtable (count only, nothing reaches the driver).
+            reinterpret_cast<PFN_Probe_SetHeaps>(copied_probe_vt[28])(cl_probe, 0, nullptr);
+            const int probe_self_check = g_probe_set_heaps;
+            g_probe_set_heaps = g_probe_set_graphics_rs = g_probe_set_graphics_table = 0;
+
+            d3d.bind(cl_probe, 0);
+            const onr::ClearRangePC pc{b_probe.addr, 4096u, 0u};
+            k_probe.run(d3d, "clear_range", &pc, sizeof pc, 5u);
+            d3d.unbind();
+
+            *reinterpret_cast<void***>(cl_probe) = vt_probe;
+            const int n_heaps = g_probe_set_heaps;
+            const int n_graphics_rs = g_probe_set_graphics_rs;
+            const int n_graphics_table = g_probe_set_graphics_table;
+
+            d3d.destroy(b_probe);
+            k_probe.unload(d3d);
+            cl_probe->Close();
+            cl_probe->Release();
+            ca_probe->Release();
+            host_heaps[0]->Release();
+            host_heaps[1]->Release();
+
+            if (probe_self_check != 1) {
+                std::fprintf(stderr, "FAIL: R33 probe self-check did not observe the routed SetDescriptorHeaps call (%d)\n",
+                             probe_self_check);
+                dev->Release();
+                return 1;
+            }
+            if (n_heaps != 0 || n_graphics_rs != 0 || n_graphics_table != 0) {
+                std::fprintf(stderr,
+                             "FAIL: R33 bind()/dispatch() mutated host state: SetDescriptorHeaps=%d "
+                             "SetGraphicsRootSignature=%d SetGraphicsRootDescriptorTable=%d\n",
+                             n_heaps, n_graphics_rs, n_graphics_table);
+                dev->Release();
+                return 1;
+            }
+            std::printf("[PASS] R33 (D3dDevice::bind/dispatch preserves host state): SetDescriptorHeaps=%d, "
+                        "SetGraphicsRootSignature=%d, SetGraphicsRootDescriptorTable=%d\n",
+                        n_heaps, n_graphics_rs, n_graphics_table);
         }
 
         const char* dlssd = std::getenv("OPENRR_DLSSD");
@@ -1136,13 +1281,16 @@ static int test_d3d12_gpu_and_engine() {
                         ID3D12CommandAllocator* sat_alloc = nullptr;
                         dev->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&sat_alloc));
                         std::vector<ID3D12GraphicsCommandList*> sat_lists;
+                        bool host_binding_report_ok = true;
                         int ok_count = 0, busy_rc = 0;
                         for (int i = 0; i < 128; ++i) {
                             ID3D12GraphicsCommandList* l = nullptr;
                             dev->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, sat_alloc, nullptr, IID_PPV_ARGS(&l));
                             OnrRrNotifyD3d12ListReset(l, sat_alloc);
-                            void* job = nullptr;
-                            const int32_t rc = api4.Record(rt, &fr, l, ONR_RR_EDIT_OFF, nullptr, &job);
+                            bool host_bound = false;
+                            const int32_t rc = openrr::pe::record_d3d12(rt, &fr, l, host_bound, false);
+                            if (rc == ONR_RR_OK && !host_bound) host_binding_report_ok = false;
+                            if (rc == ONR_RR_BUSY && host_bound) host_binding_report_ok = false;
                             l->Close();
                             sat_lists.push_back(l);
                             if (rc == ONR_RR_OK) ++ok_count;
@@ -1150,6 +1298,18 @@ static int test_d3d12_gpu_and_engine() {
                         }
                         sat_alloc->Reset();
                         OnrRrNotifyD3d12AllocatorReset(sat_alloc);
+                        sat_lists[0]->Reset(sat_alloc, nullptr);
+                        OnrRrNotifyD3d12ListReset(sat_lists[0], sat_alloc);
+                        OnrRrFrame invalid_output = fr;
+                        invalid_output.output.x = 1;
+                        void* rejected_job = nullptr;
+                        const int32_t invalid_rc = api4.Record(rt, &invalid_output, sat_lists[0], ONR_RR_EDIT_OFF,
+                                                               nullptr, &rejected_job);
+                        char invalid_error[256]{};
+                        api4.v3.v2.v1.GetLastError(invalid_error, sizeof(invalid_error));
+                        sat_lists[0]->Close();
+                        const bool invalid_rect_rejected = invalid_rc == ONR_RR_INVALID_ARGUMENT && !rejected_job &&
+                                                           std::strstr(invalid_error, "output rectangle");
                         int loop_ok = 0;
                         for (int iter = 0; iter < 135; ++iter) {
                             sat_alloc->Reset();
@@ -1175,6 +1335,19 @@ static int test_d3d12_gpu_and_engine() {
                             if (r) r->Release();
                         api4.v3.v2.v1.Destroy(rt);
 
+                        if (!host_binding_report_ok) {
+                            std::fprintf(stderr, "FAIL: D3D12 host binding report on successful or busy Record\n");
+                            dev->Release();
+                            return 1;
+                        }
+                        std::printf("[PASS] D3D12 host binding report distinguishes successful and busy Record\n");
+                        if (!invalid_rect_rejected) {
+                            std::fprintf(stderr, "FAIL: D3D12 output rectangle outside texture (rc=%d, %s)\n",
+                                         invalid_rc, invalid_error);
+                            dev->Release();
+                            return 1;
+                        }
+                        std::printf("[PASS] D3D12 rejects an output rectangle that exceeds the texture at a nonzero offset\n");
                         if (ok_count != 127 || busy_rc != ONR_RR_BUSY || rc_after != ONR_RR_OK) {
                             std::fprintf(stderr, "FAIL: ONR_RR_BUSY test ok_count=%d busy_rc=%d loop_ok=%d\n",
                                          ok_count, busy_rc, loop_ok);
@@ -1555,6 +1728,46 @@ static int test_d3d12_gpu_and_engine() {
     return 0;
 }
 
+static int test_vk_unspoof_and_rdna3_pick() {
+    openrr::pe::vulkan_entry_points();
+    VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
+    app.apiVersion = VK_API_VERSION_1_3;
+    VkInstanceCreateInfo ici{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
+    ici.pApplicationInfo = &app;
+    VkInstance inst = VK_NULL_HANDLE;
+    if (vkCreateInstance(&ici, nullptr, &inst) != VK_SUCCESS || !inst) {
+        std::fprintf(stderr, "FAIL: test_vk_unspoof_and_rdna3_pick vkCreateInstance failed\n");
+        return 1;
+    }
+    uint32_t count = 0;
+    vkEnumeratePhysicalDevices(inst, &count, nullptr);
+    std::vector<VkPhysicalDevice> devs(count);
+    if (count) vkEnumeratePhysicalDevices(inst, &count, devs.data());
+    std::string picked_name;
+    uint32_t api_ver = 0;
+    bool is_amd = false;
+    const VkPhysicalDevice picked = onr::pick_vk_physical_device(devs, nullptr, &picked_name, &api_ver, &is_amd);
+    if (!picked || !is_amd) {
+        vkDestroyInstance(inst, nullptr);
+        std::fprintf(stderr, "FAIL: pick_vk_physical_device picked=%p is_amd=%d name='%s'\n",
+                     static_cast<void*>(picked), int(is_amd), picked_name.c_str());
+        return 1;
+    }
+    VkPhysicalDeviceProperties props{};
+    VkPhysicalDeviceDriverProperties drv{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
+    onr::query_real_vk_props(picked, props, drv);
+    vkDestroyInstance(inst, nullptr);
+    if (props.vendorID != 0x1002 || props.deviceName[0] == '\0' ||
+        std::strstr(props.deviceName, "NVIDIA") != nullptr) {
+        std::fprintf(stderr, "FAIL: query_real_vk_props vendor=0x%04x name='%s' drv='%s'\n",
+                     props.vendorID, props.deviceName, drv.driverInfo);
+        return 1;
+    }
+    std::printf("[PASS] Vulkan unspoof & RDNA3/RDNA4 device pick: vendor=0x%04x name='%s' driver='%s'\n",
+                props.vendorID, props.deviceName, drv.driverInfo);
+    return 0;
+}
+
 int main() {
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
     std::set_terminate([] {
@@ -1566,7 +1779,16 @@ int main() {
     });
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     std::setvbuf(stderr, nullptr, _IONBF, 0);
+    bool host_bound = true;
+    const int32_t rc = openrr::pe::record_d3d12(nullptr, nullptr, nullptr, host_bound, false);
+    if (rc != ONR_RR_INVALID_ARGUMENT || host_bound) {
+        std::fprintf(stderr, "FAIL: rejected D3D12 Record must not request host state restoration\n");
+        return 1;
+    }
+    std::printf("[PASS] rejected D3D12 Record leaves host state untouched\n");
+    if (test_installed_data_paths() != 0) return 1;
     if (test_key_parsing() != 0) return 1;
+    if (test_vk_unspoof_and_rdna3_pick() != 0) return 1;
     if (test_split_hardening_and_eligibility() != 0) return 1;
     if (test_d3d12_gpu_and_engine() != 0) return 1;
     std::printf("ALL ASI UNIT TESTS PASSED\n");

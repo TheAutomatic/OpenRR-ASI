@@ -42,6 +42,10 @@
 #include "opennr_rr_api.h"
 #include "vk_host.hpp"
 #include "aco_runtime_trace.hpp"
+#ifdef ONR_RR_STATIC
+#include "rr_pe_log.hpp"
+#include "rr_d3d12_record.hpp"
+#endif
 
 using namespace onr;
 
@@ -90,17 +94,27 @@ class Log {
 public:
     ~Log() { close(); }
     void open(const std::wstring& path, bool new_session = false) {
+#ifdef ONR_RR_STATIC
+        (void)path;
+#else
         std::lock_guard l(m_);
         if (new_session && f_) fclose(f_), f_ = nullptr;
         if (!f_) f_ = _wfsopen(path.c_str(), L"a", _SH_DENYNO);
+#endif
     }
     void flush() {
+#ifdef ONR_RR_STATIC
+        openrr::pe::flush_log();
+#else
         std::lock_guard l(m_);
         if (f_) fflush(f_);
+#endif
     }
     void close() {
+#ifndef ONR_RR_STATIC
         std::lock_guard l(m_);
         if (f_) fclose(f_), f_ = nullptr;
+#endif
     }
     void operator()(const char* fmt, ...) {
         char b[4096];
@@ -108,6 +122,11 @@ public:
         va_start(a, fmt);
         vsnprintf(b, sizeof b, fmt, a);
         va_end(a);
+#ifdef ONR_RR_STATIC
+        size_t len = std::strlen(b);
+        while (len > 0 && (b[len - 1] == '\n' || b[len - 1] == '\r')) b[--len] = '\0';
+        openrr::pe::log("%s", b);
+#else
         SYSTEMTIME t;
         GetLocalTime(&t);
         const ULONGLONG now = GetTickCount64();
@@ -120,6 +139,7 @@ public:
             fflush(f_);
             last_flush_ = now;
         }
+#endif
     }
 
 private:
@@ -474,7 +494,12 @@ struct Ctx {
     bool direct_ok = false;            // d3d_ingest / d3d_pack read and write the game's textures (their check passed)
     Buffer dinput, doutput, dimage;    // the guides' copies, the output's rows, the denoised image (hop)
     uint64_t drecords = 0;             // recordings into the game's lists (dx ring slots)
+    // the last footprint per guide slot: GetCopyableFootprints only when the texture's description or offset changes
+    struct Footprint { D3D12_RESOURCE_DESC desc; UINT64 off, total; D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp; };
+    Footprint fps[G_COUNT] = {};
     uint32_t dq[D3dDevice::kSlots] = {}, dqnet[D3dDevice::kSlots][2] = {};
+    bool dqhop[D3dDevice::kSlots] = {};   // the slot holds a hop's first half, its RecordPost the rest
+    float dhop_ms = 0;                    // that first half's time, added to the RecordPost's
     std::wstring cache_dir;
     // Vulkan host backend (ABI 5): dev is the game's device, the frames recorded into its command buffers
     bool vk_host = false;
@@ -736,9 +761,15 @@ struct Rec {
     const char* ingest = "ingest";
     const char* pack = "pack";
     uint32_t out_fmt = 0, out_pitch = 0;   // D3D12 straight into the output texture: TF_RGBA16F | 256, x | y << 16
+    ID3D12GraphicsCommandList* diagnostic_list = nullptr;
 };
 
+template <size_t N> void rr_marker(ID3D12GraphicsCommandList* list, const wchar_t (&label)[N]) {
+    if (list) list->SetMarker(0, label, sizeof(label));
+}
+
 void record_pack(Ctx* c, Rec& r, Job& j) {
+    rr_marker(r.diagnostic_list, L"OpenRR: pack output");
     if (!c->out16.addr) c->out16 = r.d.create(size_t(c->out_size.x) * c->out_size.y * 8 + 64);
     r.d.barrier();
     PackPC pk{c->out16.addr, r.output, c->out_size, c->out_size, r.out_fmt ? r.out_pitch : j.out_pitch, r.out_fmt ? r.out_fmt : uint32_t(j.out_tf)};
@@ -817,16 +848,15 @@ void record_frame(Ctx* c, Rec& r, Job& j, bool network, bool split = false) {
             if (((ip.g[s][2] >> 16) & 12u) != 0) {
                 ip.dst[s] = 0;
             } else {
-                if (!c->guides[s].addr) {
+                if (!c->guides[s].addr)
                     c->guides[s] = d.create(size_t(c->guide_size.x) * c->guide_size.y * bpp8[s] + 64);
-                    d.fill(c->guides[s], 0, c->guides[s].size, 0);
-                }
                 ip.dst[s] = gt.buf[s] = c->guides[s].addr;
                 ingest = true;
             }
         }
     }
     if (ingest) {
+        rr_marker(r.diagnostic_list, L"OpenRR: ingest inputs");
         const size_t bpp8[8] = {8, 4, 4, 8, 2, 4, 4, 2};
         for (int s = 0; s < 8; ++s) {
             if (!direct && (network || s == G_COLOR) && !c->guides[s].addr)
@@ -834,6 +864,12 @@ void record_frame(Ctx* c, Rec& r, Job& j, bool network, bool split = false) {
         }
         d.dispatch(r.k[r.ingest], &ip, sizeof ip, div_up(render.x, 16), div_up(render.y, 16));
     }
+    // the layer read by d3d_downsample_tl from the game's texture (the output written in place, no hop): not ingested
+    const bool tl_view = network && !split && direct && !c->vk_host && j.in[G_TL].present && j.in[G_TL].direct && r.out_fmt && c->engine.output_image_ok();
+    // the SSS guide and the mask (clamped or not; without its diagnostic invert or scale) read by d3d_enc0_attr from the game's views
+    const bool sss_view = direct && !c->vk_host && j.in[G_SSS].present && j.in[G_SSS].direct;
+    const bool dm_view = direct && !c->vk_host && j.in[G_DM].present && j.in[G_DM].direct &&
+                         !(f.flags & ONR_RR_FRAME_DM_INVERT) && !(f.disocclusion_mask_scale > 0.0f && f.disocclusion_mask_scale != 1.0f);
     if (network) {
         // the optional guides the game gave, in dispatches of their own (eight slots each, the others without a
         // destination): the transparency layer, ColorBeforeTransparency and the layer's opacity as rgba16f, the
@@ -848,7 +884,7 @@ void record_frame(Ctx* c, Rec& r, Job& j, bool network, bool split = false) {
         int k = 0;
         for (int o = 0; o < int(std::size(opt)); ++o) {
             const Copy& cp = j.in[opt[o]];
-            if (!cp.present) continue;
+            if (!cp.present || (opt[o] == G_TL && tl_view) || (opt[o] == G_SSS && sss_view) || (opt[o] == G_DM && dm_view)) continue;
             Buffer& gb = c->guides[opt[o]];
             if (!gb.addr) gb = d.create(size_t(c->guide_size.x) * c->guide_size.y * bpp[o] + 64);   // fully written below
             tp.dst[k] = gb.addr;
@@ -881,13 +917,17 @@ void record_frame(Ctx* c, Rec& r, Job& j, bool network, bool split = false) {
     }
     if (network) {
         d.barrier();
-        const bool flow = g_flow ? strcmp(g_flow, "0") != 0 : !c->vk_host && g_live.load() == 1;
+        const bool flow = g_flow ? strcmp(g_flow, "0") != 0 : !c->vk_host && !c->use_d3d && g_live.load() == 1;
         c->engine.set_flow(flow);
         if (int(flow) != c->logged_flow) {
-            g_log("small levels: %s", flow ? "row flags" : c->vk_host && !g_flow ? "barriers (Vulkan host)" : "barriers (more than one network, or ONR_RR_FLOW=0)");
+            g_log("small levels: %s", flow ? "row flags" : c->vk_host && !g_flow ? "barriers (Vulkan host)" : c->use_d3d && !g_flow ? "barriers (D3D12 default)" : "barriers (more than one network, or ONR_RR_FLOW=0)");
             c->logged_flow = int(flow);
         }
-        const EngineFrame ef = engine_frame(c, j);
+        EngineFrame ef = engine_frame(c, j);
+        if (tl_view) ef.transparency = 0, ef.transparency_view = G_TL + 1, ef.transparency_origin = j.in[G_TL].x | j.in[G_TL].y << 16;
+        auto view = [&](int s) { return 1ull << 63 | uint64_t(j.in[s].x | j.in[s].y << 16) << 8 | uint64_t(s); };
+        if (sss_view) ef.sss = view(G_SSS);
+        if (dm_view) ef.disocclusion = view(G_DM) | uint64_t((f.flags & ONR_RR_FRAME_DM_CLAMP) != 0) << 40;
         Guides g{c->guides[G_COLOR].addr, c->guides[G_ALBEDO].addr, c->guides[G_SPEC].addr, c->guides[G_NORMALS].addr,
                  c->guides[G_ROUGH].addr, c->guides[G_DEPTH].addr, c->guides[G_MV].addr, c->guides[G_HIT].addr, direct ? &gt : nullptr};
         r.qnet[0] = d.queries();
@@ -902,6 +942,7 @@ void record_frame(Ctx* c, Rec& r, Job& j, bool network, bool split = false) {
         const bool img = r.out_fmt && c->engine.output_image_ok();
         c->engine.set_output_image(img);
         if (!img && !c->out16.addr) c->out16 = d.create(size_t(c->out_size.x) * c->out_size.y * 8 + 64);
+        rr_marker(r.diagnostic_list, L"OpenRR: network and downsample");
         c->engine.record(ef, g, img ? uint64_t(r.out_pitch) : c->out16.addr);
         const bool actual_sampler=EngineRuntimeTraceAccess::sampled(c->engine);
         const bool actual_flow=EngineRuntimeTraceAccess::flow(c->engine);
@@ -1341,11 +1382,37 @@ void destroy_ctx(Ctx* c) {
     free_ctx(c);
 }
 
-std::string gpu_reason(const Device& d) {
+// RX 7000 / RDNA 3.5 (AMD, cooperative matrices without FP8), experimental: the kernels built for RDNA3's fragment layout
+// (ONR_GFX11) in shaders-gfx11 beside shaders
+bool rdna3(const Device& d, const std::wstring& shaders) {
     const auto& i = d.info();
-    if (!i.coopmat) return i.name + ": no cooperative matrices (needs an RDNA4 GPU)";
-    if (!i.fp8_coopmat) return i.name + ": not an RDNA4 GPU (RX 7000 and RX 6000 support comes later)";
+    std::error_code ec;
+    return i.vendor == 0x1002 && i.coopmat && !i.fp8_coopmat && std::filesystem::is_directory(shaders + L"-gfx11", ec);
+}
+
+std::string gpu_reason(const Device& d, const std::wstring& shaders) {
+    const auto& i = d.info();
+    if (!i.coopmat) return i.name + ": no cooperative matrices (needs an RDNA4 or RDNA3 GPU)";
+    if (!i.fp8_coopmat && !rdna3(d, shaders)) return i.name + ": not an RDNA4 GPU, and no RDNA3 kernels (openrr-amd\\shaders-gfx11)";
     return {};
+}
+
+void pick_kernels(Ctx* c) {
+    if (!rdna3(c->dev, c->shader_dir)) return;
+    c->shader_dir += L"-gfx11";
+    g_log("RDNA3 GPU (experimental): kernels from %s", utf8(c->shader_dir).c_str());
+}
+
+std::wstring default_data_dir(const std::wstring& dir) {
+    std::error_code ec;
+    const std::filesystem::path md(dir);
+    if (std::filesystem::exists(md / L"openrr-amd" / L"shaders", ec)) return (md / L"openrr-amd").wstring();
+    if (std::filesystem::exists(md.parent_path() / L"openrr-amd" / L"shaders", ec)) return (md.parent_path() / L"openrr-amd").wstring();
+    if (md.has_parent_path() && md.parent_path().has_parent_path() &&
+        std::filesystem::exists(md.parent_path().parent_path() / L"openrr-amd" / L"shaders", ec))
+        return (md.parent_path().parent_path() / L"openrr-amd").wstring();
+    if (std::filesystem::exists(md / L"opennr-rr" / L"shaders", ec)) return (md / L"opennr-rr").wstring();
+    return dir + L"\\openrr-amd";
 }
 
 // ------------------------------------------------------------------------------------------------ API
@@ -1360,7 +1427,7 @@ int32_t Check(const void* luid, const wchar_t* dlssd) {
         o.luid = static_cast<const uint8_t*>(luid);
         o.interop = true;
         if (!d.init(err, o)) return fail(ONR_RR_UNSUPPORTED, "Vulkan: " + err);
-        std::string why = gpu_reason(d);
+        std::string why = gpu_reason(d, default_data_dir(module_dir()) + L"\\shaders");
         if (!why.empty()) return fail(ONR_RR_UNSUPPORTED, why);
         if (dlssd) {
             Weights w;
@@ -1394,7 +1461,8 @@ void create_vk_host(Ctx* c, const OnrRrVkDevice& v) {
     c->dev.set_stamps(g_stamps);
     g_log("Vulkan host device: %s, driver %s; the runtime's queue: family %u, index %u", c->dev.info().name.c_str(),
           c->dev.info().driver_info.c_str(), v.queue_family, v.queue_index);
-    if (std::string why = gpu_reason(c->dev); !why.empty()) throw std::runtime_error(why);
+    if (std::string why = gpu_reason(c->dev, c->shader_dir); !why.empty()) throw std::runtime_error(why);
+    pick_kernels(c);
     c->kern.load(c->dev, utf8(c->shader_dir), {"ingest", "pack", "selftest"});
     vk_selftest(c);
     // the guides read through the game's views and the output written through its view (d3d_ kernels, set 0 = views)
@@ -1458,21 +1526,7 @@ int32_t Create(const OnrRrCreateInfo* in, void** out) {
             c->d3d = static_cast<ID3D12Device*>(in->d3d12_device);
             c->d3d->AddRef();
         }
-        std::wstring data;
-        if (in->data_dir) {
-            data = std::wstring(in->data_dir);
-        } else {
-            std::error_code ec;
-            const std::filesystem::path md(dir);
-            if (std::filesystem::exists(md / L"openrr-amd" / L"shaders", ec))
-                data = (md / L"openrr-amd").wstring();
-            else if (std::filesystem::exists(md.parent_path() / L"openrr-amd" / L"shaders", ec))
-                data = (md.parent_path() / L"openrr-amd").wstring();
-            else if (std::filesystem::exists(md / L"opennr-rr" / L"shaders", ec))
-                data = (md / L"opennr-rr").wstring();
-            else
-                data = dir + L"\\openrr-amd";
-        }
+        std::wstring data = in->data_dir ? std::wstring(in->data_dir) : default_data_dir(dir);
         c->shader_dir = data + L"\\shaders";
         c->dlssd_path = in->dlssd_path ? in->dlssd_path : L"";
         c->weights_source = utf8(c->dlssd_path);
@@ -1497,11 +1551,12 @@ int32_t Create(const OnrRrCreateInfo* in, void** out) {
         // timestamps only at the submit's boundaries: one around every dispatch serialises the ones without a barrier
         c->dev.set_stamps(g_stamps);
         g_log("Vulkan device: %s, driver %s", c->dev.info().name.c_str(), c->dev.info().driver_info.c_str());
-        std::string why = gpu_reason(c->dev);
+        std::string why = gpu_reason(c->dev, c->shader_dir);
         if (!why.empty()) {
             destroy_ctx(c);
             return fail(ONR_RR_UNSUPPORTED, why);
         }
+        pick_kernels(c);
         c->fn.memProps = reinterpret_cast<PFN_vkGetMemoryWin32HandlePropertiesKHR>(vkGetDeviceProcAddr(c->dev.vk(), "vkGetMemoryWin32HandlePropertiesKHR"));
         c->fn.importSem = reinterpret_cast<PFN_vkImportSemaphoreWin32HandleKHR>(vkGetDeviceProcAddr(c->dev.vk(), "vkImportSemaphoreWin32HandleKHR"));
         if (!c->fn.memProps || !c->fn.importSem) throw std::runtime_error("Win32 interop entry points missing");
@@ -1711,6 +1766,17 @@ void stats_record(Ctx* c, const Job& j, ID3D12GraphicsCommandList* cl) {
     }
 }
 
+int32_t check_output_rect(const Ctx& c, const OnrRrTexture& output, uint64_t width, uint32_t height) {
+    const auto output_width = uint32_t(c.out_size.x);
+    const auto output_height = uint32_t(c.out_size.y);
+    if (uint64_t(output.x) + output_width <= width && uint64_t(output.y) + output_height <= height)
+        return ONR_RR_OK;
+    return fail(ONR_RR_INVALID_ARGUMENT,
+                "output rectangle at (" + std::to_string(output.x) + ", " + std::to_string(output.y) + ") of size " +
+                    std::to_string(output_width) + "x" + std::to_string(output_height) +
+                    " exceeds output texture " + std::to_string(width) + "x" + std::to_string(height));
+}
+
 // a frame's job: the guides laid out as placed footprints of one buffer from offset 0 (in_bytes in all) and the
 // output's rows (out_bytes); ONR_RR_UNSUPPORTED for an output format that is not written
 int32_t plan_job(Ctx* c, const OnrRrFrame* f, std::unique_ptr<Job>& j, D3D12_PLACED_SUBRESOURCE_FOOTPRINT* fp, UINT64& off, UINT64& obytes) {
@@ -1768,8 +1834,13 @@ int32_t plan_job(Ctx* c, const OnrRrFrame* f, std::unique_ptr<Job>& j, D3D12_PLA
             }
             continue;
         }
-        UINT64 total = 0;
-        c->d3d->GetCopyableFootprints(&rd, 0, 1, off, &fp[i], nullptr, nullptr, &total);
+        auto& fc = c->fps[i];
+        if (fc.off != off || memcmp(&fc.desc, &rd, sizeof rd)) {
+            fc.desc = rd, fc.off = off;
+            c->d3d->GetCopyableFootprints(&rd, 0, 1, off, &fc.fp, nullptr, nullptr, &fc.total);
+        }
+        fp[i] = fc.fp;
+        const UINT64 total = fc.total;
         // a planar depth-stencil copies its depth plane alone: R32G8X24 gives R32 rows, not 8-byte texels
         if (Tf plane = tf_of(fp[i].Footprint.Format)) tf = plane;
         j->in[i] = Copy{true, tf, fp[i].Offset, fp[i].Footprint.RowPitch, tex[i]->x, tex[i]->y};
@@ -1819,8 +1890,7 @@ int32_t plan_job(Ctx* c, const OnrRrFrame* f, std::unique_ptr<Job>& j, D3D12_PLA
         if (!tf_writable(j->out_tf) || !oi->image)
             return fail(ONR_RR_UNSUPPORTED, "output VkFormat " + std::to_string(oi->format) +
                                                 " is not written (written: RGBA16F/32F, B10G11R11, A2B10G10R10, RGBA8/BGRA8 (sRGB too), RGBA16, E5B9G9R9)");
-        if (oi->width < uint32_t(c->out_size.x) || oi->height < uint32_t(c->out_size.y))
-            return fail(ONR_RR_INVALID_ARGUMENT, "the output image is smaller than the output size given at Create");
+        if (int32_t rc = check_output_rect(*c, f->output, oi->width, oi->height)) return rc;
         j->out_pitch = (uint32_t(c->out_size.x) * tf_bytes(j->out_tf) + 255) & ~255u;
         j->out_bytes = obytes = UINT64(j->out_pitch) * uint32_t(c->out_size.y);
         return ONR_RR_OK;
@@ -1831,6 +1901,7 @@ int32_t plan_job(Ctx* c, const OnrRrFrame* f, std::unique_ptr<Job>& j, D3D12_PLA
     if (!tf_writable(j->out_tf))
         return fail(ONR_RR_UNSUPPORTED, "output texture format " + std::to_string(int(od.Format)) +
                                             " is not written (written: RGBA16F/32F, R11G11B10F, RGB10A2, RGBA8/BGRA8 (sRGB too), RGBA16, R9G9B9E5)");
+    if (int32_t rc = check_output_rect(*c, f->output, od.Width, od.Height)) return rc;
     D3D12_RESOURCE_DESC box = od;
     box.Width = UINT64(c->out_size.x), box.Height = UINT(c->out_size.y);
     D3D12_PLACED_SUBRESOURCE_FOOTPRINT ofp{};
@@ -2297,7 +2368,13 @@ void d3d_harvest(Ctx* c) {
         std::vector<uint64_t> ts(n);
         if (!c->dx->read_stamps(slot, ts)) continue;
         c->dq[slot] = 0;
+        const bool hop = std::exchange(c->dqhop[slot], false);
         add_gaps(c, ts, ms);
+        const float span = float(double(ts.back() - ts.front()) * ms);
+        if (hop) {
+            c->dhop_ms = span;
+            continue;
+        }
         const uint32_t a = c->dqnet[slot][0], b = c->dqnet[slot][1];
         float part[3] = {};
         const bool has_parts = b > a && b <= n;
@@ -2306,7 +2383,7 @@ void d3d_harvest(Ctx* c) {
             part[1] = float(double(ts[b - 1] - ts[a]) * ms);
             part[2] = float(double(ts.back() - ts[b - 1]) * ms);
         }
-        record_gpu_sample(c, float(double(ts.back() - ts.front()) * ms), part, has_parts);
+        record_gpu_sample(c, span + std::exchange(c->dhop_ms, 0.0f), part, has_parts);
     }
 }
 
@@ -2442,7 +2519,9 @@ int32_t GetBackend(void* ctx, uint32_t* backend) {
     return ONR_RR_OK;
 }
 
-int32_t Record(void* ctx, const OnrRrFrame* f, void* list, uint32_t edit, OnrRrDenoisedImage* image, void** job) {
+int32_t record_d3d12_frame(void* ctx, const OnrRrFrame* f, void* list, uint32_t edit, OnrRrDenoisedImage* image, void** job,
+                           bool& host_bound, bool trace) {
+    host_bound = false;
     if (!ctx || !f || !list || !job || f->size < ONR_RR_FRAME_SIZE_V1 || !f->color.resource || !f->output.resource ||
         (image && image->size < sizeof(OnrRrDenoisedImage)))
         return fail(ONR_RR_INVALID_ARGUMENT, "Record: missing arguments");
@@ -2465,7 +2544,15 @@ int32_t Record(void* ctx, const OnrRrFrame* f, void* list, uint32_t edit, OnrRrD
         // as PrepareDenoised: no hop on the frame that finds the network ready
         const bool was_ready = c->state == ONR_RR_STATE_READY;
         // our buffers outlive the lists that use them by D3dDevice's deferred release, so nothing waits here
+        if (trace) {
+            g_log("[d3d12 diag] frame %llu list=%p prepare_network built=%d engine_ready=%d",
+                  static_cast<unsigned long long>(j->seq), static_cast<void*>(cl), int(c->built.load()), int(c->engine_ready));
+            g_log.flush();
+        }
         const bool network = prepare_network(c, d, render, [] {});
+#ifdef ONR_RR_STATIC
+        trace = trace || (network && !was_ready && openrr::pe::d3d12_diagnostics_enabled());
+#endif
         // dinput and doutput are allocated on demand below only when a texture is not read/written directly.
         (void)out_bytes;
         const bool hop = network && was_ready && image && (edit == ONR_RR_EDIT_LOOP || edit == ONR_RR_EDIT_DISPLAY);
@@ -2489,12 +2576,15 @@ int32_t Record(void* ctx, const OnrRrFrame* f, void* list, uint32_t edit, OnrRrD
                 g_log("Record: all D3D12 recording slots (63 primary + 64 overflow) are in flight; skipping this frame (output not written)");
             return ONR_RR_BUSY;
         }
+        host_bound = true;
         const uint32_t slot = d.bound_slot();
         const bool overflow = d.using_overflow();
         uint32_t dummy_qnet[2] = {};
         Rec r{d, c->dkern, c->dinput.addr, c->doutput.addr, c->dimage.addr, overflow ? dummy_qnet : c->dqnet[slot]};
+        if (trace) r.diagnostic_list = cl;
         std::vector<D3D12_RESOURCE_BARRIER> back;
         try {
+            rr_marker(r.diagnostic_list, L"OpenRR: input texture preparation");
             d.stamp();
             if (c->direct_ok) {
                 r.ingest = "d3d_ingest", r.pack = "d3d_pack";
@@ -2534,6 +2624,12 @@ int32_t Record(void* ctx, const OnrRrFrame* f, void* list, uint32_t edit, OnrRrD
                     }
                     if(c->dinput.addr)c->trace.snapshot(d,"input-copied-textures",c->dinput);
                 }
+            if (trace) {
+                g_log("[d3d12 diag] frame %llu list=%p network=%d slot=%u overflow=%d ingest=%s pack=%s color=%s output=%s",
+                      static_cast<unsigned long long>(j->seq), static_cast<void*>(cl), int(network), slot, int(overflow),
+                      r.ingest, r.pack, j->in[G_COLOR].direct ? "view" : "copy",
+                      hop ? "deferred" : direct_out ? "view" : "copy");
+                g_log.flush();
             }
             record_frame(c, r, *j, network, hop);
             D3dRuntimeTraceAccess::hook(d) = {};
@@ -2541,18 +2637,25 @@ int32_t Record(void* ctx, const OnrRrFrame* f, void* list, uint32_t edit, OnrRrD
                 D3D12_RESOURCE_STATE_UNORDERED_ACCESS,j->f.output.x,j->f.output.y,c->out_size.x,c->out_size.y);
             if (!hop) {
                 if (direct_out) d.barrier();
-                else d3d_copy_output(c, *j);
-                d.stamp();
+                else {
+                    rr_marker(r.diagnostic_list, L"OpenRR: copy output texture");
+                    d3d_copy_output(c, *j);
+                }
             }
+            d.stamp();
             if (!back.empty()) cl->ResourceBarrier(UINT(back.size()), back.data());
+            rr_marker(r.diagnostic_list, L"OpenRR: recording complete");
         } catch (...) {
             D3dRuntimeTraceAccess::hook(d) = {};
             if (!overflow) c->dq[slot] = 0;
             d.unbind();
             throw;
         }
-        // a hop's times come with its RecordPost
-        if (!overflow) c->dq[slot] = hop ? 0 : d.queries();
+        // a hop's first half is timed here and added to its RecordPost's
+        if (!overflow) {
+            c->dq[slot] = d.queries();
+            c->dqhop[slot] = hop;
+        }
         if (g_stamps && !hop && !overflow && network) c->stamp_names = d.stamp_names;
         d.unbind();
         if (network) log_frame(c, render);
@@ -2575,6 +2678,11 @@ int32_t Record(void* ctx, const OnrRrFrame* f, void* list, uint32_t edit, OnrRrD
         }
         return fail(ONR_RR_FAILED, e.what());
     }
+}
+
+int32_t Record(void* ctx, const OnrRrFrame* f, void* list, uint32_t edit, OnrRrDenoisedImage* image, void** job) {
+    bool host_bound;
+    return record_d3d12_frame(ctx, f, list, edit, image, job, host_bound, false);
 }
 
 int32_t RecordPost(void* ctx, void* job, void* list, uint32_t format) {
@@ -3141,6 +3249,14 @@ int32_t GetLastErrorText(char* buf, uint32_t n) {
 }
 
 }  // namespace
+
+#ifdef ONR_RR_STATIC
+int32_t openrr::pe::record_d3d12(void* context, const OnrRrFrame* frame, ID3D12GraphicsCommandList* list,
+                                bool& host_bound, bool trace) {
+    void* job = nullptr;
+    return record_d3d12_frame(context, frame, list, ONR_RR_EDIT_OFF, nullptr, &job, host_bound, trace);
+}
+#endif
 
 // the user's "Fast mode" (docs/FASE24-FASTMODE.md), outside the ABI as OnrRrSetDeltaRate: a DLL without it has no such mode.
 // Safe every frame; the first frame asked starts the kernels' build, and the next recorded frame after it uses them.

@@ -8,7 +8,7 @@ cd -- "$(dirname -- "$0")/../.."
 out=$(realpath -m -- "${1:-build/asi}")
 stage="$out/stage"
 rm -rf -- "$out"/bench-* "$out/occ_ab"
-mkdir -p -- "$out" "$stage/plugins" "$stage/openrr-amd/shaders"
+mkdir -p -- "$out" "$stage/plugins" "$stage/openrr-amd/shaders" "$stage/openrr-amd/shaders-gfx11"
 
 cxx=${OPENRR_MINGW:-x86_64-w64-mingw32-g++}
 cc=${OPENRR_MINGW_CC:-x86_64-w64-mingw32-gcc}
@@ -33,6 +33,7 @@ python3 asi/build/embed_font.py "$font" "$out/rr_menu_font.hpp" kMenuFont
 
 common_cxx=(-std=c++20 -mf16c -O2 -fno-strict-aliasing -DNDEBUG
             -DOPENRR_BUILD_STAMP="\"$stamp\""
+            -DONR_LT_DEEP="\"2,4,2,4\""
             -DONR_RR_BUILDING -DONR_RR_STATIC -DOPENRR_EXPERIMENTAL_OPTIFG_HOST
             -I"$vk_inc" -Igpu/include -Igpu/src -Iruntime/include -Iruntime/src
             -Iasi/src -I"$minhook/include" -I"$imgui" -I"$out")
@@ -104,6 +105,7 @@ rm -f "$out/openrr-amd.debug"
 
 echo "[4/4] Building runtime SPIR-V shaders & staging package..."
 python3 asi/build/build_shaders.py "$glslang" gpu "$stage/openrr-amd/shaders"
+python3 asi/build/build_shaders.py "$glslang" gpu "$stage/openrr-amd/shaders-gfx11" --gfx11
 cp asi/openrr-amd.ini "$stage/openrr-amd.ini"
 "$cxx" -std=c++17 -O2 -shared -static -Iasi/src asi/src/optifg_ngx_proxy.cpp -o "$stage/openrr-ngx-host.dll"
 cp LICENSE THIRD_PARTY.md "$stage/"

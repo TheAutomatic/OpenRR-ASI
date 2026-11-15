@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Adapted from mochi / DLSSNR-AMD (MIT, Copyright (c) 2026 mochizuki0323).
 #pragma once
+struct ID3D12Device;
 // One log file, next to the module, opened the moment the module is loaded.
 //
 // It was four separate loggers, each opening "openrr-amd.log" by relative
@@ -35,6 +36,10 @@ const char* module_folder();
 // loaded even if every later step fails.
 void log(const char* format, ...);
 void flush_log();
+
+bool d3d12_diagnostics_enabled();
+void enable_d3d12_dred();
+bool log_d3d12_device_removed(ID3D12Device* device, const char* where);
 
 // Where the log went, for anyone who needs to say it out loud.
 const char* log_path();

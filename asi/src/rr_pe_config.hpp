@@ -14,7 +14,7 @@ struct Config {
     std::string coexist_split = "auto";    // auto, off
     std::string menu_key = "optiscaler";   // optiscaler, or key name / VK code
     bool pass_optiscaler_key = true;
-    std::string mode = "new";              // new (fast _lt), legacy (full-precision _f)
+    int mode = 1;                          // OnrRrSetFastMode: 0 legacy, 1 new, 2 experimental
     std::string vk_input_layout = "shader_read"; // shader_read, general
     std::optional<bool> hardware_depth = std::nullopt; // nullopt = auto, true = HW, false = linear
 
@@ -33,6 +33,8 @@ struct Config {
     float text_scale = 1.0f;
     int theme = 0;
 };
+
+int network_mode_level(const std::string& value);
 
 // Parse a key name ("Insert", "End", "F7", "Ctrl+Shift+F10") or virtual-key number ("45", "0x2D") into vk and MOD_* bits.
 bool parse_key(const std::string& text, int* vk, int* mods = nullptr);
