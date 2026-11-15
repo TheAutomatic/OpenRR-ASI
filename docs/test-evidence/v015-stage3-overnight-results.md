@@ -521,3 +521,82 @@ MRG8-TR 生产者镜像版（设计定稿如上）；`fast.glsl:1177` TR XOUT �
 A2 上机实验：NR_OPQ 断链 enc_64（256 VGPR→期望 192/224 档）与 MRG8-160 `dont_unroll` 重试；A3 `post_f_lt`
 f16vec2 双发射（+129µs 逆差唯一未试面）；A4/A5 生产—消费量化上移（Q/V 清扫与 WOUT8 的正确载体）与 2^k
 解锁 enc0 主干 `pc.fc1`；Track B `LT_E8RAW` 与 RGP 合流（另一会话）。
+
+## 16. Stage 7 Wave B2（Track A 收口）：一晋级五判负与 enc0-fc1 既成事实审计（2026-11-15）
+
+起点 `bb65718`（代码头 `4dd6e3f`），终点 `6dc4c99`（`05f4ecd` WP4 + `6dc4c99` WP5 清理，未 push）。全程 Legacy
+`.spv` 零字节扰动（每步 94 文件快照对比；最终态仅 WP4 的 dec_up_96/128 `f_lt/fl_lt` 4 文件按设计变化）；画质
+裁决锁定固定基线 `s5-wave3-w1-dec-mlp8/anchor2`（`4332470`），从未自我棘轮；`@idx` 仅定位，仲裁无探针 3×ABBA。
+
+### 16.0 前提勘误（本轮最重要的事实修正）
+
+计划中 "enc_64/dec_up_32 当前 256 VGPR" 读到的是 manifest 里 **occ_pad16k 探针记录**（同名列多记录）：
+shipped 策略 `enc_stage_64_64_96_f_lt` = **240 VGPR / 9728 B LDS**（W2 注释自述 "9.5KB: 6 windows per CU,
+measured faster than 8 at 8 KB" 的刻意驻留节流），`dec_up_32_64_64_f_lt` = **192 VGPR / 4096 B LDS**（U 暂存
+全活区）。两核均为 LDS 驻留约束、`scratch=0`，NR_OPQ 的 "降 VGPR 提 Occupancy" 机制在其上没有作用面。
+
+### 16.1 晋级链（每步 units 27 PASS + legacy 零扰动）
+
+| 提交 | 内容 | 静态 | @idx 4K | 3×ABBA 中位 | Anchor #2 vs 固定 4332470 |
+|---|---|---|---|---|---|
+| `05f4ecd` | **WP4 quantize-once Q/K/V（A4 载体）**：dec_up_96/128 TR 体 XUP 后把 x^T tile 一次量化为 `y` e4m3 B tile（与 XOUTQ 写出的同值），逐 head 的 Q/K/V `W8STEP` 直读（in_a/in_b e4m3 尾段早已船载）；fp16 x tile 继续供残差/MLP/XOUT，XOUT 位不变 | 仅 dec_up_96/128 `_f_lt/_fl_lt`：VGPR 192/240、LDS 16384/21504 均不变，scratch 0；exec +5.4%（配对量化器）换 QKV WMMA 周期减半 | dec_up_96_fl **−24.0µs（−5.3%）**、dec_up_128_fl **−13.7µs（−6.3%）** | **−0.647% @4K（6/6 负）/ −1.015% @1080p（6/6 负）** | v1 76/76 + v2 44/44，nf=0；dlaa 52.3727（+18.00）、Q_S0_4k_perf 52.0368（+3.75）、Q_S1_1080p_qual 39.0973（+0.088）、Q_S1_4k_qual 47.7664（+0.64）、Q_S2_4k_perf 41.2368（+0.05）、Q_S2_1080p_qual 40.6656（**−0.038 最差**）、P00 49.1183（+2.11） |
+| `6dc4c99` | **WP5 清理（零产品字节变化）**：删除不可达的 `#elif defined(LT_MLP8) && ENC_EMBED` fc2-only 死分支并更正注释——`#ifdef LT_MLP8` 已先捕获 enc0，**enc0 主干 MLP 自 `4f63aca` 起就一直运行完整 fp8 fc1+fc2**（该提交的 −41.9µs 与 −0.10dB 即全 fp8 fc1 上线；其提交信息描述的是意图而非生效物） | 94 SPIR-V 除 WP4 4 文件外逐字节一致 | 静态无变化，未复测（规则 1） | — | 权重勘察（survey_enc0_fc1，DLL 310.9.1.0）：fc1 [128][32] max\|w\|=6.0、minNZ=2⁻⁹，全部 BlockWeights 在 DLL 装载时经 `q8()` e4m3 舍入 ⇒ UT8 尾段为精确拷贝，**2^k 补偿本不存在可施加之处**（与 engine.cpp:307 注释一致）；b5 实验输出位与中性构建完全相同 |
+
+### 16.2 判负归档（铁律 6 五项证据；全部上机实测，无静态跳过）
+
+- **WP1.1 `enc_96 MRG8`**：@idx enc_96_fl 595.1 vs 同跑基线 531.2 = **+63.9µs（+12.0%）**。归因 (c)：VGPR 240→256、
+  LDS 19456→25600（MIR 6144B，3→2 WGs/CU）——522µs 大核的 merge 占比太小，付不起驻留台阶（enc_128 是 2.6 倍
+  大的 merge 落在 2.2 倍小的核上才以 −10µs 险胜）。Mochi 先例：NR_OPQ/dont_unroll 无法收回 LDS 驻留（MIR 必须
+  从 XOUT 活到 merge）。可推翻：在别处收回 ≥6144B 死 LDS 保住 3 WGs/CU 的重设计。
+- **WP1.2 `LT_UP8 UPLO/QV 死区收缩`**：死区属实（代码核实），但 QV=0 使 dec_up_96/128 LDS 16384→12288 /
+  21504→16384（4→5 / 3→4 WGs/CU）后 @idx **+8.2 / +22.1µs 变慢**；判别实验（LDS_OCC_PAD 恢复原字节数、保留新
+  偏移）回到 −3.2/−2.1µs（≈噪声，exec ±0.2%）⇒ 变慢来自驻留增加引发的 cache/工作集踩踏，LDS 尺寸本就在实测
+  甜点（onr_block.glsl "6 windows per CU, measured faster than 8 at 8 KB" 同一课）。XS_TRIM 核验：dec_up_96 所有
+  ENC_F32 C=96 DEC_UP 构建默认已开（onr_block.glsl:295），无需补。可推翻：提高每 WG 工作量的 cache-blocking，
+  或把这 4–5KB 用在实测为正的用途上。
+- **WP2.1 `enc_160 MRG8 重试`（cb `[[dont_unroll]]`，C≥160 生效、enc_128 逐字节不变）**：exec 33416→21744
+  （−35%，已低于 ship 的 23504）但 VGPR 仍 256、LDS 仍 40448（1 WG/CU）；@idx enc_160_fl **+23.6µs（+21%）**
+  与首版持平。LDS 算术：LDS_N0 15104 + MIR 5120 halves = 20224 halves = 40448B > 32768 ⇒ **本设计内 2 WGs/CU
+  永不可达**，exec 收益填不平驻留减半。enc_160_0 同跑 +12.7µs 为下游耦合/漂移（其二进制未变）。enc_64/dec_up_32
+  的 NR_OPQ：前提已被 manifest 勘误（16.0），机制无作用面；可推翻：任何记录显示这两核 VGPR-bound 或 spill。
+- **WP2.2 `NOOOB dec_up_32`**（wave-uniform 内部快路径 + never-true-store 逼出真分支，边界体逐字保留）：
+  ship 策略 192 VGPR / 4096B 不变、exec 17212→17412（+1.2%，双体并存）；@idx dec_up_32 **+3.8µs（+0.33%）**。
+  归因 (c)：W1 每 lane 的 OOB 面仅 ~4 次 token_pixel + 4 个 own 门控 store（~30–40 VALU），摊不平一个真分支；
+  Mochi 的 NOOOB 收益来自 barrier 区寄存器寿命（persistent 多 tile 核），W1 无 barrier 无 tile 循环。可推翻：
+  enc0 attr 采集分离（8 轮 reflect）或 persistent 核编译期 live-mask。
+- **WP3 `post_f_lt f16vec2（LT_POST_H2）`**（累积+门控打包 f16，decode/encode 留 f32，legacy 逐字保留）：
+  ship 记录 96 VGPR / 8320B LDS 不变、exec 15828→16220；@idx post **+72.2µs（+6.0%）**（WP4 收益不受影响：
+  dec_up_96/128 同跑仍 −21.8/−13.5µs）。归因 (c)/(b)：每个候选的 sm0..3/net_h 边界 f32↔f16 转换流量吃掉打包
+  收益，且 ACO 下双三次 taps 本就折进 `v_fma_mix` 双发射（文件自注）；Mochi 的 f16vec2 先例是 **LLPC 专属修复**
+  （其 §4.2），不可外推到 ACO。可推翻：Wave C RGP 证实 post 在未打包链上 VALU-bound，且 ACO 出无边界转换的
+  `v_pk_fma_f16`。
+- **`LT_WOUT8`/`b.out` UT8**：维持 §15.2 归档（O_h 逐 head 重量化 = Mochi §0.3 亏损形态）；本轮落地的
+  quantize-once 载体是上述 Q/K/V 版本（`05f4ecd`）。
+
+### 16.3 工程教训（本轮新增，均已在工具链修复）
+
+- **manifest 同名多记录陷阱**：同一 `.spv` 名在 manifest 中有 ship/occ_nopad/occ_pad16k/b2 探针多条记录，
+  计划文档中的 "256 VGPR" 读串了记录（16.0 勘误）。读静态账本必须按 shipped 策略（spv 哈希）对号。
+- **units.sh 环境变量名错误**：导出 `OPENRR_ACO_DIR`，装载器读 `ONR_ACO_DIR`（d3d12.cpp:906）——上一会话的外层
+  shell 环境掩盖了它；已修为 `ONR_ACO_DIR` + `WSLENV /p`（路径翻译）。
+- **`#else` 吞块二连**：W2 遗训在 post 重演——WP3 首版把公共尾段放进 `LT_POST_PAIR` 的 `#else` 内，活路径
+  （pair）`out1/out2` 未赋值，ACO 把 main() 排空成 1KB/24VGPR 空壳；**exec-bytes 账本在 GPU 之前抓住它**（对比
+  bb65718 的 15828B 即可疑）。守卫必须在共享路径外侧。
+- **EMB8 之后 bench 自门会误拦**：`run_bench.ps1` 必须带 `-Gate off`（self-PSNR 51.84 advisory，Anchor #2 裁决）。
+
+### 16.4 收官链级稳态终验（铁律 4，`bb65718 → 6dc4c99` 链 vs frozen-green-head）
+
+- **4K**（预热 500 帧 + 600 帧稳态）：中位 `11.0386 → 10.9450 ms`，**−0.848%**；候选均值 `11.0259 ms`，`nf=0`。
+- **1080p**（预热 1500 帧 + 600 帧稳态）：中位 `2.95964 → 2.93620 ms`，**−0.792%**；候选均值 `2.93796 ms`，`nf=0`。
+- 与 Wave B1 终态（同基线 −0.388%/−0.389%）相比，Wave B2 净推进约 **−0.46pp @4K / −0.40pp @1080p**，方向与
+  ABBA（−0.647%/−1.015%）一致，无功耗墙假阳性。
+- **Anchor #2（最终提交，固定基线 `4332470`）**：v1 `76/76` + v2 `44/44` 哈希门全过、双侧 `non_finite=0`；
+  关键例见 16.1（最差 −0.038 dB，累计预算 −0.70 dB 内余量充裕）。
+- Legacy 核验：94 个 runtime SPIR-V 中 90 个与 `bb65718` 逐字节一致（仅 WP4 设计内 4 文件变化）；units 27 PASS
+  （K2 `spv_hash_nopad=EXACT`、arena/wide 确定性、`diff_words=0`）。
+
+### 16.5 Wave B2 待续（Wave C 输入）
+
+Track B 跨核 `LT_E8RAW` 成对迁移、RGP 取证（H2/H4、BDA vs SSBO、`post +129µs` 真瓶颈——本轮 WP3 判负后该逆差
+仍全数未解）、三锚点终局合流。WP1.2 的判别实验同时证明：dec_up 家族驻留已过甜点，Wave C 若做 LDS 重划需以
+"提高每 WG 工作量"为前提，而非单纯收紧。
