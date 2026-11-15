@@ -539,6 +539,8 @@ int RunMain(const Args& args)
     if (args.config == "legacy") cfg = { "legacy", 0, 1 };
     else if (args.config == "fast-llpc") cfg = { "fast-llpc", 1, 1 };
     else if (args.config == "fast-aco") cfg = { "fast-aco", 1, 0 };
+    else if (args.config == "exp-aco") cfg = { "exp-aco", 2, 0 };
+    else if (args.config == "exp-llpc") cfg = { "exp-llpc", 2, 1 };
     else Fail("unknown --config " + args.config);
 
     fs::create_directories(args.outDir);
@@ -770,7 +772,7 @@ int RunMain(const Args& args)
                 Require(api.v3.v2.v1.GetInfo(ctx, &info) == ONR_RR_OK, "GetInfo");
                 Require(info.state != ONR_RR_STATE_FAILED, std::string("runtime failed: ") + info.message);
                 submitFrame(priming);
-                const bool fastReady = !cfg.fastMode || (getFastMode && getFastMode(ctx) == 1);
+                const bool fastReady = !cfg.fastMode || (getFastMode && getFastMode(ctx) == (cfg.fastMode == 2 ? 4 : 1));
                 if (info.state == ONR_RR_STATE_READY && info.frames >= 1 && fastReady) ready = true;
                 else Sleep(10);
             }

@@ -569,7 +569,8 @@ BenchResult RunRuntimeBench(const std::string& label, const fs::path& dllPath, c
         Require(api4.v3.v2.v1.GetInfo(ctx, &info) == ONR_RR_OK, "GetInfo failed");
         Require(info.state != ONR_RR_STATE_FAILED, std::string("OpenRR failed during build: ") + info.message);
         runOneFrame(maxRenderW, maxRenderH, waitIter == 0);
-        const bool fastReady = !fastMode || (getFastMode && getFastMode(ctx) == 1);
+        const int32_t fastReadyState = fastMode == 2 ? 4 : 1;
+        const bool fastReady = !fastMode || (getFastMode && getFastMode(ctx) == fastReadyState);
         Require(!fastMode || !getFastMode || getFastMode(ctx) != 3, "OpenRR fast mode build failed (state 3)");
         if (info.state == ONR_RR_STATE_READY && info.frames >= 1 && fastReady)
             break;
@@ -581,6 +582,9 @@ BenchResult RunRuntimeBench(const std::string& label, const fs::path& dllPath, c
     Require(api4.v3.v2.v1.GetInfo(ctx, &readyInfo) == ONR_RR_OK && readyInfo.state == ONR_RR_STATE_READY,
             "OpenRR did not reach ONR_RR_STATE_READY");
     Require(readyInfo.backend == (wantVulkan ? ONR_RR_BACKEND_VULKAN : ONR_RR_BACKEND_D3D12), "Unexpected OpenRR backend");
+    if (fastMode == 2)
+        Require(getFastMode && getFastMode(ctx) == 4,
+                "OpenRR fast-mode 2 (experimental) never reached state 4: refusing the silent _lt fallback");
 
     // Warmup
     if(alignPhase)Require(diagnostic(ctx,2,nullptr)==ONR_RR_OK,"Diagnostic phase alignment failed");

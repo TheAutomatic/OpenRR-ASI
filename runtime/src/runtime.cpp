@@ -2624,6 +2624,7 @@ int32_t record_d3d12_frame(void* ctx, const OnrRrFrame* f, void* list, uint32_t 
                     }
                     if(c->dinput.addr)c->trace.snapshot(d,"input-copied-textures",c->dinput);
                 }
+            }
             if (trace) {
                 g_log("[d3d12 diag] frame %llu list=%p network=%d slot=%u overflow=%d ingest=%s pack=%s color=%s output=%s",
                       static_cast<unsigned long long>(j->seq), static_cast<void*>(cl), int(network), slot, int(overflow),

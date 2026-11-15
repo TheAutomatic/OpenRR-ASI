@@ -109,41 +109,6 @@ python3 asi/build/build_shaders.py "$glslang" gpu "$stage/openrr-amd/shaders-gfx
 cp asi/openrr-amd.ini "$stage/openrr-amd.ini"
 "$cxx" -std=c++17 -O2 -shared -static -Iasi/src asi/src/optifg_ngx_proxy.cpp -o "$stage/openrr-ngx-host.dll"
 cp LICENSE THIRD_PARTY.md "$stage/"
-mkdir -p -- "$out/occ_nopad" "$out/occ_pad16k"
-# occ_* probe variants MUST mirror the shipped LT_DEFS_<stem> verbatim (the units K2 gate
-# asserts ship == occ_nopad byte-identical), so derive them from gpu/fastmode.cmake instead
-# of hand-copying the flag lists here (a stale copy failed K2 silently before).
-occ_defs() {
-  local toks
-  toks=$(sed -n "s/^set(LT_DEFS_$1[[:space:]][[:space:]]*\\(.*\\))[[:space:]]*$/\\1/p" gpu/fastmode.cmake)
-  local d="" t
-  for t in $toks; do d="$d -D$t"; done
-  [ -n "$d" ] || { echo "LT_DEFS_$1 not found in gpu/fastmode.cmake" >&2; exit 1; }
-  echo "$d"
-}
-for stem in enc0_stage_32_64 post dec_up_32_64_64 dec_head_32_64 enc_stage_64_64_96; do
-  d=$(occ_defs "$stem")
-  pad=-DLDS_OCC_PAD=8192
-  [ "$stem" = post ] && pad=-DPOST_OCC_PAD=4096
-  "$glslang" -V --target-env vulkan1.3 -DENC_F32=1 $d -Igpu/shaders/include "gpu/shaders/$stem.comp" -o "$out/occ_nopad/${stem}_f_lt.spv" > /dev/null
-  "$glslang" -V --target-env vulkan1.3 -DENC_F32=1 $d $pad -Igpu/shaders/include "gpu/shaders/$stem.comp" -o "$out/occ_pad16k/${stem}_f_lt.spv" > /dev/null
-done
-
-mkdir -p -- "$out/b2_base" "$out/b2_post_exp" "$out/b2_post_log" "$out/b2_attr_rcp" "$out/b2_attr_same" "$out/b2_c64_far3"
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_POST_PAIR=1 -Igpu/shaders/include gpu/shaders/post.comp -o "$out/b2_base/post_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_ATTR_TAB=1 -Igpu/shaders/include gpu/shaders/enc0_attr.comp -o "$out/b2_base/enc0_attr_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_MI8=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -Igpu/shaders/include gpu/shaders/enc_stage_64_64_96.comp -o "$out/b2_base/enc_stage_64_64_96_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_UP8=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -Igpu/shaders/include gpu/shaders/dec_up_64_64_96.comp -o "$out/b2_base/dec_up_64_64_96_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -Igpu/shaders/include gpu/shaders/dec_dfn_64_64.comp -o "$out/b2_base/dec_dfn_64_64_f_lt.spv" > /dev/null
-
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_POST_PAIR=1 -DLT_POST_EXP=1 -DLT_POST_NOCORNER=1 -DLT_POST_NETH=1 -Igpu/shaders/include gpu/shaders/post.comp -o "$out/b2_post_exp/post_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_POST_PAIR=1 -DLT_POST_EXP=1 -DLT_POST_NOCORNER=1 -DLT_POST_NETH=1 -DLT_POST_LOG=1 -Igpu/shaders/include gpu/shaders/post.comp -o "$out/b2_post_log/post_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_ATTR_TAB=1 -DLT_ATTR_RCP=1 -DLT_ATTR_DEPTH=1 -Igpu/shaders/include gpu/shaders/enc0_attr.comp -o "$out/b2_attr_rcp/enc0_attr_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DD3D_GUIDES=1 -DENC_F32=1 -DLT_ATTR_TAB=1 -DLT_ATTR_RCP=1 -DLT_ATTR_DEPTH=1 -Igpu/shaders/include gpu/shaders/enc0_attr.comp -o "$out/b2_attr_rcp/d3d_enc0_attr_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_ATTR_TAB=1 -DLT_ATTR_RCP=1 -DLT_ATTR_DEPTH=1 -DLT_ATTR_SAME=1 -DLT_ATTR_CL=1 -Igpu/shaders/include gpu/shaders/enc0_attr.comp -o "$out/b2_attr_same/enc0_attr_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_FAR=3 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -Igpu/shaders/include gpu/shaders/enc_stage_64_64_96.comp -o "$out/b2_c64_far3/enc_stage_64_64_96_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_FAR=3 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -Igpu/shaders/include gpu/shaders/dec_up_64_64_96.comp -o "$out/b2_c64_far3/dec_up_64_64_96_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_FAR=3 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -Igpu/shaders/include gpu/shaders/dec_dfn_64_64.comp -o "$out/b2_c64_far3/dec_dfn_64_64_f_lt.spv" > /dev/null
 "$cxx" "${common_cxx[@]}" asi/tests/test_asi_units.cpp \
     "$out/rr_pe_config.o" "$out/rr_pe_d3d12split.o" "$out/rr_pe_vkdevice.o" "$out/rr_pe_log.o" "$out/rr_pe_crash.o" \
     "$out/rt_runtime.o" "$out/rt_vk_host.o" "$out/gpu_vk.o" "$out/gpu_d3d12.o" "$out/gpu_kernels.o" \
@@ -162,7 +127,7 @@ if [[ "${OPENRR_BUILD_ACO:-1}" == "1" ]]; then
         --out "$stage/openrr-amd/aco" \
         --capture-dir "$out/aco-capture" \
         --precision "${OPENRR_ACO_PRECISION:-global}" --precision-split --precision-native-only post_f_lt d3d_downsample_lt d3d_downsample_tl_lt d3d_enc0_attr_f_lt d3d_enc0_attr_f_w_lt enc0_attr_f_lt enc0_attr_f_w_lt post_dlt_f_lt dec_head_32_64_f_lt dec_up_128_128_160_fl_lt dec_dfn_160_256_fl_lt enc_stage_160_256_0_fl_lt enc_stage_160_256_160_fl_lt --matrix-loads "${OPENRR_ACO_MATRIX_LOADS:-vector8}" --shared-cmat "${OPENRR_ACO_SHARED_CMAT:-off}" \
-        "$stage/openrr-amd/shaders" "$out/occ_nopad" "$out/occ_pad16k" "$out"/b2_* \
+        "$stage/openrr-amd/shaders" \
         --cmat-address-shaders dec_dfn_128_128_f dec_dfn_128_128_f_lt dec_dfn_128_128_fl dec_dfn_128_128_fl_lt dec_dfn_160_256_f dec_dfn_160_256_f_lt dec_dfn_160_256_fl dec_dfn_160_256_fl_lt dec_dfn_96_128_f dec_dfn_96_128_f_lt dec_dfn_96_128_fl dec_dfn_96_128_fl_lt dec_head_32_64_f dec_head_32_64_f_lt dec_up_128_128_160_f dec_up_128_128_160_f_lt dec_up_128_128_160_fl dec_up_128_128_160_fl_lt dec_up_160_256_160_f dec_up_160_256_160_f_lt dec_up_160_256_160_fl dec_up_160_256_160_fl_lt dec_up_32_64_64_f dec_up_32_64_64_f_lt dec_up_96_128_128_f dec_up_96_128_128_f_lt dec_up_96_128_128_fl dec_up_96_128_128_fl_lt enc0_stage_32_64_f enc0_stage_32_64_f_lt enc0_stage_32_64_f_w enc0_stage_32_64_f_w_lt enc_stage_128_128_160_f enc_stage_128_128_160_f_lt enc_stage_128_128_160_fl enc_stage_128_128_160_fl_lt enc_stage_160_256_0_f enc_stage_160_256_0_f_lt enc_stage_160_256_0_fl enc_stage_160_256_0_fl_lt enc_stage_160_256_160_f enc_stage_160_256_160_f_lt enc_stage_160_256_160_fl enc_stage_160_256_160_fl_lt enc_stage_64_64_96_f enc_stage_64_64_96_f_lt enc_stage_96_128_128_f enc_stage_96_128_128_f_lt enc_stage_96_128_128_fl enc_stage_96_128_128_fl_lt
 fi
 echo "Built $stage/plugins/openrr-amd.asi ($(stat -c %s "$stage/plugins/openrr-amd.asi") bytes, $count Vulkan entry points resolved lazily)"

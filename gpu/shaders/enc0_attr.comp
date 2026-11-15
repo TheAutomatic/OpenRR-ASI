@@ -176,7 +176,7 @@ float opt_r32(uint64_t a, ivec2 p) {
     if ((a >> 63) != 0ul) {
         uint o = uint(a >> 8);
         float v = texelFetch(tex[uint(a) & 255u], ivec2(o & 65535u, o >> 16) + p, 0).x;
-        v = isnan(v) ? 0.0 : v;
+        v = ((floatBitsToUint(v) & 0x7fffffffu) > 0x7f800000u) ? 0.0 : v;
         return ((a >> 40) & 1ul) != 0ul ? clamp(v, 0.0, 1.0) : v;
     }
 #endif

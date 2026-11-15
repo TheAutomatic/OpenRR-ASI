@@ -29,7 +29,7 @@ vec4 gtex(GuideTab t, uint s, ivec2 p) {
     if ((((g.z >> 16) & 255u) & 4u) != 0u) return vec4(0.0);
     // NaN -> 0 before any clamp, as the ingest does (on AMD clamp() turns a NaN into -65504)
     vec4 c = texelFetch(tex[g.x], ivec2(g.w & 65535u, g.w >> 16) + p, 0);
-    return mix(c, vec4(0.0), isnan(c));
+    return mix(c, vec4(0.0), vec4(greaterThan(floatBitsToUint(c) & uvec4(0x7fffffffu), uvec4(0x7f800000u))));
 }
 // the guide is read from the game's texture (or is absent), not from its buffer
 bool gdirect(GuideTab t, uint s) { return (gflags(t, s) & 12u) != 0u; }
