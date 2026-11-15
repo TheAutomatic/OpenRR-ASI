@@ -95,26 +95,25 @@ public:
     ~Log() { close(); }
     void open(const std::wstring& path, bool new_session = false) {
 #ifdef ONR_RR_STATIC
-        (void)path;
-#else
+        // The plugin's own logger (rr_pe_log) owns the module-folder openrr-amd.log; a
+        // host-specified path (the bench's per-run log) is still written here, so every
+        // consumer keeps its file contract.
+        if (path == module_dir() + L"\\openrr-amd.log") return;
+#endif
         std::lock_guard l(m_);
         if (new_session && f_) fclose(f_), f_ = nullptr;
         if (!f_) f_ = _wfsopen(path.c_str(), L"a", _SH_DENYNO);
-#endif
     }
     void flush() {
 #ifdef ONR_RR_STATIC
         openrr::pe::flush_log();
-#else
+#endif
         std::lock_guard l(m_);
         if (f_) fflush(f_);
-#endif
     }
     void close() {
-#ifndef ONR_RR_STATIC
         std::lock_guard l(m_);
         if (f_) fclose(f_), f_ = nullptr;
-#endif
     }
     void operator()(const char* fmt, ...) {
         char b[4096];
@@ -123,10 +122,13 @@ public:
         vsnprintf(b, sizeof b, fmt, a);
         va_end(a);
 #ifdef ONR_RR_STATIC
-        size_t len = std::strlen(b);
-        while (len > 0 && (b[len - 1] == '\n' || b[len - 1] == '\r')) b[--len] = '\0';
-        openrr::pe::log("%s", b);
-#else
+        // everything also goes to the plugin's crash-watch trail
+        {
+            size_t len = std::strlen(b);
+            while (len > 0 && (b[len - 1] == '\n' || b[len - 1] == '\r')) b[--len] = '\0';
+            openrr::pe::log("%s", b);
+        }
+#endif
         SYSTEMTIME t;
         GetLocalTime(&t);
         const ULONGLONG now = GetTickCount64();
@@ -139,7 +141,6 @@ public:
             fflush(f_);
             last_flush_ = now;
         }
-#endif
     }
 
 private:
