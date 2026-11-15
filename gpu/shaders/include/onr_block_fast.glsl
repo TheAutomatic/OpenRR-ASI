@@ -320,6 +320,12 @@ uint ocp4(uint w) {
 #define OCP4(w) (w)
 #else
 #define OCP4(w) ocp4(w)
+#ifndef REC2Y
+// raw OCP code lane shuffle -> QB8 elements, zero conversions (W2 body + TR DEC_UP8)
+#define REC2Y(ya, yb, w_) [[unroll]] for (int k_ = 0; k_ < 4; ++k_) { uint o_ = OCP4(w_[k_]); \
+        ya[2 * k_] = uintBitsToFloate4m3EXT(uint8_t(o_ & 0xffu)), ya[2 * k_ + 1] = uintBitsToFloate4m3EXT(uint8_t((o_ >> 8) & 0xffu)); \
+        yb[2 * k_] = uintBitsToFloate4m3EXT(uint8_t((o_ >> 16) & 0xffu)), yb[2 * k_ + 1] = uintBitsToFloate4m3EXT(uint8_t(o_ >> 24)); }
+#endif
 #endif
 #define W8STEP(acc, addr, off, b) { QA8 a_; coopMatLoad(a_, E4View(addr).v, off, ENC_C, ROW); acc = coopMatMulAdd(a_, b, acc); }
 // LT_MLP8 activation quantizer: an fp16 clamp then the e4m3 constructor (Mochi NR_QUANT mode-1
@@ -575,6 +581,36 @@ void main() {
 #elif DEC_UP
     // decoder _0: A = the 4x4 low-res pixels of the window (mirrored), U_pos = A up[pos]^T + b in QV [4][16][C],
     // then z = fma(skip, s, U) per token. Shifts are even, so the window covers whole low-res pixels.
+#ifdef LT_UP8
+    // Native 8-cycle FP8 up (TR body): the W2-body pattern transplanted - each lane holds
+    // row (ln & 15) of the 4x4 low-res block straight from the plane's raw e4m3 bytes
+    // (channels j*32 + hh*16 .. +16), multiplied by the exact e4m3 tail of up_w
+    // (offset 8*C*Cp bytes = the fp16 prefix). No LDS staging, no inner-K conversions.
+#define UP8_W E4View(uint64_t(pc.up_w) + uint64_t(8u * ENC_C * ENC_CP)).v
+    ivec2 uq_ = (8 * win - pc.shift) / 2 + ivec2(ln & 3u, (ln >> 2) & 3u);
+    uq_ = ivec2(reflect_i(uq_.x, pc.lo_size.x), reflect_i(uq_.y, pc.lo_size.y));
+    U32x4View ulo8_ = U32x4View(uint64_t(pc.xlo));
+#if ENC_CP == 128
+    uvec4 wp0 = ulo8_.v[plane_index_sz(uq_, int(hh * 16u), pc.lo_size) >> 4];
+    uvec4 wp1 = ulo8_.v[plane_index_sz(uq_, int(32u + hh * 16u), pc.lo_size) >> 4];
+    uvec4 wp2 = ulo8_.v[plane_index_sz(uq_, int(64u + hh * 16u), pc.lo_size) >> 4];
+    uvec4 wp3 = ulo8_.v[plane_index_sz(uq_, int(96u + hh * 16u), pc.lo_size) >> 4];
+    QB8 a0, a1, a2, a3, a4, a5, a6, a7;
+    REC2Y(a0, a1, wp0) REC2Y(a2, a3, wp1) REC2Y(a4, a5, wp2) REC2Y(a6, a7, wp3)
+#define UP8_STEP(k_) { QA8 w_; coopMatLoad(w_, UP8_W, o_ + (k_) * 16u, ENC_CP, ROW); u = coopMatMulAdd(w_, a##k_, u); }
+#elif ENC_CP == 160
+    uvec4 wp0 = ulo8_.v[plane_index_sz(uq_, int(hh * 16u), pc.lo_size) >> 4];
+    uvec4 wp1 = ulo8_.v[plane_index_sz(uq_, int(32u + hh * 16u), pc.lo_size) >> 4];
+    uvec4 wp2 = ulo8_.v[plane_index_sz(uq_, int(64u + hh * 16u), pc.lo_size) >> 4];
+    uvec4 wp3 = ulo8_.v[plane_index_sz(uq_, int(96u + hh * 16u), pc.lo_size) >> 4];
+    uvec4 wp4 = ulo8_.v[plane_index_sz(uq_, int(128u + hh * 16u), pc.lo_size) >> 4];
+    QB8 a0, a1, a2, a3, a4, a5, a6, a7, a8, a9;
+    REC2Y(a0, a1, wp0) REC2Y(a2, a3, wp1) REC2Y(a4, a5, wp2) REC2Y(a6, a7, wp3) REC2Y(a8, a9, wp4)
+#define UP8_STEP(k_) { QA8 w_; coopMatLoad(w_, UP8_W, o_ + (k_) * 16u, ENC_CP, ROW); u = coopMatMulAdd(w_, a##k_, u); }
+#else
+#error "LT_UP8 in the TR body: ENC_CP 128/160 only (160_256's Cp=256 would cost 64 B-tile VGPRs)"
+#endif
+#else
     for (uint i = lid; i < ENC_CP; i += NTH) {
         uint r = i / (ENC_CP / 16u), a = (i % (ENC_CP / 16u)) * 16u;
         ivec2 q = (8 * win - pc.shift) / 2 + ivec2(r & 3u, r >> 2);
@@ -583,12 +619,23 @@ void main() {
         put16(UPLO + r * ENC_CP, a, w);
     }
     WG_SYNC();
+#endif
 #ifndef PROF_NOUP
-#ifdef LT_UP8
-#error "LT_UP8 in the TR DEC_UP body measured slower than fp16 - removed; see docs/test-evidence/v015-stage2-up8-mrg8-results.md"
-#else
     UP_UNROLL for (uint tile = s; tile < 4u * NT; tile += NSG) {
         uint pos = tile / NT, nt = tile % NT;
+#ifdef LT_UP8
+        QC8 u = QC8(bias_acc_t(pc.up_b, pos * ENC_C + nt * 16u));
+        uint o_ = (pos * ENC_C + nt * 16u) * ENC_CP;
+#if ENC_CP == 128
+        UP8_STEP(0) UP8_STEP(1) UP8_STEP(2) UP8_STEP(3) UP8_STEP(4) UP8_STEP(5) UP8_STEP(6) UP8_STEP(7)
+#else
+        UP8_STEP(0) UP8_STEP(1) UP8_STEP(2) UP8_STEP(3) UP8_STEP(4) UP8_STEP(5) UP8_STEP(6) UP8_STEP(7) UP8_STEP(8) UP8_STEP(9)
+#endif
+        MH h_ = MH(u);
+        lds4[(UPU + ((pos * 16u + (ln & 15u)) * ENC_C + nt * 16u + 8u * hh)) >> 3] =
+            uvec4(packFloat2x16(f16vec2(h_[0], h_[1])), packFloat2x16(f16vec2(h_[2], h_[3])),
+                  packFloat2x16(f16vec2(h_[4], h_[5])), packFloat2x16(f16vec2(h_[6], h_[7])));
+#else
         ACC acc = bias_acc(pc.up_b, pos * ENC_C + nt * 16u);
         for (uint k = 0u; k < ENC_CP; k += 16u) {
             MA alo, ahi;
@@ -596,8 +643,8 @@ void main() {
             GSTEP(acc, alo, ahi, pc.up_w.v, (pos * ENC_C + nt * 16u) * ENC_CP + k, ENC_CP)
         }
         coopMatStore(MH(acc), lds, UPU + pos * 16u * ENC_C + nt * 16u, ENC_C, ROW);
-    }
 #endif
+    }
 #endif
     WG_SYNC();
 #if TR

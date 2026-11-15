@@ -138,10 +138,7 @@ void main() {
         U32x4View lo = U32x4View(uint64_t(pc.xlo));
         uvec4 w0 = lo.v[plane_index_sz(q, int(hh) * 16, pc.lo_size) >> 4], w1 = lo.v[plane_index_sz(q, 32 + int(hh) * 16, pc.lo_size) >> 4];
 #ifdef LT_UP8
-        // the same 16 record bytes as e4m3 B tiles (OCP codes); the weights' codes follow their fp16 values in up_w
-#define REC2Y(ya, yb, w) [[unroll]] for (int k_ = 0; k_ < 4; ++k_) { uint o_ = OCP4(w[k_]); \
-            ya[2 * k_] = uintBitsToFloate4m3EXT(uint8_t(o_ & 0xffu)), ya[2 * k_ + 1] = uintBitsToFloate4m3EXT(uint8_t((o_ >> 8) & 0xffu)); \
-            yb[2 * k_] = uintBitsToFloate4m3EXT(uint8_t((o_ >> 16) & 0xffu)), yb[2 * k_ + 1] = uintBitsToFloate4m3EXT(uint8_t(o_ >> 24)); }
+        // REC2Y comes from onr_block_fast.glsl (shared with the TR body); the weights' codes follow their fp16 values in up_w
 #define UP8_W E4View(uint64_t(pc.up_w) + uint64_t(8u * ENC_C * ENC_CP)).v
         QB8 a0, a1, a2, a3;
         REC2Y(a0, a1, w0) REC2Y(a2, a3, w1)

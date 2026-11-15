@@ -23,9 +23,11 @@
         f16vec2 a_ = unpackFloat2x16(e4m3_lo(w_[k_])), b_ = unpackFloat2x16(e4m3_hi(w_[k_])); \
         xa[2 * k_] = a_.x, xa[2 * k_ + 1] = a_.y, xb[2 * k_] = b_.x, xb[2 * k_ + 1] = b_.y; }
 // the same 16 record bytes as e4m3 B tiles (OCP codes), for LT_UP8 / LT_MI8
+#ifndef REC2Y
 #define REC2Y(ya, yb, w_) [[unroll]] for (int k_ = 0; k_ < 4; ++k_) { uint o_ = OCP4(w_[k_]); \
         ya[2 * k_] = uintBitsToFloate4m3EXT(uint8_t(o_ & 0xffu)), ya[2 * k_ + 1] = uintBitsToFloate4m3EXT(uint8_t((o_ >> 8) & 0xffu)); \
         yb[2 * k_] = uintBitsToFloate4m3EXT(uint8_t((o_ >> 16) & 0xffu)), yb[2 * k_ + 1] = uintBitsToFloate4m3EXT(uint8_t(o_ >> 24)); }
+#endif
 // channel tiles n (x0n, x1n: own token tiles a, b) and planes (pl: tiles a, b)
 #if NT > 4
 #define W2T45(M) M(4) M(5)
