@@ -671,6 +671,28 @@ void main() {
 #if NT > 8
         XUP(x8, x9, 4u)
 #endif
+#if DEC_UP && FP8QV
+        // A4 quantize-once: the up's x^T tiles quantize once here into the y e4m3 B tiles -
+        // the same values XOUTQ writes to the planes - and every head's Q/K/V W8STEP reads
+        // them straight (the XREG_IN encoders get theirs from the plane records in XIN8).
+        // The fp16 x tiles stay live for the residual, the MLP and XOUT.
+#define XQ8Y(xa, xb, ya, yb) QB8 ya, yb; { [[unroll]] for (int i_ = 0; i_ < (ya).length(); i_ += 2) { \
+        fe4m3vec2 qa_ = qe4_pair32(vec2(xa[i_], xa[i_ + 1])), qb_ = qe4_pair32(vec2(xb[i_], xb[i_ + 1])); \
+        ya[i_] = qa_.x, ya[i_ + 1] = qa_.y, yb[i_] = qb_.x, yb[i_ + 1] = qb_.y; } }
+        XQ8Y(x0, x1, y0, y1)
+#if NT > 2
+        XQ8Y(x2, x3, y2, y3)
+#endif
+#if NT > 4
+        XQ8Y(x4, x5, y4, y5)
+#endif
+#if NT > 6
+        XQ8Y(x6, x7, y6, y7)
+#endif
+#if NT > 8
+        XQ8Y(x8, x9, y8, y9)
+#endif
+#endif
 #else
     {
         float16_t sc = uint16BitsToFloat16(uint16_t(pc.s_skip));
