@@ -293,6 +293,43 @@ void main() {
             precise f16vec2 vb_ = fma(f16vec2(r1_[i_], r1_[i_ + 1]), f16vec2(ls2), f16vec2(xb[i_], xb[i_ + 1])); \
             xa[i_] = va_.x, xa[i_ + 1] = va_.y, xb[i_] = vb_.x, xb[i_ + 1] = vb_.y; } }
     W1_RES8(0, x00, x01) W1_RES8(1, x10, x11) W1_RES8(2, x20, x21) W1_RES8(3, x30, x31)
+#elif defined(LT_MLP8) && ENC_EMBED
+    // fc2-only FP8 for the enc0 stage MLP: fc1 stays fp16 verbatim (K = 32 input-layer
+    // noise kept out), the post-GELU 64-wide hidden slice quantises once per tile with
+    // the mode-4 pair converter and fc2 streams A tiles from the e4m3 tail of pc.fc2
+    // (engine UT8), the same tiles already shared across the four token tiles.
+#define W1_FC2_W8B E4View(uint64_t(pc.fc2) + uint64_t(4u * HID * ENC_C)).v
+    QC8 mc00 = QC8(bias_acc_t(pc.fc2_b, 0u)), mc01 = QC8(bias_acc_t(pc.fc2_b, 16u));
+    QC8 mc10 = mc00, mc11 = mc01, mc20 = mc00, mc21 = mc01, mc30 = mc00, mc31 = mc01;
+#define GELU8W(gg, h) { for (int i_ = 0; i_ < gg.length(); i_ += 2) { fe4m3vec2 q_ = qe4_pair32(vec2(gelu_f32(h[i_]), gelu_f32(h[i_ + 1]))); gg[i_] = q_.x; gg[i_ + 1] = q_.y; } }
+#define MLP8_TOK(xa, xb, ma, mb) { ACC h0 = hb0, h1 = hb1, h2 = hb2, h3 = hb3; MB b_; \
+            CPB(b_, xa) MMA(h0, f00, b_) MMA(h1, f10, b_) MMA(h2, f20, b_) MMA(h3, f30, b_) \
+            CPB(b_, xb) MMA(h0, f01, b_) MMA(h1, f11, b_) MMA(h2, f21, b_) MMA(h3, f31, b_) \
+            QB8 gg0, gg1, gg2, gg3; \
+            GELU8W(gg0, h0) GELU8W(gg1, h1) GELU8W(gg2, h2) GELU8W(gg3, h3) \
+            ma = coopMatMulAdd(fw0, gg0, ma); mb = coopMatMulAdd(fw4, gg0, mb); \
+            ma = coopMatMulAdd(fw1, gg1, ma); mb = coopMatMulAdd(fw5, gg1, mb); \
+            ma = coopMatMulAdd(fw2, gg2, ma); mb = coopMatMulAdd(fw6, gg2, mb); \
+            ma = coopMatMulAdd(fw3, gg3, ma); mb = coopMatMulAdd(fw7, gg3, mb); }
+    for (uint j = 0u; j < LT_HID; j += 64u) {
+        MA f00, f01, f10, f11, f20, f21, f30, f31;
+        coopMatLoad(f00, pc.fc1.v, WT_FC1(j * ENC_C), WS_FC1, ROW); coopMatLoad(f01, pc.fc1.v, WT_FC1(j * ENC_C + 16u), WS_FC1, ROW);
+        coopMatLoad(f10, pc.fc1.v, WT_FC1((j + 16u) * ENC_C), WS_FC1, ROW); coopMatLoad(f11, pc.fc1.v, WT_FC1((j + 16u) * ENC_C + 16u), WS_FC1, ROW);
+        coopMatLoad(f20, pc.fc1.v, WT_FC1((j + 32u) * ENC_C), WS_FC1, ROW); coopMatLoad(f21, pc.fc1.v, WT_FC1((j + 32u) * ENC_C + 16u), WS_FC1, ROW);
+        coopMatLoad(f30, pc.fc1.v, WT_FC1((j + 48u) * ENC_C), WS_FC1, ROW); coopMatLoad(f31, pc.fc1.v, WT_FC1((j + 48u) * ENC_C + 16u), WS_FC1, ROW);
+        ACC hb0 = bias_acc_t(pc.fc1_b, j), hb1 = bias_acc_t(pc.fc1_b, j + 16u), hb2 = bias_acc_t(pc.fc1_b, j + 32u), hb3 = bias_acc_t(pc.fc1_b, j + 48u);
+        QA8 fw0, fw1, fw2, fw3, fw4, fw5, fw6, fw7;
+        coopMatLoad(fw0, W1_FC2_W8B, j, HID, ROW); coopMatLoad(fw1, W1_FC2_W8B, j + 16u, HID, ROW);
+        coopMatLoad(fw2, W1_FC2_W8B, j + 32u, HID, ROW); coopMatLoad(fw3, W1_FC2_W8B, j + 48u, HID, ROW);
+        coopMatLoad(fw4, W1_FC2_W8B, 16u * HID + j, HID, ROW); coopMatLoad(fw5, W1_FC2_W8B, 16u * HID + j + 16u, HID, ROW);
+        coopMatLoad(fw6, W1_FC2_W8B, 16u * HID + j + 32u, HID, ROW); coopMatLoad(fw7, W1_FC2_W8B, 16u * HID + j + 48u, HID, ROW);
+        if (lv0) MLP8_TOK(x00, x01, mc00, mc01) if (lv1) MLP8_TOK(x10, x11, mc10, mc11)
+        if (lv2) MLP8_TOK(x20, x21, mc20, mc21) if (lv3) MLP8_TOK(x30, x31, mc30, mc31)
+    }
+#define RES8W(ma, xa) { MH r_ = MH(ma); for (int i_ = 0; i_ < r_.length(); i_ += 2) { \
+            precise f16vec2 v_ = fma(f16vec2(r_[i_], r_[i_ + 1]), f16vec2(ls2), f16vec2(xa[i_], xa[i_ + 1])); xa[i_] = v_.x; xa[i_ + 1] = v_.y; } }
+    RES8W(mc00, x00) RES8W(mc01, x01) RES8W(mc10, x10) RES8W(mc11, x11)
+    RES8W(mc20, x20) RES8W(mc21, x21) RES8W(mc30, x30) RES8W(mc31, x31)
 #else
     c00 = bias_acc_t(pc.fc2_b, 0u), c01 = bias_acc_t(pc.fc2_b, 16u);
     c10 = c00, c11 = c01, c20 = c00, c21 = c01, c30 = c00, c31 = c01;
