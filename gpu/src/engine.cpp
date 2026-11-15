@@ -330,7 +330,11 @@ void Engine::upload_stage(const StageWeights& s, StageBufs& b) {
         auto d = qv_bytes(v.data(), v.size());
         pack_bytes(dev_, fixed_, d.data(), d.size(), &dst);
     };
-    if (s.Co && s.mrg_w.size() == size_t(s.Co) * 4 * s.b.C) U(b.mrg_w, with_tiles(s.mrg_w, 4 * s.b.C));
+    // LT_MRG8 (enc2+ output merge): the e4m3 codes of the ORIGINAL (untiled) [Co][4C] follow the
+    // fp16 values + tiles (offset tiled.size() * 2 = 16 * Co * C bytes, matching the shader's
+    // MRG_W8); the fp16 prefix stays byte-identical for the regular kernels. Tail bytes = Co*4C
+    // exactly, so every A-tile read stays inside the packed blob by construction.
+    if (s.Co && s.mrg_w.size() == size_t(s.Co) * 4 * s.b.C) UT8(b.mrg_w, with_tiles(s.mrg_w, 4 * s.b.C), s.mrg_w);
     else if (s.Co) U8(b.mrg_w, s.mrg_w);
     else U(b.mrg_w, s.mrg_w);
     U(b.mrg_b, s.mrg_b);

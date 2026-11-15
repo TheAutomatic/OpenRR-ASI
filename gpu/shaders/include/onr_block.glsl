@@ -378,9 +378,19 @@ layout(push_constant, scalar) uniform P {
 #define LDS_BASE_N (OB + (SPLIT == 2 ? 2048u : 0u))
 #endif
 #ifdef LDS_OCC_PAD
-#define LDS_N max(uint(LDS_OCC_PAD), uint(LDS_BASE_N))
+#define LDS_N0 max(uint(LDS_OCC_PAD), uint(LDS_BASE_N))
 #else
-#define LDS_N LDS_BASE_N
+#define LDS_N0 LDS_BASE_N
+#endif
+#ifdef LT_MRG8
+// MRG8 (TR body, ENC_CO > 0): XOUT's e4m3 record bytes mirrored into LDS in the plane-record
+// layout - per 32-channel block [64 tokens][32 bytes] - as the merge's B-operand source (the
+// read side is bit-identical in construction to the W2 body's LT_MI8 plane reads). MIR is in
+// halves (the lds4 view indexes it as MIR >> 3); 32 * ENC_C halves = 64 tokens * C bytes.
+#define MIR ((LDS_N0 + 15u) & ~15u)
+#define LDS_N (MIR + 32u * ENC_C)
+#else
+#define LDS_N LDS_N0
 #endif
 // one LDS, four aliased views (shared blocks alias at offset 0): halves, u32 pairs, u32x2 quads, u32x4 octets
 #extension GL_EXT_shared_memory_block : require

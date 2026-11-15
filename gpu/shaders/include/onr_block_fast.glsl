@@ -1174,9 +1174,18 @@ void main() {
 #endif
 #if !DEC_HEAD
     // TensorOutput of the own tokens straight from the x^T tiles, one 16-byte store per lane and plane
-#define XOUT(xa, xb, pl) if (town && (SPLIT == 1 || ((pl) & 1u) == hf)) { uvec4 w_; [[unroll]] for (int k_ = 0; k_ < 4; ++k_) \
+#ifdef LT_MRG8
+    // MRG8: the same 16 record bytes also go to an LDS code mirror in the plane-record layout
+    // (per 32-channel block pl: [64 tokens][32 bytes], lane half hh at byte hh*16); the output
+    // merge below reads them as its B fragments, so the quantization is the XOUT codes
+    // themselves - zero extra conversions, one e4m3 rounding per value
+#define XOUT_MIR(pl) lds4[(MIR >> 3) + (((pl) * 2048u + (r0 + (ln & 15u)) * 32u + hh * 16u) >> 4)] = w_;
+#else
+#define XOUT_MIR(pl)
+#endif
+#define XOUT(xa, xb, pl) if (SPLIT == 1 || ((pl) & 1u) == hf) { uvec4 w_ = uvec4(0u); if (town) { [[unroll]] for (int k_ = 0; k_ < 4; ++k_) \
         w_[k_] = XOUTQ(f16vec2(xa[2 * k_], xa[2 * k_ + 1]), f16vec2(xb[2 * k_], xb[2 * k_ + 1])); \
-        U32x4View(uint64_t(pc.y)).v[plane_index(tp, int(pl) * 32 + int(hh) * 16) >> 4] = w_; }
+        U32x4View(uint64_t(pc.y)).v[plane_index(tp, int(pl) * 32 + int(hh) * 16) >> 4] = w_; } XOUT_MIR(pl) }
     XOUT(x0, x1, 0u)
 #if NT > 2
     XOUT(x2, x3, 1u)
@@ -1671,6 +1680,33 @@ void main() {
     }
     WG_SYNC();
 #endif
+#ifdef LT_MRG8
+    // MRG8: pooled (16 x Co) = A(mrg codes) x B(x2 code mirror) + b. The weight A tiles load
+    // from the natural-order e4m3 tail after the tiled fp16 + tiles (Engine::upload_stage UT8:
+    // tail offset 4 * (Co * 4C) = 16 * Co * C bytes); the B fragments come from the XOUT LDS
+    // code mirror, built per lane exactly like the W2 body's LT_MI8 reads the enc0 planes
+    // (REC2Y of the own token's 16 record bytes per quarter and channel block).
+#define MRG_W8 E4View(uint64_t(pc.mrg_w) + uint64_t(16u * ENC_CO * ENC_C)).v
+    for (uint nt = s; nt < ENC_CO / 16u; nt += NSG) {
+        QC8 m_ = QC8(bias_acc_t(pc.mrg_b, nt * 16u));
+        [[unroll]] for (uint q = 0u; q < 4u; ++q) {
+            // lane column n = pooled row r = ln & 15; its token of quarter q (2 ky + kx = q)
+            uint t_ = (2u * ((ln & 15u) >> 2) + (q >> 1)) * 8u + 2u * ((ln & 15u) & 3u) + (q & 1u);
+            [[unroll]] for (uint cb = 0u; cb < ENC_C / 32u; ++cb) {
+                uvec4 w_ = lds4[(MIR >> 3) + ((cb * 2048u + t_ * 32u + hh * 16u) >> 4)];
+                QB8 ba0, ba1;
+                REC2Y(ba0, ba1, w_)
+                const uint kt = q * (ENC_C / 16u) + cb * 2u;
+                QA8 a_;
+                coopMatLoad(a_, MRG_W8, nt * 16u * 4u * ENC_C + kt * 16u, 4u * ENC_C, ROW);
+                m_ = coopMatMulAdd(a_, ba0, m_);
+                coopMatLoad(a_, MRG_W8, nt * 16u * 4u * ENC_C + (kt + 1u) * 16u, 4u * ENC_C, ROW);
+                m_ = coopMatMulAdd(a_, ba1, m_);
+            }
+        }
+        coopMatStore(MH(m_), lds, MO + nt * 16u, ENC_CO, COL);
+    }
+#else
     for (uint nt = s; nt < ENC_CO / 16u; nt += NSG) {
         ACC acc = bias_acc(pc.mrg_b, nt * 16u);
         for (uint k = 0u; k < 4u * ENC_C; k += 16u) {
@@ -1684,6 +1720,7 @@ void main() {
         }
         coopMatStore(MH(acc), lds, MO + nt * 16u, ENC_CO, ROW);
     }
+#endif
     WG_SYNC();
     // PooledOutput: e4m3 of the pooled pixels the window owns
     {

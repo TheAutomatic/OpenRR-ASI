@@ -452,11 +452,20 @@ void main() {
     W2T(RES_A2) W2T(RES_B2)
 #endif
     // TensorOutput of the own tokens straight from the x^T tiles, one 16-byte store per lane and plane
-#define XOUT2(xa, xb, tp, own, pl) if (own) { uvec4 w_; [[unroll]] for (int k_ = 0; k_ < 4; ++k_) \
+#ifdef LT_MRG8
+    // MRG8: the same 16 record bytes also go to an LDS code mirror over the region the merge's fp16
+    // staging used (dead by XOUT time; the attention's Q/V scratch ended earlier). Plane-record layout
+    // per 32-channel block: [64 tokens][32 bytes], lane half hh at byte hh*16; zeros for unowned
+    // tokens keep the merge B fragments deterministic across fresh engines
+#define XOUT2_MIR(pl, t0) lds4[(((pl) * 2048u + ((t0) + (ln & 15u)) * 32u + hh * 16u) >> 4)] = w_;
+#else
+#define XOUT2_MIR(pl, t0)
+#endif
+#define XOUT2(xa, xb, tp, own, pl, t0) { uvec4 w_ = uvec4(0u); if (own) { [[unroll]] for (int k_ = 0; k_ < 4; ++k_) \
         w_[k_] = XOUTQ(f16vec2(xa[2 * k_], xa[2 * k_ + 1]), f16vec2(xb[2 * k_], xb[2 * k_ + 1])); \
-        U32x4View(uint64_t(pc.y)).v[plane_index(tp, int(pl) * 32 + int(hh) * 16) >> 4] = w_; }
-#define XOUT_A(pl, a, b) XOUT2(x0##a, x0##b, tpa, towna, uint(pl))
-#define XOUT_B(pl, a, b) XOUT2(x1##a, x1##b, tpb, townb, uint(pl))
+        U32x4View(uint64_t(pc.y)).v[plane_index(tp, int(pl) * 32 + int(hh) * 16) >> 4] = w_; } XOUT2_MIR(pl, t0) }
+#define XOUT_A(pl, a, b) XOUT2(x0##a, x0##b, tpa, towna, uint(pl), ra)
+#define XOUT_B(pl, a, b) XOUT2(x1##a, x1##b, tpb, townb, uint(pl), rb)
     W2P(XOUT_A) W2P(XOUT_B)
 #if ENC_STAGE
     // DFN head: d^T = dfn x2^T + b per token tile (3 rows used, in lane half 0); lane half 0 takes tile a, half 1
@@ -514,16 +523,53 @@ void main() {
     // merge: A row r = pooled pixel (r / 4, r % 4) of the window, K = (2 ky + kx) C + c, written straight from the
     // x^T tiles into the LDS [16][4 C] (one 16-byte store per lane and channel tile); pooled (16 x Co) = A mrg^T + b,
     // output tiles split between the subgroups, then through the LDS to the e4m3 planes
-    WG_SYNC();
+#ifdef LT_MRG8
+    // MRG8: pooled (16 x Co) = A(mrg codes) x B(x2 code mirror) + b. The mrg_w buffer already carries
+    // the e4m3 codes of everything after its fp16 values (U8/qv_bytes, shared with LT_MI8); the B
+    // fragments read the XOUT2 code mirror exactly like the input merge reads the enc0 planes
+#define MRG8_W E4View(uint64_t(pc.mrg_w) + uint64_t(2u * (ENC_CO * 4u * ENC_C + ENC_C * 4u * ENC_CIN))).v
+    {
+        // output tiles n0 .. n0 + Co / 32 - 1
+        uint n0 = (ENC_CO / 32u) * w;
+        QC8 m0 = QC8(bias_acc_t(pc.mrg_b, n0 * 16u)), m1 = QC8(bias_acc_t(pc.mrg_b, n0 * 16u + 16u)), m2 = QC8(bias_acc_t(pc.mrg_b, n0 * 16u + 32u));
+#if ENC_CO > 96
+        QC8 m3 = QC8(bias_acc_t(pc.mrg_b, n0 * 16u + 48u));
+#endif
+        [[unroll]] for (uint q = 0u; q < 4u; ++q) {
+            // lane column n = pooled row r = ln & 15; its token of quarter q (2 ky + kx = q)
+            uint t_ = (2u * ((ln & 15u) >> 2) + (q >> 1)) * 8u + 2u * ((ln & 15u) & 3u) + (q & 1u);
+            [[unroll]] for (uint cb = 0u; cb < ENC_C / 32u; ++cb) {
+                uvec4 w_ = lds4[(cb * 2048u + t_ * 32u + hh * 16u) >> 4];
+                QB8 ba0, ba1;
+                REC2Y(ba0, ba1, w_)
+                const uint kt = q * (ENC_C / 16u) + cb * 2u;
+#define MRG8_A(m, r0_) { QA8 a_; \
+                    coopMatLoad(a_, MRG8_W, (r0_) * 4u * ENC_C + kt * 16u, 4u * ENC_C, ROW); m = coopMatMulAdd(a_, ba0, m); \
+                    coopMatLoad(a_, MRG8_W, (r0_) * 4u * ENC_C + (kt + 1u) * 16u, 4u * ENC_C, ROW); m = coopMatMulAdd(a_, ba1, m); }
+                MRG8_A(m0, n0 * 16u) MRG8_A(m1, n0 * 16u + 16u) MRG8_A(m2, n0 * 16u + 32u)
+#if ENC_CO > 96
+                MRG8_A(m3, n0 * 16u + 48u)
+#endif
+            }
+        }
+        WG_SYNC();   // both subgroups done reading the mirror before the outputs overwrite it
+        coopMatStore(MH(m0), lds, n0 * 16u, ENC_CO, COL);
+        coopMatStore(MH(m1), lds, n0 * 16u + 16u, ENC_CO, COL);
+        coopMatStore(MH(m2), lds, n0 * 16u + 32u, ENC_CO, COL);
+#if ENC_CO > 96
+        coopMatStore(MH(m3), lds, n0 * 16u + 48u, ENC_CO, COL);
+#endif
+    }
+#else
+    {
 #define MST(xn, t0, n) { MH h_ = xn; uint t_ = (t0) + (ln & 15u); \
         uint a_ = ((t_ >> 4) * 4u + ((t_ & 7u) >> 1)) * 4u * ENC_C + ((((t_ >> 3) & 1u) << 1) + (t_ & 1u)) * ENC_C + (n) * 16u + 8u * hh; \
         lds4[a_ >> 3] = uvec4(packFloat2x16(f16vec2(h_[0], h_[1])), packFloat2x16(f16vec2(h_[2], h_[3])), \
             packFloat2x16(f16vec2(h_[4], h_[5])), packFloat2x16(f16vec2(h_[6], h_[7]))); }
 #define MST_A(n) MST(x0##n, ra, uint(n))
 #define MST_B(n) MST(x1##n, rb, uint(n))
-    W2T(MST_A) W2T(MST_B)
-    WG_SYNC();
-    {
+        W2T(MST_A) W2T(MST_B)
+        WG_SYNC();
         // output tiles n0 .. n0 + Co / 32 - 1
         uint n0 = (ENC_CO / 32u) * w;
         ACC m0 = bias_acc(pc.mrg_b, n0 * 16u), m1 = bias_acc(pc.mrg_b, n0 * 16u + 16u), m2 = bias_acc(pc.mrg_b, n0 * 16u + 32u);
@@ -549,6 +595,7 @@ void main() {
         coopMatStore(MH(m3), lds, n0 * 16u + 48u, ENC_CO, ROW);
 #endif
     }
+#endif
     WG_SYNC();
     // PooledOutput: e4m3 of the pooled pixels the window owns
     {
