@@ -140,6 +140,24 @@ void main() {
             f16vec2 ua = unpackFloat2x16(lds1[ua_ + uint(k_)]), ubv = unpackFloat2x16(lds1[ua_ + 8u + uint(k_)]); \
             precise f16vec2 za = fma(a_, f16vec2(sc), ua), zb = fma(b_, f16vec2(sc), ubv); \
             RT(xa)[2 * k_] = za.x, RT(xa)[2 * k_ + 1] = za.y, RT(xb)[2 * k_] = zb.x, RT(xb)[2 * k_ + 1] = zb.y; } XROWSET(xa) XROWSET(xb) }
+#if FP8QV
+// the same read + skip fma, and the fma's fp16 result quantized once into the e4m3 B tiles the
+// heads' QV products read (the same values XOUTQ writes; RDNA4 only - gfx11 strips FP8QV)
+#define XIN2Y(xa, xb, ya, yb, tp, t0, pl) MH xa, xb; QB8 ya, yb; { uvec4 w_ = U32x4View(uint64_t(pc.x)).v[plane_index(tp, int(pl) * 32 + int(hh) * 16) >> 4]; \
+        uint t_ = (t0) + (ln & 15u), ua_ = (((((t_ >> 3) & 1u) << 1) + (t_ & 1u)) * 16u * ENC_C + (((t_ >> 4) << 2) + ((t_ & 7u) >> 1)) * ENC_C + (pl) * 32u + 8u * hh) >> 1; \
+        [[unroll]] for (int k_ = 0; k_ < 4; ++k_) { \
+            f16vec2 a_ = unpackFloat2x16(e4m3_lo(w_[k_])), b_ = unpackFloat2x16(e4m3_hi(w_[k_])); \
+            f16vec2 ua = unpackFloat2x16(lds1[ua_ + uint(k_)]), ubv = unpackFloat2x16(lds1[ua_ + 8u + uint(k_)]); \
+            precise f16vec2 za = fma(a_, f16vec2(sc), ua), zb = fma(b_, f16vec2(sc), ubv); \
+            xa[2 * k_] = za.x, xa[2 * k_ + 1] = za.y, xb[2 * k_] = zb.x, xb[2 * k_ + 1] = zb.y; \
+            fe4m3vec2 qa_ = qe4_pair32(vec2(za)), qb_ = qe4_pair32(vec2(zb)); \
+            ya[2 * k_] = qa_.x, ya[2 * k_ + 1] = qa_.y, yb[2 * k_] = qb_.x, yb[2 * k_ + 1] = qb_.y; } }
+#define XIN_A(pl, a, b) XIN2Y(x0##a, x0##b, y0##a, y0##b, tpa, ra, uint(pl))
+#define XIN_B(pl, a, b) XIN2Y(x1##a, x1##b, y1##a, y1##b, tpb, rb, uint(pl))
+#else
+#define XIN_A(pl, a, b) XIN2(x0##a, x0##b, tpa, ra, uint(pl))
+#define XIN_B(pl, a, b) XIN2(x1##a, x1##b, tpb, rb, uint(pl))
+#endif
 #elif ENC_MERGE_IN
 #if NT != 4
 #error "W2 input merge: C = 64 only"
@@ -187,6 +205,16 @@ void main() {
 #else
     MH x00 = MH(mi00), x01 = MH(mi01), x02 = MH(mi02), x03 = MH(mi03), x10 = MH(mi10), x11 = MH(mi11), x12 = MH(mi12), x13 = MH(mi13);
 #endif
+#if FP8QV
+    // the merge's fp16 output quantized once into the e4m3 B tiles the heads read (the same
+    // values XOUTQ writes; RDNA4 only - gfx11 strips FP8QV)
+#define XW2Q(xa, xb, ya, yb) QB8 ya, yb; { [[unroll]] for (int i_ = 0; i_ < (ya).length(); i_ += 2) { \
+        fe4m3vec2 qa_ = qe4_pair32(vec2(xa[i_], xa[i_ + 1])), qb_ = qe4_pair32(vec2(xb[i_], xb[i_ + 1])); \
+        ya[i_] = qa_.x, ya[i_ + 1] = qa_.y, yb[i_] = qb_.x, yb[i_ + 1] = qb_.y; } }
+    XW2Q(x00, x01, y00, y01) XW2Q(x02, x03, y02, y03) XW2Q(x10, x11, y10, y11) XW2Q(x12, x13, y12, y13)
+#endif
+#define XIN_A(pl, a, b)
+#define XIN_B(pl, a, b)
 #define XIN2(xa, xb, tp, t0, pl)
 #else
 #define XIN2(xa, xb, tp, t0, pl) XT xa, xb; { ROWV(xa) ROWV(xb) uvec4 w_ = U32x4View(uint64_t(pc.x)).v[plane_index(tp, int(pl) * 32 + int(hh) * 16) >> 4]; \
@@ -203,14 +231,13 @@ void main() {
             ya[2 * k_] = uintBitsToFloate4m3EXT(uint8_t(o_ & 0xffu)), ya[2 * k_ + 1] = uintBitsToFloate4m3EXT(uint8_t((o_ >> 8) & 0xffu)); \
             yb[2 * k_] = uintBitsToFloate4m3EXT(uint8_t((o_ >> 16) & 0xffu)), yb[2 * k_ + 1] = uintBitsToFloate4m3EXT(uint8_t(o_ >> 24)); } }
 #endif
-#endif
-    // x^T tile names: x<own token tile><channel tile>; out accumulators c<own token tile><channel tile>
 #if FP8QV
 #define XIN_A(pl, a, b) XIN2Y(x0##a, x0##b, y0##a, y0##b, tpa, uint(pl))
 #define XIN_B(pl, a, b) XIN2Y(x1##a, x1##b, y1##a, y1##b, tpb, uint(pl))
 #else
 #define XIN_A(pl, a, b) XIN2(x0##a, x0##b, tpa, ra, uint(pl))
 #define XIN_B(pl, a, b) XIN2(x1##a, x1##b, tpb, rb, uint(pl))
+#endif
 #endif
     W2P(XIN_A) W2P(XIN_B)
 #define DECL_C0(n) ACC c0##n = bias_acc_t(pc.out_b, uint(n) * 16u);
