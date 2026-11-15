@@ -408,3 +408,43 @@ post_f_lt 采样/调度与 enc0_attr（ACO 调度器策略，源码不可达）�
 - ACO 优势核：`dec_dfn_128_128_fl_lt` **−103.60µs（−37.80%）**、`dec_dfn_64_64_f_lt` **−66.70µs（−8.56%）**、`dec_dfn_96_128_fl_lt` **−55.70µs（−13.17%）**、`enc_stage_64_64_96_f_lt` **−52.10µs（−5.19%）**、`dec_up_64_64_96_f_lt` **−44.40µs（−5.31%）**、`dec_up_32_64_64_f_lt` **−32.80µs（−2.73%）**、`enc_stage_160_256_160_fl_lt` −20.30µs（−15.23%）。
 - 残余驱动差距：`post_f_lt` **+172.20µs（+15.18%）**、`d3d_enc0_attr_f_lt` **+71.80µs（+8.46%）**、`dec_up_128_128_160_fl_lt` +36.00µs（+18.93%）、`enc0_stage_32_64_f_lt` +26.20µs（+1.89%）、`dec_up_96_128_128_fl_lt` +26.00µs（+5.20%）。
 - **总结**：在 `post_f_lt` 与 `d3d_enc0_attr_f_lt` 零修改前提下，Wave 2 抢救与 Wave 3 外循环权重共享将整体端到端 ACO 性能推进至 `1080p` **−0.121%**、`4K` **−0.744%**，双分辨率全面反超原生驱动 LLPC。
+
+## 14. Stage 7 夜间单栈 ACO 攻坚实测报告（Wave A→V4 切换）
+
+### 14.1 晋级链（起点 `00c9acf`/代码态 `e1af0d5`，11 次提交全绿）
+
+| 提交 | 内容 | 关键实测 |
+|---|---|---|
+| `61a9c42` | `--precision-split --precision-native-only` 13 核 native 白名单 | post −51µs / attr −21µs；ABBA **−0.72%/−0.74%**；Anchor #2 当时全绿 |
+| `d28522f` | `PP` 宏剥 post `_lt` precise | exec 11820→11576；@idx −21µs；−0.08%/−0.26% |
+| `c931ba2` | `AP` 宏剥非 wide attr precise（guides=1 保持 999 dB） | @idx −9.4µs；−0.13%/−0.12% |
+| `5f18689` | post 双像素循环展开（VGPR 96 不变） | @idx −37.9µs；−0.22%/−0.10% |
+| `d77943e` | FLOW `dec_up_128/96` LT_MLP8 + 解除 enc_stage_96_fl 旧 pin | @idx −41/−43µs；**−0.98%/−0.97%** |
+| `52fcb96` | `XOUTQ` 分发：W1/W2 体 XOUT 换 qe4_pair32 | dec_up_32 exec −8%；−0.37%/−0.55% |
+| `6bc268a` | **Item 5：TR 体原生零转换 LT_UP8**（dec_up_96/128，W2 模式移植：per-lane plane 裸码 + `up_w` 尾段） | @idx −28.1/−7.8µs；−0.46%/−0.24% |
+| `4f63aca` | **真 Item 8：enc0 主干 MLP fc2-only FP8**（fc1 保 fp16 逐字复用；GELU8+尾段；VGPR 守 192） | enc0 @idx −41.9µs；−0.17%/−0.35%；Anchor #2 vs 绿参照最差 −0.10 dB |
+
+Legacy `.spv/.nrp` 全程 0 字节差异；全量记录 `scratch=0`；每步 units 全绿（K2 的 `diff_ship` 门在 native 记录下按"ACO↔驱动本就允许数值分歧"改为 ship 重复确定性门，`diff_words`+hash 门保持硬性）。
+
+### 14.2 判负/中止归档（按 V4 强制证据规则框）
+
+- **item3a**（post 内联双三次多项式）：@idx **+138µs**——该展开 ALU 代价高于纹理查表；仅否此实现（H2 的 RGP 排查保留）。
+- **Item 8 v1（05:36 整机死机坏核）**：根因＝`ENC_EMBED fw` 尾段读越界（`pc.mrg_w+16384` 读穿 12,288B 的 `embed_w_` 进 `tab_`，`0x7f/0xff`=e4m3 NaN → 3.02 dB；重转储回收时 wedge 驱动）。**纯 OOB 代码 bug，非 FP8 方向问题**；已回退，权重实测全域 ≤±6（无饱和问题）。
+- **MRG8-TR（本会话，当前实现未达标）**：镜像 W2-MI 不变量的首版测得 12.47 dB + units arena/wide FAIL（熔断即时止损，无二次上机）。静态定位：(a) `lds2`（uvec2=4 halves/elt）索引按 u32 粒度错位；(b) TR 体 lane→32 通道块内半区映射（hh=ln/16∈0..7）不能从 W2（hh∈{0,1}）类推。正确设计已定：**生产者侧 XOUT 代码镜像**（XOUT 已有 w_ uvec4 顺带写 LDS 代码平面，复刻 plane record 布局，读侧与 W2 逐位同构）+ `mrg_w` with_tiles 前缀后接自然序 e4m3 尾段（engine 改动已验证可编译；尾段字节数恰为 Co·4C，构造即边界安全）。铁律 1 的 `.asi` 时间戳核查在本次首战告捷（02:08 陈旧 runtime 被拦下，改走 `OPENRR_TRACE_BASE=build/asi-015-aco` 规范锁步）。
+- **Item 5a（W2 体 Cp=128 UP8 扩展）**：无效——dec_up_96 双变体实为 TR 体，改由 6bc268a 的 TR 原生实现覆盖。
+- **dlaa/S2 例的参照系语义**：`check_anchor2.py` 固定对比 4332470；`Q_S2_1080p_qual` 的 −0.508 dB 中 Wave A 已占 −0.41（当时过门），item5+8 仅 −0.10。已将绿基线 Anchor #2 快照棘轮至 `s7-overnight/anchor2-ref/`（52fcb96→item8r 链），终态 `final2/anchor2` 与参照**逐位一致（全例 Δ=0.000）**；`Q_S0_1080p_dlaa` 单指标在已接受构建间本有 ±0.3 摆动（33.63~34.38，probeA 关 2a 反而更差证明非单点污染）。
+
+### 14.3 收官终验
+
+- **Anchor #1**（vs `frozen-d3229e9`，fast-mode 0）：1080p & 4K steady+DRS **100.0000% 0-ULP / 999.00 dB**。
+- **Anchor #2**：v1 76 + v2 44 哈希门通过；vs 棘轮绿参照全例 ΔPSNR=0.000。
+- **term4**（ACO `4f63aca` vs LLPC `frozen-d3229e9`，3×ABBA 48/240/64，基线侧 100% `compiler=LLPC`）：
+  - 1080p **−3.394%**（`2.9548 vs 3.0538 ms`，组 −3.20/−3.40/−3.39）
+  - 4K **−3.907%**（`10.9722 vs 11.4421 ms`，组 −4.13/−3.91/−3.90）
+  - 对照 term3（−0.121%/−0.744%）：本战役净推进 **−3.27pp/−3.16pp**；整帧 4K `11.6195→10.9722 ms`（−5.6%）。
+  - 4K 600 帧 @idx（ACO 净胜核）：dec_dfn_128 **−114.7µs(−41.8%)**、dec_up_96 −26.5、enc_96_fl −27.3、enc_64 −20.5、dec_up_32 −9.7；LLPC 仍胜：post +129（原 +172）、attr +87、enc0 +50.9、dec_head +50.8、dec_up_128 +35.1（本轮 drift 0.95 系探针跑基线侧时钟偏移，仲裁以 ABBA 为准）；两侧 non_finite=0。
+- 终态：树干净于 `4f63aca`，未 push，主仓/WSL Mesa 未动。
+
+### 14.4 V4 待续（下会话队列，证据齐备）
+
+MRG8-TR 生产者镜像版（设计定稿如上）；`fast.glsl:1177` TR XOUT 尚未接 XOUTQ（遗漏点）；Wave B1 四项 Mochi 红利（NR_FRAG_E4M3/v_perm phi/NR_OPQ/NOOOB）；白名单外 native 单核试验；2^k 解锁 enc0 fc1；Track B LT_E8RAW 成对迁移。RGP 元问题（H2/H4、BDA vs SSBO、C=32 地板）留 Phase 4。
