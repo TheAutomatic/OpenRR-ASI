@@ -448,3 +448,76 @@ Legacy `.spv/.nrp` 全程 0 字节差异；全量记录 `scratch=0`；每步 uni
 ### 14.4 V4 待续（下会话队列，证据齐备）
 
 MRG8-TR 生产者镜像版（设计定稿如上）；`fast.glsl:1177` TR XOUT 尚未接 XOUTQ（遗漏点）；Wave B1 四项 Mochi 红利（NR_FRAG_E4M3/v_perm phi/NR_OPQ/NOOOB）；白名单外 native 单核试验；2^k 解锁 enc0 fc1；Track B LT_E8RAW 成对迁移。RGP 元问题（H2/H4、BDA vs SSBO、C=32 地板）留 Phase 4。
+
+## 15. Stage 7 Wave B（Track A）：块内收官四提交链与判负归档（2026-11-15）
+
+起点 `016e5d5`（代码头 `4f63aca`），终点 `4dd6e3f`（未 push）。全程 Legacy `.spv/.nrp` 0 字节扰动
+（每步 manifest 对比核验）；所有画质裁决锁定**固定基线 `s5-wave3-w1-dec-mlp8/anchor2`（`4332470`）**，
+从未把候选拷贝为新参照。质量跑与计时跑物理分离；`@idx` 仅作定位探针，仲裁一律无探针 3×ABBA。
+
+### 15.1 晋级链（每步 units 全绿 + legacy 零扰动 + Anchor #2 vs 4332470 全过）
+
+| 提交 | 内容 | 静态（ISA 账本） | @idx 4K | ABBA 中位 4K / 1080p | Anchor #2 vs 4332470 |
+|---|---|---|---|---|---|
+| `05c1d12` | **A1.1 TR 体 `XOUTQ`**：`fast.glsl:1178` `e4m3x4`→`XOUTQ`（mode-4 配对饱和转换器；52fcb96 的 W1/W2 推广补漏；legacy 经 XOUTQ 回退宏不变） | 17 个 TR `_lt` 核（enc_96/128/160、dec_up_96/128/160、dec_dfn_128/160）：exec −4.6~−10.3%，`v_perm_b32` −36~−78/核，cvt_pk8 +12~+40，maxmin=0，VGPR/LDS/scratch 0 变化 | 目标核合计 ≈−9µs | **−0.067%（4/6 负）/ −0.198%（5/6 负）**；自对比 58.99 dB nf=0 | v1 76/76 + v2 44/44，nf=0；Q_S0_4k_perf min +0.35 |
+| `8f47692` | **A1.2 `MRG8-TR v2`（enc_128）**：XOUT 顺带写 LDS 代码镜像（plane-record 布局；未持有 token 写零保确定性）；merge 变为 A(mrg 尾段)×B(镜像 REC2Y)，与 W2 `LT_MI8` 读侧逐位同构；`engine.cpp:333` U→UT8（尾段偏移 `tiled.size()*2`=16·Co·C 字节，尾段恰 Co·4C 字节构造即界内） | 仅 enc_128 f_lt/fl_lt：LDS 21504→29696（+镜像），VGPR 240→256，scratch 0；W2 侧镜像别名死区不增 LDS | enc_128_fl **−9.99µs（−4.22%）** | **−0.083%（4/6 负）/ −0.195%（4/6 负）**；锁步交换两侧 parity 58.9956 dB 对称 | v2 mins：Q_S1_4k_qual −0.10、Q_S2_4k_perf −0.43、Q_S2_1080p_qual −0.47（累计 −0.70 预算内） |
+| `0d56e67` | **A1.3 `dec_up_160 LT_UP8`**：纯 fastmode 翻转——6bc268a 已船载的 Cp=160 分支（5 record 块 ×10 B-tile）从未启用 | 仅 dec_up_160 f_lt/fl_lt：VGPR 192、LDS 30208 不变，exec +19%（展开的 10-step UP8 体） | dec_up_160_fl **−4.45µs（−4.22%）** | **−0.070%（4/6 负）/ −0.528%（6/6 负）** | v1 76/76 + v2 44/44，nf=0，mins 全部健康 |
+| `4dd6e3f` | **A1.4 `EMB8`**：enc0 embed MLP e4m3×e4m3（`engine.cpp` embed_w_ 12,288B 后接 6,144B e4m3 尾段；W1 `LT_EMB8`：权重 A 从尾段、B 从 dithered 属性 fp16 mode-4 量化（绝不裸读 ATTR64 记录字节——Stage3 4a 的 e5m3 截断教训）、GELU 直落 f32） | 仅 enc0 f_lt/f_w_lt：VGPR 192 不变，scratch 0 | （bench 内置门拦截，见 15.3） | **−0.247%（5/6 负）/ −0.830%（6/6 负）** | 自对比 51.84 dB（35–54 区间→交 Anchor #2）：**v2 vs 固定 4332470 全面改善——dlaa min 34.38→52.37（+17.99）、Q_S0_4k_perf 48.29→52.04（+3.75）、Q_S1_4k_qual +0.64、Q_S1_1080p_qual +0.11、Q_S2_4k_perf +0.05、Q_S2_1080p_qual −0.02**；nf=0 |
+
+### 15.2 判负/中止归档（铁律 6 五项证据）
+
+- **MRG8 enc_160（`enc_stage_160_256_160`）**：首版 @idx **+24.37µs（+21.91%）**。归因 (c) 当前实现：ACO 对
+  4q×5cb 全展开 merge 的 A-tile 装载调度的寄存器压力——VGPR 192→256（occupancy 8→6 waves/SIMD）、exec +42%。
+  Mochi 先例（NR_OPQ：fswin_t 256+15spill→192、5→8 waves）属同类机制，重试路径＝cb 循环 `[[dont_unroll]]`
+  或不透明偏移断链后复测；若 enc_160 @idx 转负即推翻本判。非硬件/方向判决；W2 侧零成本镜像与守卫代码已随
+  `8f47692`/`0d56e67` 入库（未启用，`LT_MRG8` 关闭态）。
+- **MRG8 enc_64（`enc_stage_64_64_96`，0.94ms 热点）**：@idx **+5.47µs（+0.58%）**。归因 (c)：merge 仅占该核
+  ~5%，FP8 MMA 省约 384 周期被 REC2Y/记录寻址 VALU 与 codegen 膨胀（exec +14%）吃掉。重试路径＝A2 codegen
+  工具（NR_OPQ/B-fragment 复用重排）后再评估；同上可推翻。parity 58.98 dB 健康说明数值路径正确。
+- **`LT_WOUT8`（out 投影 FP8）**：静态评估后本会话不动手——FP8 形态要求 O_h 按 head 量化（K=32h+k 的分解使
+  跨 head 累加不可合并），这正是 Mochi 指南 §0.3 的"激活重量化在关键路径"亏损模式；A4 的 quantize-once
+  重构（PV 链路整体 FP8 化）才是正确载体。可推翻实验：PV8+单次 O_h 量化的联合设计。
+- **DEC_UP/enc1 的 Q/V FP8 清扫（dec_up_64..160、enc_64）**：这些核的 x = fma(skip, s, U)（DEC_UP）或 MI
+  输出（enc1），无 plane 码直读可用——FP8QV 的零量化前提不成立，需对 x 结果再量化（同上 requant 模式）。
+  本会话不盲试；留待 A4 生产—消费重排（量化上移到 XOUT/MI 出口）一并评估。
+- **A2 四项红利静态审计**（本会话完成审计、落地见 15.4 待续）：①NR_FRAG_E4M3——四目标核（enc0/enc_64/
+  dec_up_32/dec_head）已无"FP16 解包再进 LDS"面（enc0 全寄存器 ds=0；W2 的 REC2Y/put16 即直存形态；
+  XOUT 镜像=新增直存），无剩余可转换点；②v_perm phi——perm 计数（enc_64 175 / dec_up_32 48 / dec_head 41
+  / enc0 24）均为记录打包结构性开销（REC2Y 字节交织），热路径无 if/else 片段合流点（W1 的 lv 守卫宏内闭合，
+  无 phi），A1.1 已收 −36~−78/核；③NR_OPQ——真靶=enc_64（256 VGPR、111×ds_load_b64）与 MRG8-160 重试，
+  需上机实验；④NOOOB——现有 `town`/`lv`/`live_h` 守卫已是整 tile 体包裹（Mochi 所述 phi 爆炸形态不存在），
+  分体编译收益不确定，暂不投入。
+
+- **A3 白名单外 native 批测（enc_64/dec_up_32/dec_up_64/dec_dfn_64）**：@idx 四核全部为正——enc_64 **+3.86µs
+  (+0.41%)**、dec_up_32 **+9.45µs (+0.82%)**、dec_dfn_64 **+3.18µs (+0.45%)**、dec_up_64 +0.26µs（噪声）；帧净
+  +17µs。归因：这批核以 WMMA 为主干，native-precision 改写的是标量 fp 代码生成（Wave A 的受益者是图像/纹理
+  核 post/attr/downsample 与 dec_head/160 族），对这些核 exec 反而 +2~3%。**H1 的边界由此实证**：native 收益
+  不外推到 WMMA 主干核。可推翻实验：单核 ISA 对照显示某核 native 记录确实削减 wait/perm 且复测为负。白名单
+  已还原（build 逐字节回到 `4dd6e3f` 态）。
+
+### 15.3 工程教训（本会话新增，均已在工具链修复）
+
+- **ABBA 锁步交换**：engine 打包（mrg_w/embed_w 尾段）与 shader 读取耦合，c1 交换必须**连 asi 一起换**；
+  只换 data-dir 会测到"旧 engine+新 shader"读无尾段 buffer → 30.64 dB 假阳性（数据流耦合改变的通用陷阱）。
+- **吞屏障事故**：W2 `#else` 替换吃掉了 merge 前共享 `WG_SYNC()`——legacy 丢一个 OpControlBarrier（spirv-dis
+  一行定位，−16B），MRG8 路径丢跨子组镜像可见性（潜伏竞态）。守卫必须包在未动代码**外侧**，绝不穿过共享
+  同步点重写。修复后 10 个 W2 legacy 变体经 WSL glslang 预检逐字节一致。
+- **bench 内置 self-PSNR 门与 V4 规则 2 冲突**：`openrr_bench.cpp` 硬编码 `psnr01>=54` 会单凭 self-PSNR 否决
+  35–54dB 区间候选；已改为 `ONR_BENCH_GATE=off` 下 advisory（数字仍打印、finite 检查保持硬性），EMB8 由
+  Anchor #2 裁决晋级（且 anchor 显示多案例**改善**）。
+- 环境通道：本会话 shell 无法向 Windows exe 传 env——一切经 PowerShell 通道（`run_bench.ps1`/`run_anchor2.ps1`）；
+  `build/asi-015-aco/{aco,shaders}` junction 满足 units R4/K2/R10 派生路径；git autocrlf 会翻转 LF→CRLF，
+  commit 工具原样存工作树字节——编辑后提交前需 LF 归一（本会话两次修正）。
+
+### 15.4 收官稳态长测（铁律 4，链级）
+
+- 4K（预热 500 帧 + 600 帧稳态段，vs `frozen-green-head`）：`11.0757 -> 11.0327 ms`，**−0.388%**，nf=0。
+- 1080p（预热 1500 帧 + 600 帧稳态段）：`2.9683 -> 2.9567 ms`，**−0.389%**，nf=0。
+- 链级稳态与各步 ABBA 中位方向一致（4K 各步之和 −0.47% vs 稳态 −0.39%；1080p 各步之和 −1.75% 在功耗墙下
+  收敛到 −0.39%），全部净胜，无功耗墙假阳性。
+
+### 15.5 Wave B 待续（下会话，证据已归档）
+
+A2 上机实验：NR_OPQ 断链 enc_64（256 VGPR→期望 192/224 档）与 MRG8-160 `dont_unroll` 重试；A3 `post_f_lt`
+f16vec2 双发射（+129µs 逆差唯一未试面）；A4/A5 生产—消费量化上移（Q/V 清扫与 WOUT8 的正确载体）与 2^k
+解锁 enc0 主干 `pc.fc1`；Track B `LT_E8RAW` 与 RGP 合流（另一会话）。
