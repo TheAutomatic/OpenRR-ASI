@@ -172,6 +172,24 @@ void main() {
     // rr2_enc0 embed, transposed: the dithered attributes of a token tile are the B operands straight from memory (lane:
     // token l % 16, attributes 16 kt + 8 h .. + 7); h^T = gelu(fc1 A^T + b), x^T = fc2 h^T + b. K = 48: attributes
     // 43..47 are +0
+#ifdef LT_EMB8
+    // EMB8: the embed MLP on e4m3 x e4m3 -> fp32. The weight A tiles load from the e4m3 tail
+    // after the embed buffer's fp16 values (engine: offset 12,288 B); one rounding to fp16 per
+    // output instead of one per 16 K.
+#define EMB_W8 E4View(uint64_t(pc.mrg_w) + uint64_t(12288u)).v
+    QA8 ew00, ew01, ew02, ew10, ew11, ew12, ew20, ew21, ew22, ew30, ew31, ew32;   // fc1 [neuron tile][K tile]
+    coopMatLoad(ew00, EMB_W8, 0u, 64u, ROW); coopMatLoad(ew01, EMB_W8, 16u, 64u, ROW); coopMatLoad(ew02, EMB_W8, 32u, 64u, ROW);
+    coopMatLoad(ew10, EMB_W8, 1024u, 64u, ROW); coopMatLoad(ew11, EMB_W8, 1040u, 64u, ROW); coopMatLoad(ew12, EMB_W8, 1056u, 64u, ROW);
+    coopMatLoad(ew20, EMB_W8, 2048u, 64u, ROW); coopMatLoad(ew21, EMB_W8, 2064u, 64u, ROW); coopMatLoad(ew22, EMB_W8, 2080u, 64u, ROW);
+    coopMatLoad(ew30, EMB_W8, 3072u, 64u, ROW); coopMatLoad(ew31, EMB_W8, 3088u, 64u, ROW); coopMatLoad(ew32, EMB_W8, 3104u, 64u, ROW);
+    QA8 fw00, fw01, fw02, fw03, fw10, fw11, fw12, fw13;   // fc2 [channel tile][neuron tile]
+    coopMatLoad(fw00, EMB_W8, 4096u, 64u, ROW); coopMatLoad(fw01, EMB_W8, 4112u, 64u, ROW);
+    coopMatLoad(fw02, EMB_W8, 4128u, 64u, ROW); coopMatLoad(fw03, EMB_W8, 4144u, 64u, ROW);
+    coopMatLoad(fw10, EMB_W8, 5120u, 64u, ROW); coopMatLoad(fw11, EMB_W8, 5136u, 64u, ROW);
+    coopMatLoad(fw12, EMB_W8, 5152u, 64u, ROW); coopMatLoad(fw13, EMB_W8, 5168u, 64u, ROW);
+    QC8 eb0 = QC8(bias_acc_t(pc.mrg_b, 0u)), eb1 = QC8(bias_acc_t(pc.mrg_b, 16u)), eb2 = QC8(bias_acc_t(pc.mrg_b, 32u)), eb3 = QC8(bias_acc_t(pc.mrg_b, 48u));
+    QC8 fb0 = QC8(bias_acc_t(pc.mrg_b, 64u)), fb1 = QC8(bias_acc_t(pc.mrg_b, 80u));
+#else
     MA ew00, ew01, ew02, ew10, ew11, ew12, ew20, ew21, ew22, ew30, ew31, ew32;   // fc1 [neuron tile][K tile]
     coopMatLoad(ew00, pc.mrg_w.v, 0u, 64u, ROW); coopMatLoad(ew01, pc.mrg_w.v, 16u, 64u, ROW); coopMatLoad(ew02, pc.mrg_w.v, 32u, 64u, ROW);
     coopMatLoad(ew10, pc.mrg_w.v, 1024u, 64u, ROW); coopMatLoad(ew11, pc.mrg_w.v, 1040u, 64u, ROW); coopMatLoad(ew12, pc.mrg_w.v, 1056u, 64u, ROW);
@@ -184,15 +202,28 @@ void main() {
     coopMatLoad(fw12, pc.mrg_w.v, 5152u, 64u, ROW); coopMatLoad(fw13, pc.mrg_w.v, 5168u, 64u, ROW);
     ACC eb0 = bias_acc_t(pc.mrg_b, 0u), eb1 = bias_acc_t(pc.mrg_b, 16u), eb2 = bias_acc_t(pc.mrg_b, 32u), eb3 = bias_acc_t(pc.mrg_b, 48u);
     ACC fb0 = bias_acc_t(pc.mrg_b, 64u), fb1 = bias_acc_t(pc.mrg_b, 80u);
+#endif
     U32x4View av = U32x4View(uint64_t(pc.attr));
     // the attributes come dithered from enc0_attr_f (ATTR64): the token's 48-byte record, the lane half's 16 bytes and the shared 16;
     // per pair of block j the two high bytes and their bit 7 from the plane dword
+#ifdef LT_EMB8
+    // B side: the dithered attribute fp16 quantizes once per tile through the mode-4 pair
+    // converter (never the raw record bytes - they are e5m3-truncated fp16 high bytes, not
+    // e4m3); the GELU output comes straight from f32 like the shipped stage-MLP GELU8.
+#define UNREC(b, d0, d1, pl, j) [[unroll]] for (int k_ = 0; k_ < 4; ++k_) { \
+            uint d_ = k_ < 2 ? d0 : d1; \
+            uint w_ = ((k_ & 1) == 0 ? ((d_ << 8) & 0x0000ff00u) | ((d_ << 16) & 0xff000000u) : ((d_ >> 8) & 0x0000ff00u) | (d_ & 0xff000000u)) \
+                | (((pl) >> uint(4 * (j) + k_) << 7) & 0x00800080u); \
+            f16vec2 e_ = unpackFloat2x16(w_); fe4m3vec2 q_ = qe4_pair32(vec2(e_)); b[2 * k_] = q_.x, b[2 * k_ + 1] = q_.y; }
+#define GELUB(e, g) QB8 g; { for (int i = 0; i < e.length(); i += 2) { fe4m3vec2 q_ = qe4_pair32(vec2(gelu_f32(e[i]), gelu_f32(e[i + 1]))); g[i] = q_.x, g[i + 1] = q_.y; } }
+#else
 #define UNREC(b, d0, d1, pl, j) [[unroll]] for (int k_ = 0; k_ < 4; ++k_) { \
             uint d_ = k_ < 2 ? d0 : d1; \
             uint w_ = ((k_ & 1) == 0 ? ((d_ << 8) & 0x0000ff00u) | ((d_ << 16) & 0xff000000u) : ((d_ >> 8) & 0x0000ff00u) | (d_ & 0xff000000u)) \
                 | (((pl) >> uint(4 * (j) + k_) << 7) & 0x00800080u); \
             f16vec2 e_ = unpackFloat2x16(w_); b[2 * k_] = e_.x, b[2 * k_ + 1] = e_.y; }
 #define GELUB(e, g) MB g; { MH h_ = MH(e); for (int i = 0; i < h_.length(); i += 2) { f16vec2 q = GELU_EMB(f16vec2(h_[i], h_[i + 1])); h_[i] = q.x, h_[i + 1] = q.y; } CPB(g, h_) }
+#endif
 #ifdef ATTR_WIDE
 // the 64-byte record (enc0_attr_f_w: attributes 32 and 33 in use), the lane half's 32 bytes
 #define EMB_REC(tp) \
@@ -206,6 +237,21 @@ void main() {
         uint d4_ = hh == 0u ? s_.x & 0xffff0000u : s_.w & 0x00ffffffu, d5_ = hh == 0u ? s_.y : 0u; \
         uint pl_ = hh == 0u ? s_.z : (s_.x & 0xfffu) | ((s_.w >> 8) & 0xff0000u) | ((s_.x & 0x1000u) << 12);
 #endif
+#ifdef LT_EMB8
+#define EMB_TOK(xa, xb, tp) MH xa, xb; { \
+        EMB_REC(tp) \
+        QB8 b0_, b1_, b2_; \
+        UNREC(b0_, r0_.x, r0_.y, pl_, 0) UNREC(b1_, r0_.z, r0_.w, pl_, 1) UNREC(b2_, d4_, d5_, pl_, 2) \
+        QC8 e0 = eb0, e1 = eb1, e2 = eb2, e3 = eb3; \
+        MMA(e0, ew00, b0_) MMA(e1, ew10, b0_) MMA(e2, ew20, b0_) MMA(e3, ew30, b0_) \
+        MMA(e0, ew01, b1_) MMA(e1, ew11, b1_) MMA(e2, ew21, b1_) MMA(e3, ew31, b1_) \
+        MMA(e0, ew02, b2_) MMA(e1, ew12, b2_) MMA(e2, ew22, b2_) MMA(e3, ew32, b2_) \
+        GELUB(e0, g0_) GELUB(e1, g1_) GELUB(e2, g2_) GELUB(e3, g3_) \
+        QC8 f0 = fb0, f1 = fb1; \
+        MMA(f0, fw00, g0_) MMA(f1, fw10, g0_) MMA(f0, fw01, g1_) MMA(f1, fw11, g1_) \
+        MMA(f0, fw02, g2_) MMA(f1, fw12, g2_) MMA(f0, fw03, g3_) MMA(f1, fw13, g3_) \
+        xa = MH(f0), xb = MH(f1); }
+#else
 #define EMB_TOK(xa, xb, tp) MH xa, xb; { \
         EMB_REC(tp) \
         MB b0_, b1_, b2_; \
@@ -219,6 +265,7 @@ void main() {
         MMA(f0, fw00, g0_) MMA(f1, fw10, g0_) MMA(f0, fw01, g1_) MMA(f1, fw11, g1_) \
         MMA(f0, fw02, g2_) MMA(f1, fw12, g2_) MMA(f0, fw03, g3_) MMA(f1, fw13, g3_) \
         xa = MH(f0), xb = MH(f1); }
+#endif
     EMB_TOK(x00, x01, tp0) EMB_TOK(x10, x11, tp1) EMB_TOK(x20, x21, tp2) EMB_TOK(x30, x31, tp3)
 #define XIN1(xa, xb, tp, t0)
 #else

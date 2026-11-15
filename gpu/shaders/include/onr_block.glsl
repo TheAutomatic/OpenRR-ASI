@@ -382,11 +382,12 @@ layout(push_constant, scalar) uniform P {
 #else
 #define LDS_N0 LDS_BASE_N
 #endif
-#ifdef LT_MRG8
+#if defined(LT_MRG8) && !W1 && !W2
 // MRG8 (TR body, ENC_CO > 0): XOUT's e4m3 record bytes mirrored into LDS in the plane-record
 // layout - per 32-channel block [64 tokens][32 bytes] - as the merge's B-operand source (the
 // read side is bit-identical in construction to the W2 body's LT_MI8 plane reads). MIR is in
-// halves (the lds4 view indexes it as MIR >> 3); 32 * ENC_C halves = 64 tokens * C bytes.
+// halves (the lds4 view indexes it via MIR >> 3); 32 * ENC_C halves = 64 tokens * C bytes.
+// W1/W2 keep their footprint: their MRG8 mirrors alias the dead merge-rows region instead.
 #define MIR ((LDS_N0 + 15u) & ~15u)
 #define LDS_N (MIR + 32u * ENC_C)
 #else

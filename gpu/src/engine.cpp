@@ -355,7 +355,15 @@ void Engine::init(Gpu& dev, const Kernels& k, const Weights& w) {
     t_pack_refs = &refs;
     for (int s = 0; s < 6; ++s) upload_stage(w.enc[s], enc_[s]);
     for (int l = 0; l < 5; ++l) upload_stage(w.dec0[l], dec0_[l]), upload_stage(w.dec1[l], dec1_[l]);
-    pack_bytes(dev_, fixed_, w.embed_w.data(), w.embed_w.size() * 2, &embed_w_);
+    // EMB8 (ENC_EMBED, W1 body): the exact e4m3 codes of the embed MLP's [64][64] + [32][64]
+    // follow the fp16 values (offset 12,288 B, codes 6,144 B; the weights sit far inside +-448).
+    // The fp16 prefix stays byte-identical - the Legacy embed reads only it.
+    {
+        std::vector<uint8_t> d(w.embed_w.size() * 3);
+        std::memcpy(d.data(), w.embed_w.data(), w.embed_w.size() * 2);
+        for (size_t i = 0; i < w.embed_w.size(); ++i) d[w.embed_w.size() * 2 + i] = e4m3_rne(w.embed_w[i]);
+        pack_bytes(dev_, fixed_, d.data(), d.size(), &embed_w_);
+    }
     pack_bytes(dev_, fixed_, w.embed_b.data(), w.embed_b.size() * 2, &embed_b_);
     pack_bytes(dev_, fixed_, w.lut.data(), w.lut.size() * 2, &lut_);
     H16 masks(512);
