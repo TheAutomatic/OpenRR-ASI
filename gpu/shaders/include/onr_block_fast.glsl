@@ -326,7 +326,7 @@ ACC bias_acc_t(F16Buf b, uint n0) {
 // LT_UP8 (decoder _0, W1 and W2) and LT_MI8 (enc1): the up and the input merge products on e4m3 x e4m3 -> fp32 as well. Their B
 // operands are the e4m3 bytes of the planes they read and their weights are exact e4m3 (Engine::upload_stage keeps the codes
 // after the fp16 values); one rounding to fp16 per output instead of one per 16 K
-#if FP8QV || defined(LT_UP8) || defined(LT_MI8) || defined(LT_MLP8)
+#if FP8QV || defined(LT_UP8) || defined(LT_MI8) || defined(LT_MLP8) || (defined(LT_E8RAW) && (!defined(ONR_GFX11) || !ONR_GFX11))
 #extension GL_EXT_float_e4m3 : require
 #define QA8 coopmat<floate4m3_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseA>
 #define QB8 coopmat<floate4m3_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseB>
@@ -350,12 +350,12 @@ uint ocp4(uint w) {
 #define OCP4(w) (w)
 #else
 #define OCP4(w) ocp4(w)
+#endif
 #ifndef REC2Y
 // raw OCP code lane shuffle -> QB8 elements, zero conversions (W2 body + TR DEC_UP8)
 #define REC2Y(ya, yb, w_) [[unroll]] for (int k_ = 0; k_ < 4; ++k_) { uint o_ = OCP4(w_[k_]); \
         ya[2 * k_] = uintBitsToFloate4m3EXT(uint8_t(o_ & 0xffu)), ya[2 * k_ + 1] = uintBitsToFloate4m3EXT(uint8_t((o_ >> 8) & 0xffu)); \
         yb[2 * k_] = uintBitsToFloate4m3EXT(uint8_t((o_ >> 16) & 0xffu)), yb[2 * k_ + 1] = uintBitsToFloate4m3EXT(uint8_t(o_ >> 24)); }
-#endif
 #endif
 #define W8STEP(acc, addr, off, b) { QA8 a_; coopMatLoad(a_, E4View(addr).v, off, ENC_C, ROW); acc = coopMatMulAdd(a_, b, acc); }
 // LT_MLP8 activation quantizer: an fp16 clamp then the e4m3 constructor (Mochi NR_QUANT mode-1
@@ -421,6 +421,35 @@ layout(buffer_reference, scalar, buffer_reference_align = 16) buffer U32x4View {
             f16vec2 a_ = unpackFloat2x16(e4m3_lo(w[k_])), b_ = unpackFloat2x16(e4m3_hi(w[k_])); \
             RT(xa)[2 * k_] = a_.x, RT(xa)[2 * k_ + 1] = a_.y, RT(xb)[2 * k_] = b_.x, RT(xb)[2 * k_ + 1] = b_.y; } ROWB(xa) ROWB(xb) }
 
+#if defined(LT_E8RAW) && (!defined(ONR_GFX11) || !ONR_GFX11)
+// LT_E8RAW (RDNA4 hardware path): 3 instructions per pair (v_cvt_pk_f32_fp8_e32 v[2:3], w.{l,h}
+// + two v_cvt_f16_f32_e32 directly into v.l/v.h); bytes (0, 1) -> lo, bytes (2, 3) -> hi.
+uint e4m3_lo(uint w) {
+    u8vec4 u = unpack8(w);
+    return packFloat2x16(f16vec2(vec2(fe4m3vec2(uintBitsToFloate4m3EXT(u.x), uintBitsToFloate4m3EXT(u.y)))));
+}
+uint e4m3_hi(uint w) {
+    u8vec4 u = unpack8(w);
+    return packFloat2x16(f16vec2(vec2(fe4m3vec2(uintBitsToFloate4m3EXT(u.z), uintBitsToFloate4m3EXT(u.w)))));
+}
+uint e4m3x4(f16vec2 a, f16vec2 b) {
+    return qe4_pack2(qe4_pair32(vec2(a)), qe4_pair32(vec2(b)));
+}
+#elif defined(LT_E8RAW)
+// Reference/fallback OCP e4m3fn codec (bytes 0, 1 -> lo; bytes 2, 3 -> hi).
+uint e4m3_lo(uint w) {
+    return pack32(u16vec2(uint16_t(float16BitsToUint16(ocp_e4m3_in(w & 0xffu))),
+                          uint16_t(float16BitsToUint16(ocp_e4m3_in((w >> 8) & 0xffu)))));
+}
+uint e4m3_hi(uint w) {
+    return pack32(u16vec2(uint16_t(float16BitsToUint16(ocp_e4m3_in((w >> 16) & 0xffu))),
+                          uint16_t(float16BitsToUint16(ocp_e4m3_in(w >> 24)))));
+}
+uint e4m3x4(f16vec2 a, f16vec2 b) {
+    return pack32(u8vec4(uint8_t(ocp_e4m3_out(a.x)), uint8_t(ocp_e4m3_out(a.y)),
+                         uint8_t(ocp_e4m3_out(b.x)), uint8_t(ocp_e4m3_out(b.y))));
+}
+#else
 // e4m3 codes 0, 1 (e4m3_lo) or 2, 3 (e4m3_hi) of w -> two packed fp16, sm_86 expansion (e4m3_in): each code << 8 in
 // its half (one v_perm), then sign | ((code & 0x7f) << 7) + (8 << 10): the arithmetic shift by 1 per half leaves the
 // sign in bits 15 and 14, bit 14 is cleared
@@ -446,6 +475,7 @@ uint e4m3x4(f16vec2 a, f16vec2 b) {
     u8vec4 p = unpack8(u), q = unpack8(v);
     return pack32(u8vec4(p.y, p.w, q.y, q.w));
 }
+#endif
 #ifndef XOUTQ
 #define XOUTQ(a, b) e4m3x4(a, b)
 #endif
@@ -852,7 +882,7 @@ void main() {
             RT(xa)[2 * k_] = a_.x, RT(xa)[2 * k_ + 1] = a_.y, RT(xb)[2 * k_] = b_.x, RT(xb)[2 * k_ + 1] = b_.y; } XROWSET(xa) XROWSET(xb) }
 #if FP8QV
     // and the same bytes as e4m3 B tiles (OCP codes)
-#define XIN8(xa, xb, ya, yb, pl) XIN(xa, xb, pl) QB8 ya, yb; { uvec4 w_ = U32x4View(uint64_t(pc.x)).v[plane_index(tp, int(pl) * 32 + int(hh) * 16) >> 4];         [[unroll]] for (int k_ = 0; k_ < 4; ++k_) { uint o_ = ocp4(w_[k_]);             ya[2 * k_] = uintBitsToFloate4m3EXT(uint8_t(o_ & 0xffu)), ya[2 * k_ + 1] = uintBitsToFloate4m3EXT(uint8_t((o_ >> 8) & 0xffu));             yb[2 * k_] = uintBitsToFloate4m3EXT(uint8_t((o_ >> 16) & 0xffu)), yb[2 * k_ + 1] = uintBitsToFloate4m3EXT(uint8_t(o_ >> 24)); } }
+#define XIN8(xa, xb, ya, yb, pl) XIN(xa, xb, pl) QB8 ya, yb; { uvec4 w_ = U32x4View(uint64_t(pc.x)).v[plane_index(tp, int(pl) * 32 + int(hh) * 16) >> 4];         [[unroll]] for (int k_ = 0; k_ < 4; ++k_) { uint o_ = OCP4(w_[k_]);             ya[2 * k_] = uintBitsToFloate4m3EXT(uint8_t(o_ & 0xffu)), ya[2 * k_ + 1] = uintBitsToFloate4m3EXT(uint8_t((o_ >> 8) & 0xffu));             yb[2 * k_] = uintBitsToFloate4m3EXT(uint8_t((o_ >> 16) & 0xffu)), yb[2 * k_ + 1] = uintBitsToFloate4m3EXT(uint8_t(o_ >> 24)); } }
 #else
 #define XIN8(xa, xb, ya, yb, pl) XIN(xa, xb, pl)
 #endif

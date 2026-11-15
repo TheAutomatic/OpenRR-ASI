@@ -7,7 +7,7 @@ cd -- "$(dirname -- "$0")/../.."
 
 out=$(realpath -m -- "${1:-build/asi}")
 stage="$out/stage"
-rm -rf -- "$out"/bench-* "$out/occ_ab"
+rm -rf -- "$out"/bench-* "$out/occ_ab" "$out/occ_nopad" "$out/occ_pad16k" "$out/b2_base" "$out/b2_post_exp" "$out/b2_post_log" "$out/b2_attr_rcp" "$out/b2_attr_same" "$out/b2_c64_far3"
 mkdir -p -- "$out" "$stage/plugins" "$stage/openrr-amd/shaders" "$stage/openrr-amd/shaders-gfx11"
 
 cxx=${OPENRR_MINGW:-x86_64-w64-mingw32-g++}

@@ -1659,6 +1659,13 @@ static int test_d3d12_gpu_and_engine() {
                             std::filesystem::copy_file(entry.path(), def_dir / entry.path().filename(),
                                                        std::filesystem::copy_options::overwrite_existing, ec_r10);
                         }
+                        const auto src_aco = onr::u8_to_path(spv_dir).parent_path() / "aco";
+                        if (std::filesystem::exists(src_aco, ec_r10)) {
+                            std::filesystem::copy(src_aco, def_root / "aco",
+                                                  std::filesystem::copy_options::recursive |
+                                                      std::filesystem::copy_options::overwrite_existing,
+                                                  ec_r10);
+                        }
                         OnrRrCreateInfo ci_r10{};
                         ci_r10.size = sizeof(ci_r10);
                         ci_r10.d3d12_device = dev;
@@ -1722,6 +1729,83 @@ static int test_d3d12_gpu_and_engine() {
         if (accepted != 254) { std::fprintf(stderr, "FAIL: qv accepted %u patterns, expected 254\n", accepted); return 1; }
         std::printf("[PASS] Item QV (qv_bytes 65536-pattern exhaustive sweep: 254 exact OCP e4m3 codes, "
                     "+-480 rejected, round-trip bit-exact)\n");
+    }
+    // Item OCP (WP-C4): the plane byte codecs + 4-lane word byte-order pin (0,1 -> lo; 2,3 -> hi).
+    {
+        auto e4m3_value = [](uint32_t c) -> double {   // OCP e4m3fn (bias 7, 448 max, 0x7f NaN)
+            const double sign = (c & 0x80) ? -1.0 : 1.0;
+            const uint32_t e = (c >> 3) & 15, m = c & 7;
+            if (e == 15 && m == 7) return std::numeric_limits<double>::quiet_NaN();
+            if (e == 0) return sign * double(m) * (1.0 / 512.0);
+            return sign * (1.0 + double(m) / 8.0) * std::ldexp(1.0, int(e) - 7);
+        };
+        auto ocp_decode_fp16_bits = [](uint32_t c) -> uint32_t {
+            const uint32_t s = c & 0x80u, e = (c >> 3) & 15u, m = c & 7u;
+            if (e == 15 && m == 7) return (s << 8) | 0x7e00u;
+            if (e == 0) {
+                if (m == 0) return s << 8;
+                const uint32_t p = m >= 4u ? 2u : m >= 2u ? 1u : 0u;
+                return (s << 8) | ((6u + p) << 10) | ((m - (1u << p)) << (10u - p));
+            }
+            return (s << 8) | ((e + 8u) << 10) | (m << 7);
+        };
+        auto fp16_to_double = [](uint32_t h) -> double {
+            const uint32_t he = (h >> 10) & 31u, hm = h & 1023u;
+            if (he == 31u) return std::numeric_limits<double>::quiet_NaN();
+            const double mag = he == 0 ? double(hm) * (1.0 / 65536.0)
+                                       : (1.0 + double(hm) / 1024.0) * std::ldexp(1.0, int(he) - 15);
+            return (h & 0x8000u) ? -mag : mag;
+        };
+        uint32_t ocp_exact = 0, sm86_zero_skew = 0, roundtrip = 0, nan_codes = 0;
+        for (uint32_t c = 0; c <= 0xFF; ++c) {
+            const uint32_t s = c & 0x80u, e = (c >> 3) & 15u, m = c & 7u;
+            if (e == 15 && m == 7) ++nan_codes;
+            const uint32_t h = ocp_decode_fp16_bits(c);
+            const double hv = fp16_to_double(h);
+            const double want = e4m3_value(c);
+            if (std::isnan(want) ? !std::isnan(hv) : hv != want) {
+                std::fprintf(stderr, "FAIL: OCP decode 0x%02x -> fp16 0x%04x = %.9g, want %.9g\n", c, h, hv, want);
+                return 1;
+            }
+            ++ocp_exact;
+            if (!std::isnan(want)) ++roundtrip;
+            const uint32_t s86 = (((c & 0x7fu) << 7) + 0x2000u) | (s << 8);
+            const uint32_t s86e = (s86 >> 10) & 31u;
+            if (e == 0) {
+                if (s86e != 8u) { std::fprintf(stderr, "FAIL: sm_86 decode of 0x%02x not exp-8\n", c); return 1; }
+                ++sm86_zero_skew;
+            } else if (e == 15u && m == 7u) {
+                if (s86 != ((s << 8) | 0x5f80u)) {
+                    std::fprintf(stderr, "FAIL: sm_86 decode of NaN code 0x%02x -> 0x%04x\n", c, s86);
+                    return 1;
+                }
+            } else if (s86 != h) {
+                std::fprintf(stderr, "FAIL: sm_86 decode 0x%02x -> 0x%04x, OCP exact 0x%04x\n", c, s86, h);
+                return 1;
+            }
+        }
+        // 4-lane word roundtrip pin: pack 4 distinct codes (0, 3*2^-9, -1.5, 448) into bytes 0..3;
+        // verify e4m3_lo reads bytes (0, 1) and e4m3_hi reads bytes (2, 3) with zero (1, 2) swap.
+        const uint32_t c4[4] = { 0x00u, 0x03u, 0xBCu, 0x7Eu };   // +0.0, 3*2^-9, -1.5, 448.0
+        const double   v4[4] = { 0.0, 3.0 / 512.0, -1.5, 448.0 };
+        const uint32_t w4 = c4[0] | (c4[1] << 8) | (c4[2] << 16) | (c4[3] << 24);
+        const uint32_t lo_w = ocp_decode_fp16_bits(w4 & 0xffu) | (ocp_decode_fp16_bits((w4 >> 8) & 0xffu) << 16);
+        const uint32_t hi_w = ocp_decode_fp16_bits((w4 >> 16) & 0xffu) | (ocp_decode_fp16_bits(w4 >> 24) << 16);
+        const double dec4[4] = {
+            fp16_to_double(lo_w & 0xffffu), fp16_to_double(lo_w >> 16),
+            fp16_to_double(hi_w & 0xffffu), fp16_to_double(hi_w >> 16),
+        };
+        for (int k = 0; k < 4; ++k) {
+            if (dec4[k] != v4[k]) {
+                std::fprintf(stderr, "FAIL: OCP 4-lane word lane %d got %.9g, want %.9g\n", k, dec4[k], v4[k]);
+                return 1;
+            }
+        }
+        if (ocp_exact != 256 || nan_codes != 2 || sm86_zero_skew != 16 || roundtrip != 254) {
+            std::fprintf(stderr, "FAIL: OCP sweep counts %u/%u/%u/%u\n", ocp_exact, nan_codes, sm86_zero_skew, roundtrip);
+            return 1;
+        }
+        std::printf("[PASS] Item OCP (256-byte exhaustive + 4-lane lo(0,1)/hi(2,3) round-trip pin)\n");
     }
 
     dev->Release();

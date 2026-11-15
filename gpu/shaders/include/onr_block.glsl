@@ -452,17 +452,25 @@ const float16_t GELU_A = 0.412109375hf;
 uint sg() { return gl_SubgroupID; }
 
 float16_t e4m3_in(uint b) {
+#ifdef LT_E8RAW
+    return ocp_e4m3_in(b);
+#else
     // sm_86 expansion: exponent field 0 is read as a normal, so 0x00 is 2^-7
     return uint16BitsToFloat16(uint16_t(((b & 0x80u) << 8) | ((((b >> 3) & 15u) + 8u) << 10) | ((b & 7u) << 7)));
+#endif
 }
 
 uint e4m3_out(float16_t x) {
+#ifdef LT_E8RAW
+    return ocp_e4m3_out(x);
+#else
     // sm_86 packing: add the weight of mantissa bit 6 (round half away), clamp to [2^-7 + ulp, 448]
     uint b = uint(float16BitsToUint16(x));
     precise float16_t r = x + uint16BitsToFloat16(uint16_t(b & 0xfc40u));
     r = r - uint16BitsToFloat16(uint16_t(b & 0xfc00u));
     float16_t m = min(max(abs(r), 0.00782012939453125hf), 448.0hf);
     return ((uint(float16BitsToUint16(m)) >> 7) - 0x40u) & 0x7fu | ((b >> 8) & 0x80u);
+#endif
 }
 
 int reflect_i(int i, int n) { i = abs(i); return min(i, 2 * n - 2 - i); }
