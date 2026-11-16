@@ -1,6 +1,6 @@
 # OpenRR Stage 9 (Wave D) — 7 维理论上限终审与发行门禁签收（v016）
 
-- 工作树/分支：`codex/mesa-263-comparison`（本轮终点 `23854ce`，父封板 `b26472a` = tag `stage8-seal-b26472a`；未 push）
+- 工作树/分支：`codex/mesa-263-comparison`（代码终点 `a583168` / 着色器终点 `23854ce`，父封板 `b26472a` = tag `stage8-seal-b26472a`；未 push）
 - 最终全绿发行包：`build/aco-v015/stage/`（冻结副本 `build/v015-runs/stage9/final-pkg/`）
 - 过程证据：`docs/test-evidence/v016-stage9-wave-d-progress.md`（第一轮 + 第二轮全部五项证据与归档记录）
 - ISA 方法：全部采用 ACO 原生后端（`RADV_DEBUG=shaders`，截取 `After lowering to hw instructions:`）；裸 llvm-mc-21 已废止（GFX12 `v_cvt_pk_fp8_f32` 首字 `0xd769` 误码导致 4 字节错位，见进展文档 §4.1）
@@ -38,7 +38,7 @@
 
 （数据源 `build/v015-runs/stage9/isa_dim1.json`：22 核批量 ACO 原生后端探针 + manifest。全部 `scratch=0`；16 个神经网络核中 15 个 `v_maxmin==0`，唯 `dec_head_32_64_f_lt` 余 12 条（其 head_px 的 sigmoid/tanh 数值钳位语义，非量化折叠断裂——该核 `v_cvt_pk_fp8_f32`=48 在场）；图像壳核（post/downsample/d3d_ae）的少量 maxmin 为其原生 min/max 语义。）
 
-- **残留 f16 WMMA 说明**：C=32 的 116 条 = `LT_Q16/LT_VO` fp16 近似路径（本轮实测 FP8 全替换判负：画质 −0.29 dB / 性能 −2.8%，见进展文档 §4.3）；C≥64 的 66–104 条 = 精确 fp16 注意力（FP8 化按静态账本 264+ VGPR 必 spill + 纯增激活量化误差，整组归档，见 §7）。动态占比按 4K 窗口加权后 f16 WMMA 周期占比由 47.7% 降至约 44%（enc_64 MRG8 的 fp8 替换 + 各核 MI8/UP8 扩张）。
+- **残留 f16 WMMA 说明**：`C=32` 的 `116–132` 条（`dec_head` 含对称恒等阵）= `LT_Q16/LT_VO` fp16 近似路径（本轮实测 FP8 全替换判负：画质 `−0.29 dB` / 性能 `−2.8%`，见进展文档 §4.3）；`C≥64` 的 `26–136` 条 = 精确 fp16 注意力（其中 `W2 C=64`（`240 VGPR`）与 `enc_96/enc_128/dec_dfn_96`（`256 VGPR`）处于驻留边界，跨 head 持有 `QC8` 输出累加器易触发降档或 spill；其余 `192 VGPR` 的 `TR` 核虽有寄存器余量，但 `C≥64` 现行系无近似的精确 FP16 注意力，在未引入逐 tile `$2^k$` 动态激活缩放（`act-scale`）前裸压 `Q/V/P/O` 进 `e4m3` 已由本轮 `W1A8` 实测证实固定折损 `~0.29 dB`（越过 `−0.25 dB` 单步红线），且全网剩余 `C≥64` 的 `15.54M` 次/帧 FP16 WMMA 扣除新增量化 VALU 后的理论净上限仅 `< 180 µs`（约 4K 整帧 `1.5%`），故整组归档并锁定 `act-scale` 为下一代重开前提，见 §7）。动态占比按 4K 窗口加权后 f16 WMMA 周期占比由 `47.7%` 降至约 `44%`（`enc_64 MRG8` 的 fp8 替换 + 各核 `MI8/UP8` 扩张）。
 - `s_setreg` 集中在 `dec_up_64_64_96_f_lt`（28）——D6.0 两相拆平实测证明源码级不可再降（无屏障两相被调度器重排）。
 
 ## 维度 2 — 全 6 档预设稳态 vs RTX 5090（310.9.1.0）终表
@@ -63,7 +63,10 @@
 
 ## 维度 4 — Mochi 加法周期模型对账（4K Qual）
 
-`128 SIMD @ ~3.0 GHz = 384,000 SIMD-cycles/µs`。以 enc_stage_64_64_96_f_lt 为例：960×540 内部画布 / 64-token 窗口 = 8,100 窗口 × 每窗口静态 `240×8 + 104×16 = 3,584` WMMA 周期 ≈ 75.6 µs 纯 WMMA 下限，实测 860 µs → WMMA 占比 ~8.8%，其余为访存/VALU/softmax/驻留等待（240 VGPR = 6 waves/SIMD 驻留）。同法 dec_dfn_160_256：480×270/64=2,025 窗 × (160×8+84×16)=2,624 周期 ≈ 13.8 µs WMMA 下限 vs 实测 86 µs（16%）——大 C 核普遍为访存/发射受限，与"FP8 化收益有限"的实测互相印证。
+`128 SIMD @ ~3.0 GHz = 384,000 SIMD-cycles/µs`（4K Quality：`pad = 2560×1440`、`output = 3840×2160`、`internal = 5760×3240`）：
+- `enc0_stage_32_64_f_lt`（`s=0`，`2560×1440` → `321×181 = 58,101` 窗 × `1 wave/WG` = `58,101` waves）：每 wave 静态 `96×8 + 116×16 = 2,624` WMMA 周期 → 纯 WMMA 上界约 **`397.0 µs`**（边界裁剪略低），对比 `@idx 4K` 实测 **`1,330.6 µs`**，纯 WMMA 占 **`~29.8%`**，其余为属性/图像全局访存、寄存器内 `exp2`/rcp Softmax、`192` 条 `v_cvt_pk_fp8_f32` 配套 `f32` 转换及平面写回；
+- `enc_stage_64_64_96_f_lt`（`s=1`，`1280×720` → `161×91 = 14,651` 窗 × **`2 waves/WG`（`W2`）= `29,302` waves**）：每 wave 静态 `240×8 + 104×16 = 3,584` WMMA 周期 → 纯 WMMA 下限 **`273.5 µs`** vs `@idx 4K` 实测 **`860.2 µs`**（纯 WMMA 占比 **`31.8%`**，`240 VGPR = 6 waves/SIMD`）；
+- `dec_dfn_160_256_fl_lt`（`s=4`，`160×90` → `21×12 = 252` 窗，持久 `FLOW` 网格 `wg=256` 即 `8 waves/WG`，且静态 `fp8=40 / f16=36` 内含 `LT_ROLL_HD=1` 的 **`5`-head 循环**）：计入 `5` 次 head 循环与活跃窗口波数后，纯 WMMA 约 **`22–28 µs`** vs `@idx 4K` 实测 **`86.8 µs`**（占比 **`~26%–32%`**），大头在持久核行标志同步、`30.2 KB` LDS 往返与全局访存——与 `--shared-cmat load`（`±0.0 µs`）及 WGP（`+9.5 µs`）实测完全吻合。
 
 ## 维度 5 — 核间屏障气泡与 FLOW 终裁
 
@@ -82,9 +85,9 @@
 |---|---|---|---|---|---|---|
 | 32 | enc0/dec_up_32/dec_head_32 | 32 | W1 | 192 | 8 | 0–4 KB |
 | 64 | enc_64/dec_up_64/dec_dfn_64 | 64 | W2 | 240 | 6 | 9.7 KB |
-| 96 | enc_96/dec_up_96/dec_dfn_96 | 64–128 | W2/TR | 240–256 | 6 | 9.7–25.6 KB |
-| 128 | enc_128/dec_up_128/dec_dfn_128 | 128 | TR | 240–256 | 6 | 21.5–29.7 KB |
-| 160 | enc_160×2/dec_up_160/dec_dfn_160 | 128–256 | TR | 192–216 | 7–8 | 21.5–30.2 KB |
+| 96 | enc_96/dec_up_96/dec_dfn_96 | 64–128 | W2/TR | 192–256 | 6–8 | 9.7–25.6 KB |
+| 128 | enc_128/dec_up_128/dec_dfn_128 | 128 | TR | 192–256 | 6–8 | 9.7–29.7 KB |
+| 160 | enc_160×2/dec_up_160/dec_dfn_160 | 256 | TR | 192 | 8 | 30.2 KB |
 
 W2_96UP（dec_up_96 → 2-wave）实测自身 −10.0 µs 但下游 dec_dfn_96 +21.6 µs（输出布局耦合），结队净负回退；C=128 2-wave 静态账本必破 256 VGPR，按条款不盲跑。
 
@@ -96,13 +99,13 @@ W2_96UP（dec_up_96 → 2-wave）实测自身 −10.0 µs 但下游 dec_dfn_96 +
 
 | 门禁 | 结果 |
 |---|---|
-| 94/94 `.nrp`（零冗余、`scratch=0`） | ✅ records=94 failures=0，全核 scratch=0 |
+| 94/94 `.nrp`（零冗余、`scratch=0`） | ✅ manifest records=94, 磁盘实存 .nrp=94（`build_aco_records.py` 自动清退孤儿 `.nrp` 已固化）, failures=0, 全核 scratch=0 |
 | Anchor #1 `Legacy=0` vs ref-016-release | ✅ 4K + 1080p steady+DRS `max_ulp_diff = 0`（100.0000% 0-ULP） |
 | Anchor #2 `New=1`（fast-aco） | ✅ v1 29/29 全 ≥0（best +0.0307 dB）、v2 21/21 最差 −0.1415 dB、nf=0 |
 | Anchor #2 `Fast=2`（exp-aco） | ✅ vs exp 基线 v1 最差 +0.0000（best +0.0406）、v2 最差 −0.1217、nf=0 |
 | Anchor #2 `FLOW=0`（默认态对账） | ✅ 与 FLOW=1 逐值一致（_f_lt/_fl_lt 画质对齐验证） |
 | `shaders-gfx11` 94 核 | ✅ capability 4212/4213 = 0、`Float8` 字符串 = 0 |
-| 4 套测试 | ✅ policy 9/9、present_scope EXIT=0、dxgi_queue EXIT=0、asi_units 全 PASS（含 WP-D1/D5 新断言） |
+| 4 套测试 | ✅ policy 10/10、present_scope EXIT=0、dxgi_queue EXIT=0、asi_units 全 PASS（含 WP-D1/D5 新断言） |
 | 空白目录冷装验收 | ✅ Temp 空目录冷装 24 帧 EXIT=0（manifest 路径核验） |
 | 四语包 + CJK 字体 + PE 导入表 | ✅ English/zh-CN/ja/ko + NotoSansCJKsc-Regular.ttf；导入表 bcrypt/d3d12/KERNEL32/msvcrt/SHELL32/USER32/VERSION 干净 |
 | 全仓 LF 行尾 | ✅ `git diff --check` 干净；改动文件 100% LF（Step 0 已还原 CRLF 污染） |

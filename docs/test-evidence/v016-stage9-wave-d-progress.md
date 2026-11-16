@@ -95,7 +95,7 @@ FLOW=0 净赢 ~55 µs（空隙 −108.6 µs 吸收 barriers 串行 +24.9 µs；3
 - **WP-D2b 实验 B（`LT_POST_STILL=1`）**：`post_f_lt` 1236.7 → **1247.0 µs（+10.3）**——合成评测全程运动，无静态区可赢，divergent `subgroupAll` 分支纯增开销 → 按硬门禁回退。
 - **WP-D3（`W2_96UP=1`，dec_up_96_128_128 切 2-wave W2 体）**：资源门禁全过（VGPR 256、LDS 12 KB、scratch 0、workgroup 64）；自身 **431.6 → 421.6 µs（−10.0/−2.3%）** 但下游 `dec_dfn_96_128_fl_lt` **+21.6 µs（+6.1%）**（W2 体输出布局耦合）——结队净 **+11.6 µs** → 按结队准则回退。C=128 静态清点：C=96 双 tile 已占满 256 VGPR，C=128（NT=8）双 token tile 需 ~220+ 基础 + 双倍 Q/V/Wout 片段 → 必破 256 触发 spill，按计划不做盲跑，账本归档。
 - **WP-D6.0（XIN2Y 跨 tile 拆平）**：落地为 `XINF`/`XINQ` 两相宏（`W2P(XIN_FMA_*)` 先全量 fma、`W2P(XIN_QY_*)` 后集中量化）；ACO 原生后端实测 `dec_up_64_64_96_f_lt` `s_setreg` **仍为 28**（源码两相间无屏障，调度器按寄存器压力自由重排，MODE 翻转不可源码级消除），配对计时全核 ±1 µs（中性）→ 保留代码形态（零代价、结构更清晰）。
-- **WP-D6a/D6b（C≥64 的 13 核 S/O/W_out FP8+FP32）静态清点归档**：W2 C=64 现状 240 VGPR；FP8 化需新增 pb QB8（+8）、oh/量化临时（+16）、S/O QC8 累加器对（+16）→ 264+ 必破 256。且机制性证据：本轮 W1A8 实测同一算子模板（FP8 Q/V/S/O + e4m3 激活量化）画质 **−0.29 dB**（破 −0.25 警戒线）、性能 −2.8%；C≥64 的现行 fp16 注意力是**精确路径**（无 LT_Q16/LT_VO 近似可抵消），FP8 化为纯增量化误差 + 驻留降档，双轴可预见皆负 → 按"不做无效投入"条款整组归档，不做逐宽度盲跑。
+- **WP-D6a/D6b（`C≥64` 的 13 核 `S/O/W_out` FP8+FP32）混合证据归档**：`W2 C=64`（现状 `240 VGPR`）与 `enc_96/enc_128/dec_dfn_96`（`256 VGPR`）处于驻留边界，跨 head 持有 `QC8` 输出累加器易触发降档或 spill；其余 `192 VGPR` 的 `TR` 核虽有寄存器余量，但机制性证据已把双轴收死——本轮 `W1A8` 实测同一算子模板（FP8 `Q/V/S/O` + `e4m3` 激活量化）画质 **`−0.29 dB`**（破 `−0.25 dB` 警戒线）、性能 `−2.8%`；而 `C≥64` 现行 fp16 注意力是**精确路径**（无 `LT_Q16/LT_VO` 权重截断误差可对冲），未引入逐 tile `$2^k$` 动态激活缩放（`act-scale`）前裸压进 `e4m3` 属纯增量化误差，且全网剩余 `C≥64` 的 `15.54M` 次/帧 FP16 WMMA 扣除新增量化 VALU 后的理论净上限仅 `< 180 µs`（约 4K 整帧 `1.5%`）→ 按“不做无效投入”条款整组归档，锁定 `act-scale` 为重开前提。
 
 ## 8. 第二轮 Step 5 终审（完成，详见 `v016-stage9-wave-d-final-audit.md`）
 
@@ -106,6 +106,6 @@ FLOW=0 净赢 ~55 µs（空隙 −108.6 µs 吸收 barriers 串行 +24.9 µs；3
 
 ## 9. 构建/门禁记录
 
-- 全部构建：WSL `build_asi.sh build/aco-v015` + `build_runtime_trace.sh`；94/94 记录、0 failures、`scratch=0` 每轮核验。
-- 套件：`test_aco_build_policy`（8/8）、`test_present_scope`、`test_dxgi_queue`、`test_asi_units`（含新 WP-D1/D5 断言 + 引擎 1080p/4K 档）全部 PASS。
+- 全部构建：WSL `build_asi.sh build/aco-v015` + `build_runtime_trace.sh`；`94/94` 记录 + `94/94` 磁盘 `.nrp`（`build_aco_records.py` 已固化自动清退孤儿 `.nrp`）、`0` failures、`scratch=0` 每轮核验。
+- 套件：`test_aco_build_policy`（**10/10**，新增 `test_stale_nrp_pruned_on_success`）、`test_present_scope`、`test_dxgi_queue`、`test_asi_units`（含新 WP-D1/D5 断言 + 引擎 1080p/4K 档）全部 PASS。
 - 事故 1：anchor2 首跑指向正被 W1A8 重建覆写的 `build/aco-v015` → "missing metadata" 假失败；改为冻结包 `-Pkg` 后通过（教训：测量一律用冻结目录）。
