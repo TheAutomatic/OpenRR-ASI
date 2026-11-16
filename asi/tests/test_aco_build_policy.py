@@ -171,5 +171,15 @@ class BuildPolicyTests(unittest.TestCase):
             with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
                 self.build((), **kw)
 
+    def test_stale_nrp_pruned_on_success(self):
+        m = self.build()
+        orphan = self.manifest_path.parent / 'deadbeef01234567.nrp'
+        orphan.write_bytes(b'stale')
+        self.calls.clear()
+        self.build()
+        self.assertFalse(orphan.exists())
+        self.assertEqual(sorted(p.name for p in self.manifest_path.parent.glob('*.nrp')),
+                         sorted(r['record'] for r in m['records'].values()))
+
 if __name__ == '__main__':
     unittest.main()

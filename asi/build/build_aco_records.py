@@ -260,6 +260,9 @@ def main():
     (root/'manifest.msgpack').write_bytes(msgpack(index))
     if failures:
         raise SystemExit(f'{len(failures)} capture(s) failed; see {manifest_path}')
+    for stale in root.glob('*.nrp'):
+        if stale.stem not in records:
+            stale.unlink()
 
 if __name__ == '__main__':
     main()
