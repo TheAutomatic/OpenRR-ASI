@@ -44,3 +44,5 @@
 ## 5. 工具与产物
 
 `build/v015-runs/stage8/`：`run_bench.ps1`（idx/steady/abba，ONR_RR_FLOW=1 钉死）、`run_llpc.ps1`（对照③）、`run_anchor1.ps1`、`run_anchor2.ps1`（支持 exp-aco/exp-llpc）、`idx_report.py`、`make_wgp_records.py`、`freeze.sh`。冻结包：`ref-stage7-b2/`、`frozen-016-base/`（trace asi 已刷新为日志修复版）、`wgp-pkg/`。运行目录均一次性新建、退出码 0 + 产物新鲜度校验（IDX-DONE/ABBA-DONE 门）。
+
+> 后续修复与终局封板（`5721569..e745d71`）：见 [`v016-stage8-phases2-6-results.md`](v016-stage8-phases2-6-results.md) 与 [`v016-stage8-final-audit.md`](v016-stage8-final-audit.md)。关于 `@idx` 邮戳间隔下标口径的纠偏（`idx_report.py` 对齐 `@2`/`@42` 后，`ints[33]` 为 `32:dec_dfn_96_fl → 34:dec_up_64` 的 `FLOW` 尾隔 `116.5–121.2 µs`，详见终审维度 5），亦以终局文档为准。
