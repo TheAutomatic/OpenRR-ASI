@@ -1,0 +1,225 @@
+# OpenRR: the menu's texts in 日本語. Copy it into openrr-amd\lang in the game's folder and set
+# [OpenRR] Language=ja in openrr-amd.ini (or pick it in the menu).
+#
+# The letters: msgid "@font" names a font file beside this file (fonts\NotoSansCJKsc-Regular.ttf of the
+# OpenRR language pack, SIL Open Font License 1.1); without it the Windows CJK fonts are used, and if
+# none has the letters the menu stays English.
+
+msgid "@language"
+msgstr "日本語"
+
+msgid "@font"
+msgstr "fonts/NotoSansCJKsc-Regular.ttf"
+
+msgid "Enable OpenRR (Ray Reconstruction)"
+msgstr "OpenRR（レイ再構成）を有効化"
+
+msgid "(Menu key: %s)"
+msgstr "（メニューキー：%s）"
+
+msgid "Status"
+msgstr "状態"
+
+msgid "Idle: waiting for the game to create a DLSS Ray Reconstruction feature."
+msgstr "待機中：ゲームが DLSS レイ再構成機能を作成するのを待っています。"
+
+msgid "Note: %s"
+msgstr "補足：%s"
+
+msgid "Ready"
+msgstr "準備完了"
+
+msgid "Building network..."
+msgstr "ネットワーク構築中..."
+
+msgid "Failed"
+msgstr "失敗"
+
+msgid "Unknown"
+msgstr "不明"
+
+msgid "D3D12 Direct ELF"
+msgstr "D3D12 直接 ELF"
+
+msgid "Vulkan Host (RecordVk)"
+msgstr "Vulkan ホスト（RecordVk）"
+
+msgid "Vulkan Interop Bridge"
+msgstr "Vulkan 相互運用ブリッジ"
+
+msgid "State: %s%s%s%s"
+msgstr "状態：%s%s%s%s"
+
+msgid "Backend: %s"
+msgstr "バックエンド：%s"
+
+msgid "Backend note: %s"
+msgstr "バックエンド補足：%s"
+
+msgid "Resolution: %ux%u -> %ux%u"
+msgstr "解像度：%ux%u -> %ux%u"
+
+msgid "GPU time (raw): %.2f ms (p50 %.2f ms, p95 %.2f ms)  |  Frames: %u"
+msgstr "GPU 時間（生計測）：%.2f ms（p50 %.2f ms、p95 %.2f ms） |  フレーム数：%u"
+
+msgid "Est. w/o async preemption: %.2f ms (avg %.2f ms)"
+msgstr "非同期プリエンプション除外推定：%.2f ms（平均 %.2f ms）"
+
+msgid "Weights: %s"
+msgstr "重み：%s"
+
+msgid "Coexistence: dlssnr-amd.asi detected (Direct path active)"
+msgstr "共存：dlssnr-amd.asi を検出（直接パス有効）"
+
+msgid "Execution & Backend"
+msgstr "実行とバックエンド"
+
+msgid "D3D12 Backend"
+msgstr "D3D12 バックエンド"
+
+msgid "Auto (D3D12 Direct preferred)"
+msgstr "自動（D3D12 直接優先）"
+
+msgid "Network Mode"
+msgstr "ネットワークモード"
+
+msgid "Legacy"
+msgstr "レガシー（Legacy）"
+
+msgid "New (recommended)"
+msgstr "標準高速（New・推奨）"
+
+msgid "Fast (experimental)"
+msgstr "最速（Fast・実験的）"
+
+msgid "New"
+msgstr "標準高速（New）"
+
+msgid "Building fast kernels"
+msgstr "高速カーネルを構築中"
+
+msgid "Fast kernels unavailable"
+msgstr "高速カーネル利用不可"
+
+msgid "Runtime: %s"
+msgstr "ランタイム：%s"
+
+msgid "Coexist Split"
+msgstr "共存時分割設定"
+
+msgid "Auto (disable split when dlssnr-amd is present)"
+msgstr "自動（dlssnr-amd 検出時は分割を無効化）"
+
+msgid "Off (never split command lists)"
+msgstr "オフ（コマンドリストを分割しない）"
+
+msgid "Depth Type"
+msgstr "深度タイプ"
+
+msgid "Auto"
+msgstr "自動"
+
+msgid "Hardware Depth (NDC)"
+msgstr "ハードウェア深度（NDC）"
+
+msgid "Linear Depth"
+msgstr "線形深度"
+
+msgid "Vulkan Input Layout"
+msgstr "Vulkan 入力レイアウト"
+
+msgid "Shader Read Optimal"
+msgstr "シェーダー読取最適（Shader Read Optimal）"
+
+msgid "General"
+msgstr "汎用（General）"
+
+msgid "OptiFG Host Bridge (experimental)"
+msgstr "OptiFG ホストブリッジ（実験的）"
+
+msgid "Restart required. Set OptiScaler's [Libraries] NvngxPath to load openrr-ngx-host.dll."
+msgstr "再起動が必要です。OptiScaler の [Libraries] NvngxPath で openrr-ngx-host.dll を読み込むように設定してください。"
+
+msgid "Guides"
+msgstr "ガイド"
+
+msgid "Use Disocclusion Mask"
+msgstr "ディソクルージョンマスクを使用"
+
+msgid "Invert Disocclusion Mask"
+msgstr "ディソクルージョンマスクを反転"
+
+msgid "Clamp Disocclusion Mask (0..1)"
+msgstr "ディソクルージョンマスクを 0..1 にクランプ"
+
+msgid "Disocclusion Mask Scale"
+msgstr "ディソクルージョンマスク倍率"
+
+msgid "Use SSS Guide (ColorBeforeFog)"
+msgstr "SSS ガイドを使用（ColorBeforeFog）"
+
+msgid "Use Responsivity Mask"
+msgstr "応答度マスク（Responsivity Mask）を使用"
+
+msgid "Use Color Before Transparency"
+msgstr "半透明前カラー（Color Before Transparency）を使用"
+
+msgid "Use Depth of Field Guide"
+msgstr "被写界深度ガイド（DoF）を使用"
+
+msgid "Use Reflection Motion Vectors"
+msgstr "反射モーションベクターを使用"
+
+msgid "Use Transparency Layer Opacity & Motion"
+msgstr "半透明レイヤー不透明度・モーションを使用"
+
+msgid "Menu & Hotkeys"
+msgstr "メニューとホットキー"
+
+msgid "Menu Key"
+msgstr "メニューキー"
+
+msgid "Enter a key such as F7 or Ctrl+F7, then press Enter."
+msgstr "F7 や Ctrl+F7 などのキーを入力して Enter を押してください。"
+
+msgid "Use OptiScaler Shortcut"
+msgstr "OptiScaler のショートカットを使用"
+
+msgid "Pass OptiScaler Key (Insert) while open"
+msgstr "開いている間 OptiScaler キー（Insert）を通す"
+
+msgid "Menu Size"
+msgstr "メニューの大きさ"
+
+msgid "Text Size"
+msgstr "文字の大きさ"
+
+msgid "Theme"
+msgstr "テーマ"
+
+msgid "Blue"
+msgstr "ブルー"
+
+msgid "Teal"
+msgstr "ティール"
+
+msgid "Violet"
+msgstr "バイオレット"
+
+msgid "Amber"
+msgstr "アンバー"
+
+msgid "Crimson"
+msgstr "クリムゾン"
+
+msgid "Graphite"
+msgstr "グラファイト"
+
+msgid "Language"
+msgstr "言語"
+
+msgid "openrr-amd\\lang\\<name>.txt; the file reloads when it changes."
+msgstr "openrr-amd\\lang\\<name>.txt を読み込みます。ファイル変更時は自動再読込されます。"
+
+msgid "Close"
+msgstr "閉じる"

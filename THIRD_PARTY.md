@@ -132,3 +132,11 @@ license notices. The package includes generated shader records; Mesa shared
 libraries, the noop DRM shim and the capture executable are build tools and
 are not distributed in the Windows stage. See `asi/build/mesa/README.md` for
 patch provenance and reproducible build instructions.
+
+---
+
+## 7. Noto Sans CJK SC (`openrr-amd/lang/fonts/NotoSansCJKsc-Regular.ttf`)
+
+Menu CJK glyph coverage (`zh-CN`, `ja`, `ko`) uses Google Noto Sans CJK SC,
+licensed under the SIL Open Font License, Version 1.1.
+Full license text in `asi/lang/fonts/Noto-CJK-LICENSE.txt`.

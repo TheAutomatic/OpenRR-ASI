@@ -1,0 +1,225 @@
+# OpenRR: the menu's texts in 简体中文. Copy it into openrr-amd\lang in the game's folder and set
+# [OpenRR] Language=zh-CN in openrr-amd.ini (or pick it in the menu).
+#
+# The letters: msgid "@font" names a font file beside this file (fonts\NotoSansCJKsc-Regular.ttf of the
+# OpenRR language pack, SIL Open Font License 1.1, fonts\Noto-CJK-LICENSE.txt); without it the Windows
+# CJK fonts (msyh.ttc / simhei.ttf) are used, and if none has the letters the menu stays English.
+
+msgid "@language"
+msgstr "简体中文"
+
+msgid "@font"
+msgstr "fonts/NotoSansCJKsc-Regular.ttf"
+
+msgid "Enable OpenRR (Ray Reconstruction)"
+msgstr "启用 OpenRR（光线重建）"
+
+msgid "(Menu key: %s)"
+msgstr "（菜单快捷键：%s）"
+
+msgid "Status"
+msgstr "状态"
+
+msgid "Idle: waiting for the game to create a DLSS Ray Reconstruction feature."
+msgstr "空闲：正在等待游戏创建 DLSS 光线重建特性。"
+
+msgid "Note: %s"
+msgstr "说明：%s"
+
+msgid "Ready"
+msgstr "就绪"
+
+msgid "Building network..."
+msgstr "正在构建网络..."
+
+msgid "Failed"
+msgstr "失败"
+
+msgid "Unknown"
+msgstr "未知"
+
+msgid "D3D12 Direct ELF"
+msgstr "D3D12 直连 ELF"
+
+msgid "Vulkan Host (RecordVk)"
+msgstr "Vulkan 宿主（RecordVk）"
+
+msgid "Vulkan Interop Bridge"
+msgstr "Vulkan 互操作桥接"
+
+msgid "State: %s%s%s%s"
+msgstr "状态：%s%s%s%s"
+
+msgid "Backend: %s"
+msgstr "后端：%s"
+
+msgid "Backend note: %s"
+msgstr "后端说明：%s"
+
+msgid "Resolution: %ux%u -> %ux%u"
+msgstr "分辨率：%ux%u -> %ux%u"
+
+msgid "GPU time (raw): %.2f ms (p50 %.2f ms, p95 %.2f ms)  |  Frames: %u"
+msgstr "GPU 耗时（原始）：%.2f ms（p50 %.2f ms，p95 %.2f ms） |  帧数：%u"
+
+msgid "Est. w/o async preemption: %.2f ms (avg %.2f ms)"
+msgstr "估算去除异步抢占耗时：%.2f ms（平均 %.2f ms）"
+
+msgid "Weights: %s"
+msgstr "权重：%s"
+
+msgid "Coexistence: dlssnr-amd.asi detected (Direct path active)"
+msgstr "共存：检测到 dlssnr-amd.asi（直连路径已激活）"
+
+msgid "Execution & Backend"
+msgstr "执行与后端"
+
+msgid "D3D12 Backend"
+msgstr "D3D12 后端"
+
+msgid "Auto (D3D12 Direct preferred)"
+msgstr "自动（优先 D3D12 直连）"
+
+msgid "Network Mode"
+msgstr "网络模式"
+
+msgid "Legacy"
+msgstr "传统模式（Legacy）"
+
+msgid "New (recommended)"
+msgstr "标准加速（New，推荐）"
+
+msgid "Fast (experimental)"
+msgstr "极速模式（Fast，实验性）"
+
+msgid "New"
+msgstr "标准加速（New）"
+
+msgid "Building fast kernels"
+msgstr "正在构建加速内核"
+
+msgid "Fast kernels unavailable"
+msgstr "加速内核不可用"
+
+msgid "Runtime: %s"
+msgstr "运行时模式：%s"
+
+msgid "Coexist Split"
+msgstr "共存拆分策略"
+
+msgid "Auto (disable split when dlssnr-amd is present)"
+msgstr "自动（存在 dlssnr-amd 时禁用拆分）"
+
+msgid "Off (never split command lists)"
+msgstr "关闭（永不拆分命令列表）"
+
+msgid "Depth Type"
+msgstr "深度类型"
+
+msgid "Auto"
+msgstr "自动"
+
+msgid "Hardware Depth (NDC)"
+msgstr "硬件深度（NDC）"
+
+msgid "Linear Depth"
+msgstr "线性深度"
+
+msgid "Vulkan Input Layout"
+msgstr "Vulkan 输入布局"
+
+msgid "Shader Read Optimal"
+msgstr "着色器只读最优（Shader Read Optimal）"
+
+msgid "General"
+msgstr "通用（General）"
+
+msgid "OptiFG Host Bridge (experimental)"
+msgstr "OptiFG 宿主桥接（实验性）"
+
+msgid "Restart required. Set OptiScaler's [Libraries] NvngxPath to load openrr-ngx-host.dll."
+msgstr "需要重启游戏。请在 OptiScaler 的 [Libraries] NvngxPath 中设置加载 openrr-ngx-host.dll。"
+
+msgid "Guides"
+msgstr "引导图"
+
+msgid "Use Disocclusion Mask"
+msgstr "使用去遮挡遮罩（Disocclusion Mask）"
+
+msgid "Invert Disocclusion Mask"
+msgstr "反转去遮挡遮罩"
+
+msgid "Clamp Disocclusion Mask (0..1)"
+msgstr "钳位去遮挡遮罩（0..1）"
+
+msgid "Disocclusion Mask Scale"
+msgstr "去遮挡遮罩缩放"
+
+msgid "Use SSS Guide (ColorBeforeFog)"
+msgstr "使用次表面散射引导图（ColorBeforeFog）"
+
+msgid "Use Responsivity Mask"
+msgstr "使用响应度遮罩（Responsivity Mask）"
+
+msgid "Use Color Before Transparency"
+msgstr "使用半透明前颜色（Color Before Transparency）"
+
+msgid "Use Depth of Field Guide"
+msgstr "使用景深引导图（Depth of Field）"
+
+msgid "Use Reflection Motion Vectors"
+msgstr "使用反射运动矢量（Reflection MVs）"
+
+msgid "Use Transparency Layer Opacity & Motion"
+msgstr "使用半透明层不透明度与运动矢量"
+
+msgid "Menu & Hotkeys"
+msgstr "菜单与快捷键"
+
+msgid "Menu Key"
+msgstr "菜单快捷键"
+
+msgid "Enter a key such as F7 or Ctrl+F7, then press Enter."
+msgstr "输入按键（例如 F7 或 Ctrl+F7），然后按 Enter 确认。"
+
+msgid "Use OptiScaler Shortcut"
+msgstr "使用 OptiScaler 快捷键"
+
+msgid "Pass OptiScaler Key (Insert) while open"
+msgstr "打开时透传 OptiScaler 按键（Insert）"
+
+msgid "Menu Size"
+msgstr "菜单大小"
+
+msgid "Text Size"
+msgstr "文字大小"
+
+msgid "Theme"
+msgstr "主题"
+
+msgid "Blue"
+msgstr "蓝"
+
+msgid "Teal"
+msgstr "青绿"
+
+msgid "Violet"
+msgstr "紫"
+
+msgid "Amber"
+msgstr "琥珀"
+
+msgid "Crimson"
+msgstr "深红"
+
+msgid "Graphite"
+msgstr "石墨"
+
+msgid "Language"
+msgstr "语言"
+
+msgid "openrr-amd\\lang\\<name>.txt; the file reloads when it changes."
+msgstr "读取 openrr-amd\\lang\\<name>.txt；文件修改后会自动重载。"
+
+msgid "Close"
+msgstr "关闭"

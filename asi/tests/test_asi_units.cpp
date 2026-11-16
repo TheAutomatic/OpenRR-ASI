@@ -6,6 +6,7 @@
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
 #include "rr_pe_config.hpp"
+#include "rr_lang.hpp"
 #include "rr_ini_edit.hpp"
 #include "rr_pe_d3d12split.hpp"
 #include "rr_pe_vkdevice.hpp"
@@ -1812,6 +1813,108 @@ static int test_d3d12_gpu_and_engine() {
     return 0;
 }
 
+// Item LANG (Stage 8 Phase 5): menu language loader (asi/src/rr_lang.hpp) — msgid/msgstr parsing, UTF-8 BOM,
+// C escapes & continuations, printf-conversion safety gate, BMP code-point collection, Label##id & tr_items,
+// suspended() fallback, staged 4-language discovery/parity, and [OpenRR] Language ini persistence.
+static int test_language_loader() {
+    using namespace openrr::lang;
+    struct Clean { ~Clean() { suspended() = false; table() = Table{}; } } clean;
+    const char* dir = ".tmp-lang-test";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    const auto write = [&](const char* name, const std::string& text) {
+        FILE* f = openrr::u8::fopen((std::string(dir) + "\\" + name).c_str(), "wb");
+        if (!f) return false;
+        const bool ok = std::fwrite(text.data(), 1, text.size(), f) == text.size();
+        std::fclose(f);
+        return ok;
+    };
+    const bool ok = write("t1.txt", "\xEF\xBB\xBF# a comment\n"
+                                    "msgid \"@language\"\nmsgstr \"Test\"\n"
+                                    "msgid \"@font\"\nmsgstr \"fonts/x.ttf\"\n"
+                                    "msgid \"Menu & Hotkeys\"\nmsgstr \"\xE8\x8F\x9C\xE5\x8D\x95\" \n"
+                                    "msgid \"multi\"\n\"line\\ttab\"\nmsgstr \"a\\nb\"\n"
+                                    "msgid \"Frames: %d (%.2f ms)\"\nmsgstr \"\xD1\x80\xD0\xB0\xD0\xBC\xD0\xBA\xD0\xB8 %d\"\n"
+                                    "msgid \"Close\"\nmsgstr \"\"\n");
+    if (!ok) { std::fprintf(stderr, "FAIL: lang test file\n"); return 1; }
+    if (!load(dir, "t1")) { std::fprintf(stderr, "FAIL: lang load\n"); return 1; }
+    const Table& t = table();
+    if (t.display != "Test" || t.font != "fonts/x.ttf") { std::fprintf(stderr, "FAIL: lang @language/@font\n"); return 1; }
+    if (t.entries != 2) { std::fprintf(stderr, "FAIL: lang entries %d (want 2)\n", t.entries); return 1; }
+    if (t.rejected != 1) { std::fprintf(stderr, "FAIL: lang rejected %d (want 1)\n", t.rejected); return 1; }
+    if (std::strcmp(tr("Menu & Hotkeys"), "\xE8\x8F\x9C\xE5\x8D\x95") != 0) { std::fprintf(stderr, "FAIL: lang tr\n"); return 1; }
+    if (std::strcmp(tr("Status"), "Status") != 0) { std::fprintf(stderr, "FAIL: lang tr fallback\n"); return 1; }
+    if (std::strcmp(tr("multi" "line\ttab"), "a\nb") != 0) { std::fprintf(stderr, "FAIL: lang escapes/continuation\n"); return 1; }
+    if (std::strcmp(tr("Menu & Hotkeys##m"), "\xE8\x8F\x9C\xE5\x8D\x95##m") != 0) { std::fprintf(stderr, "FAIL: lang ##id\n"); return 1; }
+    const char items[] = "Menu & Hotkeys\0Status\0Close\0";
+    const char* ti = tr_items(items);
+    const char* ti1 = ti + std::strlen(ti) + 1;
+    const char* ti2 = ti1 + std::strlen(ti1) + 1;
+    if (std::strcmp(ti, "\xE8\x8F\x9C\xE5\x8D\x95") != 0 || std::strcmp(ti1, "Status") != 0 || std::strcmp(ti2, "Close") != 0)
+        { std::fprintf(stderr, "FAIL: lang tr_items\n"); return 1; }
+    if (t.code_points.size() != 2) { std::fprintf(stderr, "FAIL: lang code points %zu\n", t.code_points.size()); return 1; }
+    suspended() = true;
+    if (std::strcmp(tr("Menu & Hotkeys"), "Menu & Hotkeys") != 0 || std::strcmp(tr_items(items), "Menu & Hotkeys") != 0)
+        { std::fprintf(stderr, "FAIL: lang suspended\n"); return 1; }
+    suspended() = false;
+    if (!load(dir, "") || !table().map.empty()) { std::fprintf(stderr, "FAIL: lang english clear\n"); return 1; }
+    if (load(dir, "no-such-language")) { std::fprintf(stderr, "FAIL: lang missing file\n"); return 1; }
+
+    // Real staged package audit when executed from the repo root
+    const std::string staged_lang = std::filesystem::exists("build\\aco-v015\\stage\\openrr-amd\\lang")
+        ? "build\\aco-v015\\stage\\openrr-amd\\lang"
+        : std::filesystem::exists("asi\\lang") ? "asi\\lang" : "";
+    if (!staged_lang.empty()) {
+        const auto found = list(staged_lang);
+        bool has_en = false, has_zh = false, has_ja = false, has_ko = false;
+        for (const auto& [stem, shown] : found) {
+            if (stem.empty() && shown == "English") has_en = true;
+            if (stem == "zh-CN") has_zh = true;
+            if (stem == "ja") has_ja = true;
+            if (stem == "ko") has_ko = true;
+        }
+        if (!has_en || !has_zh || !has_ja || !has_ko) {
+            std::fprintf(stderr, "FAIL: lang list missing expected languages (%zu found)\n", found.size());
+            return 1;
+        }
+        for (const char* lc : {"zh-CN", "ja", "ko"}) {
+            if (!load(staged_lang, lc) || table().entries < 55 || table().rejected != 0) {
+                std::fprintf(stderr, "FAIL: lang staged %s entries=%d rejected=%d\n", lc, table().entries, table().rejected);
+                return 1;
+            }
+        }
+        if (staged_lang.rfind("build\\", 0) == 0 &&
+            !std::filesystem::exists(staged_lang + "\\fonts\\NotoSansCJKsc-Regular.ttf")) {
+            std::fprintf(stderr, "FAIL: staged NotoSansCJKsc-Regular.ttf missing\n");
+            return 1;
+        }
+    }
+
+    // [OpenRR] Language ini round trip via both openrr::ini_edit::Ini and Win32 profile APIs
+    const std::string ini_path = std::string(dir) + "\\openrr-amd.ini";
+    if (!write("openrr-amd.ini", "[OpenRR]\nLanguage =\n")) { std::fprintf(stderr, "FAIL: lang ini create\n"); return 1; }
+    {
+        openrr::ini_edit::Ini editor(ini_path);
+        editor.refresh();
+        editor.set("OpenRR", "Language", "ja");
+        editor.save();
+        openrr::ini_edit::Ini reader(ini_path);
+        reader.refresh();
+        if (reader.get("OpenRR", "Language", "") != "ja") {
+            std::fprintf(stderr, "FAIL: lang ini_edit round trip\n");
+            return 1;
+        }
+    }
+    WritePrivateProfileStringA("OpenRR", "Language", "zh-CN", ini_path.c_str());
+    char back[64] = {};
+    GetPrivateProfileStringA("OpenRR", "Language", "", back, sizeof back, ini_path.c_str());
+    if (std::strcmp(back, "zh-CN") != 0) { std::fprintf(stderr, "FAIL: lang ini round trip\n"); return 1; }
+    std::filesystem::remove_all(dir);
+    std::printf("[PASS] Item LANG (msgid/msgstr + BOM + escapes + continuation, conversion gate, "
+                "code points, ##id + tr_items, suspended fallback, 4-lang parity >=55 keys, ini round trip)\n");
+    return 0;
+}
+
 static int test_vk_unspoof_and_rdna3_pick() {
     openrr::pe::vulkan_entry_points();
     VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
@@ -1872,6 +1975,7 @@ int main() {
     std::printf("[PASS] rejected D3D12 Record leaves host state untouched\n");
     if (test_installed_data_paths() != 0) return 1;
     if (test_key_parsing() != 0) return 1;
+    if (test_language_loader() != 0) return 1;
     if (test_vk_unspoof_and_rdna3_pick() != 0) return 1;
     if (test_split_hardening_and_eligibility() != 0) return 1;
     if (test_d3d12_gpu_and_engine() != 0) return 1;

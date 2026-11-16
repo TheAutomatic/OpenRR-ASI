@@ -108,6 +108,16 @@ python3 asi/build/build_shaders.py "$glslang" gpu "$stage/openrr-amd/shaders"
 python3 asi/build/build_shaders.py "$glslang" gpu "$stage/openrr-amd/shaders-gfx11" --gfx11
 cp asi/openrr-amd.ini "$stage/openrr-amd.ini"
 "$cxx" -std=c++17 -O2 -shared -static -Iasi/src asi/src/optifg_ngx_proxy.cpp -o "$stage/openrr-ngx-host.dll"
+mkdir -p -- "$stage/openrr-amd/lang/fonts"
+python3 asi/build/make_lang.py "$stage/openrr-amd/lang/English.txt" asi/src/rr_pe_menu.cpp
+cp -- asi/lang/zh-CN.txt asi/lang/ja.txt asi/lang/ko.txt "$stage/openrr-amd/lang/"
+cp -- asi/lang/fonts/README.txt asi/lang/fonts/Noto-CJK-LICENSE.txt "$stage/openrr-amd/lang/fonts/"
+cjk_font="${OPENRR_CJK_FONT_DIR:-/mnt/c/Users/Kenny/Downloads/DLSSNR-AMD-lang-CJK-0.0.9/lang/fonts}/NotoSansCJKsc-Regular.ttf"
+if [[ -f "asi/lang/fonts/NotoSansCJKsc-Regular.ttf" ]]; then
+    cp -- "asi/lang/fonts/NotoSansCJKsc-Regular.ttf" "$stage/openrr-amd/lang/fonts/"
+elif [[ -f "$cjk_font" ]]; then
+    cp -- "$cjk_font" "$stage/openrr-amd/lang/fonts/"
+fi
 cp LICENSE THIRD_PARTY.md "$stage/"
 "$cxx" "${common_cxx[@]}" asi/tests/test_asi_units.cpp \
     "$out/rr_pe_config.o" "$out/rr_pe_d3d12split.o" "$out/rr_pe_vkdevice.o" "$out/rr_pe_log.o" "$out/rr_pe_crash.o" \

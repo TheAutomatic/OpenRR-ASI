@@ -40,3 +40,6 @@ snippets/
 
 # Local execution and borrowing plans with machine-specific absolute paths
 /docs/local-plans/
+
+# Bundled CJK font pack staged during build, never tracked in git
+asi/lang/fonts/*.ttf

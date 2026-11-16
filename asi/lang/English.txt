@@ -1,0 +1,221 @@
+# OpenRR: the menu's texts in English, made from the code by asi/build/make_lang.py.
+# A copy with its msgstr lines translated is a new language (openrr-amd\lang\<name>.txt,
+# [OpenRR] Language in openrr-amd.ini); msgid "@language" names it in the menu, msgid "@font" its
+# letters (openrr-amd\lang\fonts\..., else the Windows CJK fonts, else English stays).
+
+msgid "@language"
+msgstr "English"
+
+msgid "Enable OpenRR (Ray Reconstruction)"
+msgstr "Enable OpenRR (Ray Reconstruction)"
+
+msgid "(Menu key: %s)"
+msgstr "(Menu key: %s)"
+
+msgid "Status"
+msgstr "Status"
+
+msgid "Idle: waiting for the game to create a DLSS Ray Reconstruction feature."
+msgstr "Idle: waiting for the game to create a DLSS Ray Reconstruction feature."
+
+msgid "Note: %s"
+msgstr "Note: %s"
+
+msgid "Ready"
+msgstr "Ready"
+
+msgid "Building network..."
+msgstr "Building network..."
+
+msgid "Failed"
+msgstr "Failed"
+
+msgid "Unknown"
+msgstr "Unknown"
+
+msgid "D3D12 Direct ELF"
+msgstr "D3D12 Direct ELF"
+
+msgid "Vulkan Host (RecordVk)"
+msgstr "Vulkan Host (RecordVk)"
+
+msgid "Vulkan Interop Bridge"
+msgstr "Vulkan Interop Bridge"
+
+msgid "State: %s%s%s%s"
+msgstr "State: %s%s%s%s"
+
+msgid "Backend: %s"
+msgstr "Backend: %s"
+
+msgid "Backend note: %s"
+msgstr "Backend note: %s"
+
+msgid "Resolution: %ux%u -> %ux%u"
+msgstr "Resolution: %ux%u -> %ux%u"
+
+msgid "GPU time (raw): %.2f ms (p50 %.2f ms, p95 %.2f ms)  |  Frames: %u"
+msgstr "GPU time (raw): %.2f ms (p50 %.2f ms, p95 %.2f ms)  |  Frames: %u"
+
+msgid "Est. w/o async preemption: %.2f ms (avg %.2f ms)"
+msgstr "Est. w/o async preemption: %.2f ms (avg %.2f ms)"
+
+msgid "Weights: %s"
+msgstr "Weights: %s"
+
+msgid "Coexistence: dlssnr-amd.asi detected (Direct path active)"
+msgstr "Coexistence: dlssnr-amd.asi detected (Direct path active)"
+
+msgid "Execution & Backend"
+msgstr "Execution & Backend"
+
+msgid "D3D12 Backend"
+msgstr "D3D12 Backend"
+
+msgid "Auto (D3D12 Direct preferred)"
+msgstr "Auto (D3D12 Direct preferred)"
+
+msgid "Network Mode"
+msgstr "Network Mode"
+
+msgid "Legacy"
+msgstr "Legacy"
+
+msgid "New (recommended)"
+msgstr "New (recommended)"
+
+msgid "Fast (experimental)"
+msgstr "Fast (experimental)"
+
+msgid "New"
+msgstr "New"
+
+msgid "Building fast kernels"
+msgstr "Building fast kernels"
+
+msgid "Fast kernels unavailable"
+msgstr "Fast kernels unavailable"
+
+msgid "Runtime: %s"
+msgstr "Runtime: %s"
+
+msgid "Coexist Split"
+msgstr "Coexist Split"
+
+msgid "Auto (disable split when dlssnr-amd is present)"
+msgstr "Auto (disable split when dlssnr-amd is present)"
+
+msgid "Off (never split command lists)"
+msgstr "Off (never split command lists)"
+
+msgid "Depth Type"
+msgstr "Depth Type"
+
+msgid "Auto"
+msgstr "Auto"
+
+msgid "Hardware Depth (NDC)"
+msgstr "Hardware Depth (NDC)"
+
+msgid "Linear Depth"
+msgstr "Linear Depth"
+
+msgid "Vulkan Input Layout"
+msgstr "Vulkan Input Layout"
+
+msgid "Shader Read Optimal"
+msgstr "Shader Read Optimal"
+
+msgid "General"
+msgstr "General"
+
+msgid "OptiFG Host Bridge (experimental)"
+msgstr "OptiFG Host Bridge (experimental)"
+
+msgid "Restart required. Set OptiScaler's [Libraries] NvngxPath to load openrr-ngx-host.dll."
+msgstr "Restart required. Set OptiScaler's [Libraries] NvngxPath to load openrr-ngx-host.dll."
+
+msgid "Guides"
+msgstr "Guides"
+
+msgid "Use Disocclusion Mask"
+msgstr "Use Disocclusion Mask"
+
+msgid "Invert Disocclusion Mask"
+msgstr "Invert Disocclusion Mask"
+
+msgid "Clamp Disocclusion Mask (0..1)"
+msgstr "Clamp Disocclusion Mask (0..1)"
+
+msgid "Disocclusion Mask Scale"
+msgstr "Disocclusion Mask Scale"
+
+msgid "Use SSS Guide (ColorBeforeFog)"
+msgstr "Use SSS Guide (ColorBeforeFog)"
+
+msgid "Use Responsivity Mask"
+msgstr "Use Responsivity Mask"
+
+msgid "Use Color Before Transparency"
+msgstr "Use Color Before Transparency"
+
+msgid "Use Depth of Field Guide"
+msgstr "Use Depth of Field Guide"
+
+msgid "Use Reflection Motion Vectors"
+msgstr "Use Reflection Motion Vectors"
+
+msgid "Use Transparency Layer Opacity & Motion"
+msgstr "Use Transparency Layer Opacity & Motion"
+
+msgid "Menu & Hotkeys"
+msgstr "Menu & Hotkeys"
+
+msgid "Menu Key"
+msgstr "Menu Key"
+
+msgid "Enter a key such as F7 or Ctrl+F7, then press Enter."
+msgstr "Enter a key such as F7 or Ctrl+F7, then press Enter."
+
+msgid "Use OptiScaler Shortcut"
+msgstr "Use OptiScaler Shortcut"
+
+msgid "Pass OptiScaler Key (Insert) while open"
+msgstr "Pass OptiScaler Key (Insert) while open"
+
+msgid "Menu Size"
+msgstr "Menu Size"
+
+msgid "Text Size"
+msgstr "Text Size"
+
+msgid "Theme"
+msgstr "Theme"
+
+msgid "Blue"
+msgstr "Blue"
+
+msgid "Teal"
+msgstr "Teal"
+
+msgid "Violet"
+msgstr "Violet"
+
+msgid "Amber"
+msgstr "Amber"
+
+msgid "Crimson"
+msgstr "Crimson"
+
+msgid "Graphite"
+msgstr "Graphite"
+
+msgid "Language"
+msgstr "Language"
+
+msgid "openrr-amd\\lang\\<name>.txt; the file reloads when it changes."
+msgstr "openrr-amd\\lang\\<name>.txt; the file reloads when it changes."
+
+msgid "Close"
+msgstr "Close"
+
