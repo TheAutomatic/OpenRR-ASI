@@ -93,7 +93,12 @@ FLOW=0 净赢 ~55 µs（空隙 −108.6 µs 吸收 barriers 串行 +24.9 µs；3
 - **WP-D6.0（XIN2Y 跨 tile 拆平）**：落地为 `XINF`/`XINQ` 两相宏（`W2P(XIN_FMA_*)` 先全量 fma、`W2P(XIN_QY_*)` 后集中量化）；ACO 原生后端实测 `dec_up_64_64_96_f_lt` `s_setreg` **仍为 28**（源码两相间无屏障，调度器按寄存器压力自由重排，MODE 翻转不可源码级消除），配对计时全核 ±1 µs（中性）→ 保留代码形态（零代价、结构更清晰）。
 - **WP-D6a/D6b（C≥64 的 13 核 S/O/W_out FP8+FP32）静态清点归档**：W2 C=64 现状 240 VGPR；FP8 化需新增 pb QB8（+8）、oh/量化临时（+16）、S/O QC8 累加器对（+16）→ 264+ 必破 256。且机制性证据：本轮 W1A8 实测同一算子模板（FP8 Q/V/S/O + e4m3 激活量化）画质 **−0.29 dB**（破 −0.25 警戒线）、性能 −2.8%；C≥64 的现行 fp16 注意力是**精确路径**（无 LT_Q16/LT_VO 近似可抵消），FP8 化为纯增量化误差 + 驻留降档，双轴可预见皆负 → 按"不做无效投入"条款整组归档，不做逐宽度盲跑。
 
-## 8. 第二轮 Step 5 终审（进行中）
+## 8. 第二轮 Step 5 终审（完成，详见 `v016-stage9-wave-d-final-audit.md`）
+
+- Anchor #1：4K + 1080p steady+DRS `max_ulp_diff = 0`（100.0000% 0-ULP）。
+- Anchor #2 三列：fast-aco v1 全 ≥0（best +0.0307）/ v2 最差 −0.1415；exp-aco vs exp 基线 v1 最差 0.0000（best +0.0406）/ v2 最差 −0.1217；FLOW=0 与 FLOW=1 逐值一致；全部 `non_finite=0`。
+- 6 档 × 3 模式水位（默认 FLOW=0）：Fast 4K Qual **10.4988 ms（3.60x 5090）**、1080p Qual 2.7706（3.18x）、1440p Qual 4.7235（3.36x）、4K Perf 6.6800（3.41x）、1080p DLAA 5.4492（3.53x）、4K UltraPerf 3.8916（3.02x）。
+- 无探针 FLOW 终裁：4K `FLOW=1` 快 −49.1 µs（3×交错中位）——**第一轮 STAMPS 口径的 "F0 快 55 µs" 系探针串行化扭曲**；1080p 中性。宿主默认维持 FLOW=0，双列不混标。
 - **WP-D2a**：`build_aco_records.py` 新增 `--shared-cmat-shaders`（逐核限定 `ONR_ACO_SHARED_CMAT` 作用域；指纹含 `shared_cmat_shaders`；记录含 per-record `shared_cmat`）；`test_aco_build_policy.py` 扩到 8 测全绿（作用域隔离、缓存指纹、off+名单报错、全局模式兼容）。
 - **WP-D3 前置**：`onr_block_w2.glsl` LT_UP8 路径支持 `ENC_CP == 128`（`w3` 记录 + `UP_K3_8`），`>128` 拒绝；`W2_96UP` 门已存在，启用留待测量。
 - **WP-D6 前置**：`XIN2Y`（w2 体）拆为 fma 段 + 集中量化段（压 `s_setreg` MODE 翻转）；`XQ8Y` 审视为纯量化无需拆。
