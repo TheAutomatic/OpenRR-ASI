@@ -92,6 +92,8 @@ struct DfnImport {
 std::vector<uint8_t> qv_bytes(const uint16_t* v, size_t n);
 // row-major [n / K][K] weights followed by the same values in 16x16 tiles (wout, fc1, fc2 of the network kernels)
 std::vector<uint16_t> with_tiles(const std::vector<uint16_t>& v, size_t K);
+// fp16 bits -> OCP e4m3 code, round-to-nearest-even, satfinite (never emits the NaN codes 0x7f/0xff)
+uint8_t e4m3_rne(uint16_t h);
 
 class Engine {
 public:
