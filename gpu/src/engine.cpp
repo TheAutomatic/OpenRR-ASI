@@ -286,8 +286,13 @@ inline uint8_t e4m3_rne(uint16_t h) {
 Buffer Engine::upload_qv(const H16& v, const H16& lr) {
     if (v.empty()) return {};
     auto d = qv_bytes(v.data(), v.size());
-    d.resize(v.size() * 3 + lr.size() * 2);   // LT_Q16 reads lr at 3 n bytes; the regular kernels never do
-    std::memcpy(d.data() + v.size() * 3, lr.data(), lr.size() * 2);
+    const size_t base = v.size() * 3;
+    d.resize(base + lr.size() * 3);   // LT_Q16 reads lr at 3 n bytes; LT_VO8 reads e4m3(lr) at 5 n bytes
+    if (!lr.empty()) {
+        std::memcpy(d.data() + base, lr.data(), lr.size() * 2);
+        const size_t e8 = base + lr.size() * 2;
+        for (size_t i = 0; i < lr.size(); ++i) d[e8 + i] = e4m3_rne(lr[i]);
+    }
     return pack_bytes(dev_, fixed_, d.data(), d.size());
 }
 
@@ -296,8 +301,13 @@ void Engine::upload_stage(const StageWeights& s, StageBufs& b) {
     auto UQ = [&](Buffer& dst, const H16& v, const H16& lr) {
         if (v.empty()) { dst = {}; return; }
         auto d = qv_bytes(v.data(), v.size());
-        d.resize(v.size() * 3 + lr.size() * 2);
-        std::memcpy(d.data() + v.size() * 3, lr.data(), lr.size() * 2);
+        const size_t base = v.size() * 3;
+        d.resize(base + lr.size() * 3);
+        if (!lr.empty()) {
+            std::memcpy(d.data() + base, lr.data(), lr.size() * 2);
+            const size_t e8 = base + lr.size() * 2;
+            for (size_t i = 0; i < lr.size(); ++i) d[e8 + i] = e4m3_rne(lr[i]);
+        }
         pack_bytes(dev_, fixed_, d.data(), d.size(), &dst);
     };
     UQ(b.in_a, s.b.in_a, s.b.C == 32 ? lr_keys(s.b.in_a, s.b.C, s.b.X) : H16{});

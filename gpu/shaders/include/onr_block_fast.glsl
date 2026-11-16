@@ -326,7 +326,7 @@ ACC bias_acc_t(F16Buf b, uint n0) {
 // LT_UP8 (decoder _0, W1 and W2) and LT_MI8 (enc1): the up and the input merge products on e4m3 x e4m3 -> fp32 as well. Their B
 // operands are the e4m3 bytes of the planes they read and their weights are exact e4m3 (Engine::upload_stage keeps the codes
 // after the fp16 values); one rounding to fp16 per output instead of one per 16 K
-#if FP8QV || defined(LT_UP8) || defined(LT_MI8) || defined(LT_MLP8) || (defined(LT_E8RAW) && (!defined(ONR_GFX11) || !ONR_GFX11))
+#if FP8QV || defined(LT_UP8) || defined(LT_MI8) || defined(LT_MLP8) || defined(LT_VO8) || (defined(LT_E8RAW) && (!defined(ONR_GFX11) || !ONR_GFX11))
 #extension GL_EXT_float_e4m3 : require
 #define QA8 coopmat<floate4m3_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseA>
 #define QB8 coopmat<floate4m3_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseB>

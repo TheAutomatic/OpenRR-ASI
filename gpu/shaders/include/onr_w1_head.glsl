@@ -3,6 +3,47 @@
 // constant (LT_FAR1), so each head keeps only its own key tiles.
         uint wq = hd * 32u * ENC_C;
         // Q^T [dim tile][token tile] = in_a x^T, V [token tile][dim tile] = x in_b^T; K = channel tiles in order
+#if defined(LT_VO8) && defined(LT_VO)
+        // LT_VO8: compute V before Q using e4m3(vo_values) at 5n bytes in a non-unrolled token loop
+        // so only one QC8 pair (s0_, s1_) and one QA8 pair (vx0_, vx1_) exist before Q allocates.
+        MH v00 = MH(0.0), v01 = MH(0.0), v10 = MH(0.0), v11 = MH(0.0), v20 = MH(0.0), v21 = MH(0.0), v30 = MH(0.0), v31 = MH(0.0);
+        {
+#define W1_VB8 E4View(uint64_t(pc.in_b) + uint64_t(VB8_LR(0u))).v
+            QB8 wb00, wb01, wb10, wb11;
+            coopMatLoad(wb00, W1_VB8, wq, ENC_C, COL);
+            coopMatLoad(wb01, W1_VB8, wq + 16u * ENC_C, ENC_C, COL);
+            coopMatLoad(wb10, W1_VB8, wq + 16u, ENC_C, COL);
+            coopMatLoad(wb11, W1_VB8, wq + 16u * ENC_C + 16u, ENC_C, COL);
+            [[dont_unroll]] for (uint vt_ = 0u; vt_ < 4u; ++vt_) {
+                QA8 vx0_, vx1_;
+                [[unroll]] for (int i_ = 0; i_ < 8; i_ += 2) {
+                    f16vec2 ha_ = vt_ < 2u ? (vt_ == 0u ? f16vec2(x00[i_], x00[i_ + 1]) : f16vec2(x10[i_], x10[i_ + 1]))
+                                           : (vt_ == 2u ? f16vec2(x20[i_], x20[i_ + 1]) : f16vec2(x30[i_], x30[i_ + 1]));
+                    f16vec2 hb_ = vt_ < 2u ? (vt_ == 0u ? f16vec2(x01[i_], x01[i_ + 1]) : f16vec2(x11[i_], x11[i_ + 1]))
+                                           : (vt_ == 2u ? f16vec2(x21[i_], x21[i_ + 1]) : f16vec2(x31[i_], x31[i_ + 1]));
+                    fe4m3vec2 q0_ = qe4_pair32(vec2(ha_)), q1_ = qe4_pair32(vec2(hb_));
+                    vx0_[i_] = q0_.x, vx0_[i_ + 1] = q0_.y, vx1_[i_] = q1_.x, vx1_[i_ + 1] = q1_.y;
+                }
+                QC8 s0_ = QC8(0.0), s1_ = QC8(0.0);
+                MMA(s0_, vx0_, wb00) MMA(s1_, vx0_, wb01) MMA(s0_, vx1_, wb10) MMA(s1_, vx1_, wb11)
+                MH va_ = MH(s0_), vb_ = MH(s1_);
+                if (vt_ == 0u) { [[unroll]] for (int i_ = 0; i_ < 8; ++i_) v00[i_] = va_[i_], v01[i_] = vb_[i_]; }
+                else if (vt_ == 1u) { [[unroll]] for (int i_ = 0; i_ < 8; ++i_) v10[i_] = va_[i_], v11[i_] = vb_[i_]; }
+                else if (vt_ == 2u) { [[unroll]] for (int i_ = 0; i_ < 8; ++i_) v20[i_] = va_[i_], v21[i_] = vb_[i_]; }
+                else { [[unroll]] for (int i_ = 0; i_ < 8; ++i_) v30[i_] = va_[i_], v31[i_] = vb_[i_]; }
+            }
+#undef W1_VB8
+        }
+        ACC q00 = ACC(0.0), q01 = ACC(0.0), q10 = ACC(0.0), q11 = ACC(0.0), q20 = ACC(0.0), q21 = ACC(0.0), q30 = ACC(0.0), q31 = ACC(0.0);
+#define QK_TOK(xt, qa, qb) { MB b_; XPB(b_, xt) MMA(qa, wa0, b_) Q2_IF { MMA(qb, wa1, b_) } }
+#define QK(n, xa, xb, xc, xd) { MA wa0, wa1; \
+            coopMatLoad(wa0, pc.in_a.v, QA_LR(wq + (n) * 16u), ENC_C, ROW); Q2_IF { coopMatLoad(wa1, pc.in_a.v, wq + 16u * ENC_C + (n) * 16u, ENC_C, ROW); } \
+            QK_TOK(xa, q00, q01) QK_TOK(xb, q10, q11) QK_TOK(xc, q20, q21) QK_TOK(xd, q30, q31) }
+        QK(0u, x00, x10, x20, x30)
+        QK(1u, x01, x11, x21, x31)
+#undef QK_TOK
+#undef QK
+#else
         ACC q00 = ACC(0.0), q01 = ACC(0.0), q10 = ACC(0.0), q11 = ACC(0.0), q20 = ACC(0.0), q21 = ACC(0.0), q30 = ACC(0.0), q31 = ACC(0.0);
         ACC v00 = ACC(0.0), v01 = ACC(0.0), v10 = ACC(0.0), v11 = ACC(0.0), v20 = ACC(0.0), v21 = ACC(0.0), v30 = ACC(0.0), v31 = ACC(0.0);
 #define QV_TOK(xt, qa, qb, va, vb) { MB b_; XPB(b_, xt) MMA(qa, wa0, b_) Q2_IF { MMA(qb, wa1, b_) } \
@@ -13,6 +54,7 @@
             QV_TOK(xa, q00, q01, v00, v01) QV_TOK(xb, q10, q11, v10, v11) QV_TOK(xc, q20, q21, v20, v21) QV_TOK(xd, q30, q31, v30, v31) }
         QV_K(0u, x00, x10, x20, x30)
         QV_K(1u, x01, x11, x21, x31)
+#endif
 #ifndef LT_VO
         // out projection fragments of the head: [channel tile][dim tile], K = 32 hd + dims
         MA wo00, wo01, wo10, wo11;

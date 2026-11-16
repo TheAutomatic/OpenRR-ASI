@@ -149,8 +149,10 @@ layout(local_size_x = 128 * SPLIT) in;
 // LT_VO (W1): the values through wout_h in_b_h, stored like LT_Q16's keys after in_b and its e4m3 codes
 #ifdef LT_VO
 #define VB_LR(x) (3u * ENC_X * ENC_C / 2u + (x))
+#define VB8_LR(x) (5u * ENC_X * ENC_C + (x))
 #else
 #define VB_LR(x) (x)
+#define VB8_LR(x) (x)
 #endif
 // LT_RCP: the softmax's reciprocal by the hardware's fp16 one
 #ifdef LT_RCP
