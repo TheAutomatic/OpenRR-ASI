@@ -55,25 +55,45 @@
 
 FLOW=0 净赢 ~55 µs（空隙 −108.6 µs 吸收 barriers 串行 +24.9 µs；32→34 持久核尾波饥饿气泡消除，与计划预判一致）。终审按裁决边界双列两套权威水位（默认实机态 FLOW=0 / 流控态 FLOW=1），不混标；不改宿主默认（`runtime.cpp:924` 维持 FLOW=0）。
 
-## 4. WP-D5 — LT_W1A8 原生 e4m3 全 FP8 头（实现完毕，性能止损归档）
-实现（保留于源码，未启用）：`onr_w1_head.glsl` 新增 `LT_W1A8` 全 FP8+FP32 头（Q/V/S/O/W_out 全 `v_wmma_f32_16x16x16_fp8_fp8`，寄存器转置 `W1A_TA`，f32 归一 `W1A_PB`，`id8` 精确 e4m3 单位阵，`W1_WOUT8` = `UT8(b.out)` 尾段 `4*C*X`，`W1_QA8/W1_VB8` = `qv_bytes` 码区 `2*X*C`）；`onr_block_w1.glsl` 提供 xq 一次量化 + 跨头 `oc` QC8 累加器 + `LT_MLP8` 依赖门；engine.cpp `UT8(b.out, ...)` 尾段与 `e4m3_rne` 导出 + 16 级 stage 偏移/数值单测（全 PASS）。
+## 4. WP-D5 — LT_W1A8 原生 e4m3 全 FP8 头（第二轮：ISA 平反，双门禁判负归档）
 
-五项证据（vs seal，per kernel enc0 / dec_up / dec_head）：
+### 4.1 第一轮 llvm-mc 结论作废（勘误）
 
-| 项 | enc0 | dec_up | dec_head |
-|---|---|---|---|
-| fp8 WMMA | 96→**200** | 48→**222** | 16→**258** |
-| f16 WMMA | 116→**0** | 132→**0** | 132→**8** |
-| VGPR | 192→216 | 192→216 | 192→216 |
-| v_cndmask | 477→592 | 193→**735** | 179→**851** |
-| code B | 24392→30588 | 16156→24148 | 20876→32160 |
+第一轮"全包零 `v_cvt_pk_fp8_f32`、`v_cndmask` 暴涨 735/851"的结论 **100% 错误**：Ubuntu llvm-mc-21 不识别 GFX12 `v_cvt_pk_fp8_f32` 的 VOP3 首字 `0xd769xxxx`，warning 后错位 4 字节，把操作数高字节 `0x02` 误判为 VOP2 `v_cndmask_b32_e32`。本轮起所有 ISA 统计改用 ACO 原生后端（`RADV_DEBUG=shaders`，截取 `After lowering to hw instructions:`），并可用 `.nrp` 机器码 `(dword >> 16) == 0xd769` 交叉核验。
 
-- 反汇编（llvm-mc-21）：`v_cvt_pk_fp8_f32` 与 `v_maxmin` 均为 **0** —— 扫描全包 94 核（含 seal 基线同核）证实：**本 26.3 ACO 工具链下 `qe4_pair32` 的 f2e4m3fn_satfn 硬件折叠在全包任何位置都不发生**，软件量化（cndmask+perm+s_setreg）是现状路径；W1A8 每头 ~40 个量化 tile 的软件代价超过 WMMA 8→16 周期收益，叠加 VGPR 216（驻留 4→3 waves/SIMD）导致净回退。
-- 快速计时（units 引擎档）：4K 11.086 ms（比 D1a +142 µs / +1.3%，超 ±0.5% 漂移带），1080p 2.900。
-- 裁决：按止损条款归档——代码保留（`LT_W1A8` 未定义即零影响），fastmode 还原为 `LT_Q16/LT_VO`。重启前置条件：工具链侧 `v_cvt_pk_fp8_f32` 折叠恢复（或找到可匹配形态）后，量化成本每 tile ~30 ops → 1 op，账本将反转为净赢。
+### 4.2 第二轮：修复 5 处着色器 Bug 后重测
+
+指令单定位的 5 处 Bug 全部修复：①量化/转置循环上限 16→8（wave32 每 lane 8 元素，消除指令翻倍）；②Q/V 补齐 K tile n=1（通道 16..31，此前整半输入漏乘）；③`W1A_OW` 补 `hd * 32u` 列偏移（此前 hd=1 错乘 hd=0 的 W_out）；④`W1A_EDIR` 行列转正（A=key 转置 × B=own）+ `W1A_ELO` 还原 fp16 精确恒等阵（严禁未归一化 exp 进 e4m3）；⑤Q 逐 tile 窄作用域（同时仅 2 个 QC8）+ V 直存 `QA8 vt`（量化即转置）+ `W1A_OKT` 恢复 `IFK` 稀疏剪枝。
+
+**ISA 门禁（ACO 原生后端，全部达标）**：
+
+| 核 | fp8 WMMA | f16 WMMA | v_cvt_pk_fp8_f32 | v_maxmin | v_cndmask | VGPR | scratch |
+|---|---|---|---|---|---|---|---|
+| enc0_stage_32_64_f_lt | 260 | 14 | 496 | 0 | 17 | 216 | 0 |
+| dec_up_32_64_64_f_lt | 236 | 10 | 416 | 0 | 4 | 216 | 0 |
+| dec_head_32_64_f_lt | 204 | 10 | 384 | 0 | 18 | 240 | 0 |
+
+硬件单指令量化转换器全程在场；f16 WMMA 仅剩 LT_SYM 的 E_LO 恒等阵。
+
+### 4.3 双门禁实测（判负归档）
+
+- **性能**：units 引擎档 4K Fast 11.075 ms（p1-candidate 10.778，+297 µs/+2.8%）；1080p 2.903（+55 µs）。全秩 32 维 Q/V/O/W_out 乘法量显著高于被替换的 rank-16 `LT_Q16` + 免投影 `LT_VO` 近似，8 周期 FP8 折抵后仍净负，叠加 216/240 VGPR（8→7 waves/SIMD）。
+- **画质（Anchor #2 fast-aco vs seal）**：v1 最差 **−0.2910 dB**（Q_S0_1080p_dlaa，52.1289）、−0.2818（Q_S0_4k_perf）——破单步 −0.25 dB 警戒线；v2 最差 −0.1857（Q_S2_4k_perf）。原因：FP8 通路把激活（x、softmax 概率）压入 e4m3（相对误差 ~4–6%），其代价超过卸除 LT_Q16/LT_VO 的 2.6–2.95% 权重截断收益。
+- **裁决**：代码保留（`LT_W1A8` 未定义零影响），fastmode 还原 `LT_Q16/LT_VO`。重启前置条件：对激活做 2^k 逐 tile 缩放量化（DLSSNR-AMD 的 act-scale 方案）或等 toolchain 侧激活感知量化，否则 C=32 的 FP8 注意力在画质-性能双轴均不可赢。
 
 ## 5. 其他已落地（待终包测量）
 
+## 7. 第二轮 Step 2–4 结果（全部按五项证据归档）
+
+- **WP-D2a 实验 A（dec_dfn_160_256 WGP，`--wgp-mode-shaders`，rsrc1 bit29=1 验证）**：帧内配对 `dec_dfn_160_256_fl_lt` **86.8 → 96.3 µs（+9.5/+11%）**，下游 `dec_up_128_128_160_fl_lt` +6.2 µs；Phase-1 的单核 −10.1 µs 为孤立测量，帧内 WGP 反效 → 回退。
+- **WP-D2a 实验 B（`--shared-cmat load` 逐核）**：`dec_dfn_160_256_fl_lt` **±0.0 µs**（LDS 访存非瓶颈，160 条标量 `ds_load_u16_d16*` 向量化零收益）→ 不保留（中性即复杂度无益），`loadstore` 不再测。
+- **WP-D2b 实验 A（post_f_lt/post_dlt_f_lt WGP）**：`post_f_lt` 1215.9 → 1217.1 µs（+1.2，噪声），22 核和 +12.3 µs（带内偏负）→ 归档。
+- **WP-D2b 实验 B（`LT_POST_STILL=1`）**：`post_f_lt` 1236.7 → **1247.0 µs（+10.3）**——合成评测全程运动，无静态区可赢，divergent `subgroupAll` 分支纯增开销 → 按硬门禁回退。
+- **WP-D3（`W2_96UP=1`，dec_up_96_128_128 切 2-wave W2 体）**：资源门禁全过（VGPR 256、LDS 12 KB、scratch 0、workgroup 64）；自身 **431.6 → 421.6 µs（−10.0/−2.3%）** 但下游 `dec_dfn_96_128_fl_lt` **+21.6 µs（+6.1%）**（W2 体输出布局耦合）——结队净 **+11.6 µs** → 按结队准则回退。C=128 静态清点：C=96 双 tile 已占满 256 VGPR，C=128（NT=8）双 token tile 需 ~220+ 基础 + 双倍 Q/V/Wout 片段 → 必破 256 触发 spill，按计划不做盲跑，账本归档。
+- **WP-D6.0（XIN2Y 跨 tile 拆平）**：落地为 `XINF`/`XINQ` 两相宏（`W2P(XIN_FMA_*)` 先全量 fma、`W2P(XIN_QY_*)` 后集中量化）；ACO 原生后端实测 `dec_up_64_64_96_f_lt` `s_setreg` **仍为 28**（源码两相间无屏障，调度器按寄存器压力自由重排，MODE 翻转不可源码级消除），配对计时全核 ±1 µs（中性）→ 保留代码形态（零代价、结构更清晰）。
+- **WP-D6a/D6b（C≥64 的 13 核 S/O/W_out FP8+FP32）静态清点归档**：W2 C=64 现状 240 VGPR；FP8 化需新增 pb QB8（+8）、oh/量化临时（+16）、S/O QC8 累加器对（+16）→ 264+ 必破 256。且机制性证据：本轮 W1A8 实测同一算子模板（FP8 Q/V/S/O + e4m3 激活量化）画质 **−0.29 dB**（破 −0.25 警戒线）、性能 −2.8%；C≥64 的现行 fp16 注意力是**精确路径**（无 LT_Q16/LT_VO 近似可抵消），FP8 化为纯增量化误差 + 驻留降档，双轴可预见皆负 → 按"不做无效投入"条款整组归档，不做逐宽度盲跑。
+
+## 8. 第二轮 Step 5 终审（进行中）
 - **WP-D2a**：`build_aco_records.py` 新增 `--shared-cmat-shaders`（逐核限定 `ONR_ACO_SHARED_CMAT` 作用域；指纹含 `shared_cmat_shaders`；记录含 per-record `shared_cmat`）；`test_aco_build_policy.py` 扩到 8 测全绿（作用域隔离、缓存指纹、off+名单报错、全局模式兼容）。
 - **WP-D3 前置**：`onr_block_w2.glsl` LT_UP8 路径支持 `ENC_CP == 128`（`w3` 记录 + `UP_K3_8`），`>128` 拒绝；`W2_96UP` 门已存在，启用留待测量。
 - **WP-D6 前置**：`XIN2Y`（w2 体）拆为 fma 段 + 集中量化段（压 `s_setreg` MODE 翻转）；`XQ8Y` 审视为纯量化无需拆。

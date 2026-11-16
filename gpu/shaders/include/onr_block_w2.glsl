@@ -151,19 +151,22 @@ void main() {
 #if FP8QV
 // the same read + skip fma, and the fma's fp16 result quantized once into the e4m3 B tiles the
 // heads' QV products read (the same values XOUTQ writes; RDNA4 only - gfx11 strips FP8QV)
-#define XIN2Y(xa, xb, ya, yb, tp, t0, pl) MH xa, xb; QB8 ya, yb; { uvec4 w_ = U32x4View(uint64_t(pc.x)).v[plane_index(tp, int(pl) * 32 + int(hh) * 16) >> 4]; \
+#define XINF(xa, xb, tp, t0, pl) MH xa, xb; { uvec4 w_ = U32x4View(uint64_t(pc.x)).v[plane_index(tp, int(pl) * 32 + int(hh) * 16) >> 4]; \
         uint t_ = (t0) + (ln & 15u), ua_ = (((((t_ >> 3) & 1u) << 1) + (t_ & 1u)) * 16u * ENC_C + (((t_ >> 4) << 2) + ((t_ & 7u) >> 1)) * ENC_C + (pl) * 32u + 8u * hh) >> 1; \
-        precise f16vec2 za_[4], zb_[4]; \
         [[unroll]] for (int k_ = 0; k_ < 4; ++k_) { \
             f16vec2 a_ = unpackFloat2x16(e4m3_lo(w_[k_])), b_ = unpackFloat2x16(e4m3_hi(w_[k_])); \
             f16vec2 ua = unpackFloat2x16(lds1[ua_ + uint(k_)]), ubv = unpackFloat2x16(lds1[ua_ + 8u + uint(k_)]); \
-            za_[k_] = fma(a_, f16vec2(sc), ua), zb_[k_] = fma(b_, f16vec2(sc), ubv); \
-            xa[2 * k_] = za_[k_].x, xa[2 * k_ + 1] = za_[k_].y, xb[2 * k_] = zb_[k_].x, xb[2 * k_ + 1] = zb_[k_].y; } \
-        [[unroll]] for (int k_ = 0; k_ < 4; ++k_) { \
-            fe4m3vec2 qa_ = qe4_pair32(vec2(za_[k_])), qb_ = qe4_pair32(vec2(zb_[k_])); \
-            ya[2 * k_] = qa_.x, ya[2 * k_ + 1] = qa_.y, yb[2 * k_] = qb_.x, yb[2 * k_ + 1] = qb_.y; } }
-#define XIN_A(pl, a, b) XIN2Y(x0##a, x0##b, y0##a, y0##b, tpa, ra, uint(pl))
-#define XIN_B(pl, a, b) XIN2Y(x1##a, x1##b, y1##a, y1##b, tpb, rb, uint(pl))
+            precise f16vec2 za = fma(a_, f16vec2(sc), ua), zb = fma(b_, f16vec2(sc), ubv); \
+            xa[2 * k_] = za.x, xa[2 * k_ + 1] = za.y, xb[2 * k_] = zb.x, xb[2 * k_ + 1] = zb.y; } }
+// D6.0: every channel tile's skip fma first, then ONE quantization sweep over all x tiles, so
+// ACO never flips MODE.FP16_OVFL (s_setreg) back and forth at each tile boundary
+#define XINQ(xa, xb, ya, yb) QB8 ya, yb; { [[unroll]] for (int i_ = 0; i_ < 8; i_ += 2) { \
+        fe4m3vec2 qa_ = qe4_pair32(vec2(xa[i_], xa[i_ + 1])), qb_ = qe4_pair32(vec2(xb[i_], xb[i_ + 1])); \
+        ya[i_] = qa_.x, ya[i_ + 1] = qa_.y, yb[i_] = qb_.x, yb[i_ + 1] = qb_.y; } }
+#define XIN_FMA_A(pl, a, b) XINF(x0##a, x0##b, tpa, ra, uint(pl))
+#define XIN_FMA_B(pl, a, b) XINF(x1##a, x1##b, tpb, rb, uint(pl))
+#define XIN_QY_A(pl, a, b) XINQ(x0##a, x0##b, y0##a, y0##b)
+#define XIN_QY_B(pl, a, b) XINQ(x1##a, x1##b, y1##a, y1##b)
 #else
 #define XIN_A(pl, a, b) XIN2(x0##a, x0##b, tpa, ra, uint(pl))
 #define XIN_B(pl, a, b) XIN2(x1##a, x1##b, tpb, rb, uint(pl))
@@ -249,7 +252,11 @@ void main() {
 #define XIN_B(pl, a, b) XIN2(x1##a, x1##b, tpb, rb, uint(pl))
 #endif
 #endif
+#if DEC_UP && FP8QV
+    W2P(XIN_FMA_A) W2P(XIN_FMA_B) W2P(XIN_QY_A) W2P(XIN_QY_B)
+#else
     W2P(XIN_A) W2P(XIN_B)
+#endif
 #define DECL_C0(n) ACC c0##n = bias_acc_t(pc.out_b, uint(n) * 16u);
 #define DECL_C1(n) ACC c1##n = c0##n;
     W2T(DECL_C0) W2T(DECL_C1)

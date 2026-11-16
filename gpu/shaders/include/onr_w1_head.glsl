@@ -3,31 +3,71 @@
 // constant (LT_FAR1), so each head keeps only its own key tiles.
         uint wq = hd * 32u * ENC_C;
 #ifdef LT_W1A8
-        // WP-D5: one head fully on exact-e4m3 weights, f32 accumulators, 8-cycle FP8 WMMA only.
-        // A = the head's Wq rows (codes of in_a), B = quantized x^T; Q^T dims preserved into QB8
-        QA8 wqa0_, wqa1_;
-        coopMatLoad(wqa0_, W1_QA8, wq, ENC_C, ROW);
-        coopMatLoad(wqa1_, W1_QA8, wq + 16u * ENC_C, ENC_C, ROW);
+        // WP-D5 (r2): one head fully on exact-e4m3 weights, f32 accumulators, 8-cycle FP8 WMMA
+        // only. ENC_C = 32 is TWO K tiles: n = 0 (channels 0..15, xq<t>0 @ wq) and n = 1
+        // (channels 16..31, xq<t>1 @ wq + 16) - every product below covers both.
+        QA8 wqa00, wqa01, wqa10, wqa11;   // Wq A tiles [dim half dh][K tile n]
+        coopMatLoad(wqa00, W1_QA8, wq, ENC_C, ROW);
+        coopMatLoad(wqa01, W1_QA8, wq + 16u * ENC_C, ENC_C, ROW);
+        coopMatLoad(wqa10, W1_QA8, wq + 16u, ENC_C, ROW);
+        coopMatLoad(wqa11, W1_QA8, wq + 16u * ENC_C + 16u, ENC_C, ROW);
+        // Q^T per token tile, narrow scope: only the two accumulators of one tile live (16 VGPR)
         QB8 qk00, qk01, qk10, qk11, qk20, qk21, qk30, qk31;   // qk<token tile><dim half>
         {
-            QC8 t00 = QC8(0.0), t01 = QC8(0.0), t10 = QC8(0.0), t11 = QC8(0.0);
-            QC8 t20 = QC8(0.0), t21 = QC8(0.0), t30 = QC8(0.0), t31 = QC8(0.0);
-            MMA(t00, wqa0_, xq00) MMA(t01, wqa1_, xq00)
-            MMA(t10, wqa0_, xq10) MMA(t11, wqa1_, xq10)
-            MMA(t20, wqa0_, xq20) MMA(t21, wqa1_, xq20)
-            MMA(t30, wqa0_, xq30) MMA(t31, wqa1_, xq30)
-            W1A_Q8(qk00, t00) W1A_Q8(qk01, t01) W1A_Q8(qk10, t10) W1A_Q8(qk11, t11)
-            W1A_Q8(qk20, t20) W1A_Q8(qk21, t21) W1A_Q8(qk30, t30) W1A_Q8(qk31, t31)
+            QC8 t0_ = QC8(0.0), t1_ = QC8(0.0);
+            MMA(t0_, wqa00, xq00) MMA(t1_, wqa01, xq00) MMA(t0_, wqa10, xq01) MMA(t1_, wqa11, xq01)
+            W1A_Q8(qk00, t0_) W1A_Q8(qk01, t1_)
         }
-        // V[tokens][dim half] = x Wv^T: A = the x^T register transpose, B = the head's Wv rows
-        QB8 wvb0_, wvb1_;
-        coopMatLoad(wvb0_, W1_VB8, wq, ENC_C, COL);
-        coopMatLoad(wvb1_, W1_VB8, wq + 16u * ENC_C, ENC_C, COL);
-        QB8 v800, v801, v810, v811, v820, v821, v830, v831;   // v8<token tile><dim half>
-#define W1A_VT(n) { QA8 a_; W1A_TA(a_, xq##n##0) QC8 u0_ = QC8(0.0), u1_ = QC8(0.0); \
-            MMA(u0_, a_, wvb0_) MMA(u1_, a_, wvb1_) W1A_Q8(v8##n##0, u0_) W1A_Q8(v8##n##1, u1_) }
-        W1A_VT(0) W1A_VT(1) W1A_VT(2) W1A_VT(3)
-#undef W1A_VT
+        {
+            QC8 t0_ = QC8(0.0), t1_ = QC8(0.0);
+            MMA(t0_, wqa00, xq10) MMA(t1_, wqa01, xq10) MMA(t0_, wqa10, xq11) MMA(t1_, wqa11, xq11)
+            W1A_Q8(qk10, t0_) W1A_Q8(qk11, t1_)
+        }
+        {
+            QC8 t0_ = QC8(0.0), t1_ = QC8(0.0);
+            MMA(t0_, wqa00, xq20) MMA(t1_, wqa01, xq20) MMA(t0_, wqa10, xq21) MMA(t1_, wqa11, xq21)
+            W1A_Q8(qk20, t0_) W1A_Q8(qk21, t1_)
+        }
+        {
+            QC8 t0_ = QC8(0.0), t1_ = QC8(0.0);
+            MMA(t0_, wqa00, xq30) MMA(t1_, wqa01, xq30) MMA(t0_, wqa10, xq31) MMA(t1_, wqa11, xq31)
+            W1A_Q8(qk30, t0_) W1A_Q8(qk31, t1_)
+        }
+        // V[tokens][dim half] = sum_n x Wv^T; quantized straight into A fragments (V^T, free transpose)
+        QB8 wvb00, wvb01, wvb10, wvb11;   // Wv B tiles [K tile n][dim half dh]
+        coopMatLoad(wvb00, W1_VB8, wq, ENC_C, COL);
+        coopMatLoad(wvb01, W1_VB8, wq + 16u * ENC_C, ENC_C, COL);
+        coopMatLoad(wvb10, W1_VB8, wq + 16u, ENC_C, COL);
+        coopMatLoad(wvb11, W1_VB8, wq + 16u * ENC_C + 16u, ENC_C, COL);
+        QA8 vt00, vt01, vt10, vt11, vt20, vt21, vt30, vt31;   // V^T A tiles [dim half][token tile]
+        {
+            QA8 a0_, a1_;
+            W1A_TA(a0_, xq00) W1A_TA(a1_, xq01)
+            QC8 u0_ = QC8(0.0), u1_ = QC8(0.0);
+            MMA(u0_, a0_, wvb00) MMA(u1_, a0_, wvb01) MMA(u0_, a1_, wvb10) MMA(u1_, a1_, wvb11)
+            W1A_Q8A(vt00, u0_) W1A_Q8A(vt01, u1_)
+        }
+        {
+            QA8 a0_, a1_;
+            W1A_TA(a0_, xq10) W1A_TA(a1_, xq11)
+            QC8 u0_ = QC8(0.0), u1_ = QC8(0.0);
+            MMA(u0_, a0_, wvb00) MMA(u1_, a0_, wvb01) MMA(u0_, a1_, wvb10) MMA(u1_, a1_, wvb11)
+            W1A_Q8A(vt10, u0_) W1A_Q8A(vt11, u1_)
+        }
+        {
+            QA8 a0_, a1_;
+            W1A_TA(a0_, xq20) W1A_TA(a1_, xq21)
+            QC8 u0_ = QC8(0.0), u1_ = QC8(0.0);
+            MMA(u0_, a0_, wvb00) MMA(u1_, a0_, wvb01) MMA(u0_, a1_, wvb10) MMA(u1_, a1_, wvb11)
+            W1A_Q8A(vt20, u0_) W1A_Q8A(vt21, u1_)
+        }
+        {
+            QA8 a0_, a1_;
+            W1A_TA(a0_, xq30) W1A_TA(a1_, xq31)
+            QC8 u0_ = QC8(0.0), u1_ = QC8(0.0);
+            MMA(u0_, a0_, wvb00) MMA(u1_, a0_, wvb01) MMA(u0_, a1_, wvb10) MMA(u1_, a1_, wvb11)
+            W1A_Q8A(vt30, u0_) W1A_Q8A(vt31, u1_)
+        }
         // S = Q_keys Q_own^T + bias per own tile: A = the key tile's transpose, B = the own tile
 #define W1A_S(s_, ot, j) { MH bh_; coopMatLoad(bh_, pc.bias.v, hd * 4096u + (ot) * 1024u + (j) * 16u, 64u, COL); s_ = QC8(ACC(bh_)); \
             IFK(j, ot) { QA8 a_; W1A_TA(a_, qk##j##0) MMA(s_, a_, qk##ot##0) W1A_TA(a_, qk##j##1) MMA(s_, a_, qk##ot##1) } }
@@ -35,18 +75,19 @@
 #define W1A_PB(pbj, pj, rf) { [[unroll]] for (int e = 0; e < 8; e += 2) { \
             vec2 w_ = vec2(float(pj[e]), float(pj[e + 1])) * (rf); \
             fe4m3vec2 q_ = qe4_pair32(w_); pbj[e] = q_.x, pbj[e + 1] = q_.y; } }
-        // O^T[dim half][own] = sum over key tiles V^T x P, then W_out (UT8 tail) into the oc tiles
-#define W1A_OKT(kt) { QA8 a_; W1A_TA(a_, v8##kt##0) MMA(oh0_, a_, pb##kt) W1A_TA(a_, v8##kt##1) MMA(oh1_, a_, pb##kt) }
+        // O^T[dim half][own] = sum over KEPT key tiles V^T x P (sparse guard restored)
+#define W1A_OKT(ot, kt) IFK(uint(ot), uint(kt)) { MMA(oh0_, vt##kt##0, pb##kt) MMA(oh1_, vt##kt##1, pb##kt) }
+        // W_out from the UT8 tail, this head's columns (hd * 32 offsets)
 #define W1A_OW(ot) { QB8 oh80_, oh81_; W1A_Q8(oh80_, oh0_) W1A_Q8(oh81_, oh1_) QA8 w_; \
-            coopMatLoad(w_, W1_WOUT8, 0u, ENC_X, ROW); MMA(oc##ot##0, w_, oh80_) \
-            coopMatLoad(w_, W1_WOUT8, 16u, ENC_X, ROW); MMA(oc##ot##0, w_, oh81_) \
-            coopMatLoad(w_, W1_WOUT8, 16u * ENC_X, ENC_X, ROW); MMA(oc##ot##1, w_, oh80_) \
-            coopMatLoad(w_, W1_WOUT8, 16u * ENC_X + 16u, ENC_X, ROW); MMA(oc##ot##1, w_, oh81_) }
+            coopMatLoad(w_, W1_WOUT8, hd * 32u, ENC_X, ROW); MMA(oc##ot##0, w_, oh80_) \
+            coopMatLoad(w_, W1_WOUT8, hd * 32u + 16u, ENC_X, ROW); MMA(oc##ot##0, w_, oh81_) \
+            coopMatLoad(w_, W1_WOUT8, 16u * ENC_X + hd * 32u, ENC_X, ROW); MMA(oc##ot##1, w_, oh80_) \
+            coopMatLoad(w_, W1_WOUT8, 16u * ENC_X + hd * 32u + 16u, ENC_X, ROW); MMA(oc##ot##1, w_, oh81_) }
 #define W1A_TAIL(ot) { float rf_ = float(RCP_SUM(sum)); \
             QB8 pb0, pb1, pb2, pb3; \
             W1A_PB(pb0, p0, rf_) W1A_PB(pb1, p1, rf_) W1A_PB(pb2, p2, rf_) W1A_PB(pb3, p3, rf_) \
             QC8 oh0_ = QC8(0.0), oh1_ = QC8(0.0); \
-            W1A_OKT(0) W1A_OKT(1) W1A_OKT(2) W1A_OKT(3) \
+            W1A_OKT(ot, 0) W1A_OKT(ot, 1) W1A_OKT(ot, 2) W1A_OKT(ot, 3) \
             W1A_OW(ot) }
 #define W1A_ATT(ot) if (lv##ot) { \
             QC8 s0_, s1_, s2_, s3_; \
@@ -65,15 +106,17 @@
             SM_SUM(sum, e2, p0, p1, p2, p3) \
             W1A_TAIL(ot) }
 #ifdef LT_SYM
-        // symmetric scores: each pair once through the FP8 products, exp in f16 registers
+        // symmetric scores: each pair once through the FP8 products. A = the KEY tile's
+        // transpose, B = the OWN tile (bias at T * 1024 + K * 16 holds [keys K][own T])
 #define W1A_EDIR(pT, T, K) { MH bh_; coopMatLoad(bh_, pc.bias.v, hd * 4096u + (T) * 1024u + (K) * 16u, 64u, COL); QC8 p_ = QC8(ACC(bh_)); \
-            QA8 a_; W1A_TA(a_, qk##T##0) MMA(p_, a_, qk##K##0) W1A_TA(a_, qk##T##1) MMA(p_, a_, qk##K##1) \
+            QA8 a_; W1A_TA(a_, qk##K##0) MMA(p_, a_, qk##T##0) W1A_TA(a_, qk##K##1) MMA(p_, a_, qk##T##1) \
             pT = MH(p_); \
             [[unroll]] for (int e = 0; e < 8; e += 2) { f16vec2 t_ = unpackFloat2x16(exp_bits2(f16vec2(pT[e], pT[e + 1]))); pT[e] = t_.x, pT[e + 1] = t_.y; } }
 #define W1A_EUP(T, K) MH e##T##K = MH(0.0); if (KEPT(uint(T), uint(K)) && (lv##T || lv##K)) W1A_EDIR(e##T##K, T, K)
 #define W1A_EOWN(pT, T) MH pT = MH(0.0); W1A_EDIR(pT, T, T)
-#define W1A_ELO(pT, T, K) MH pT = MH(0.0); if (KEPT(uint(T), uint(K))) { QB8 q_; W1A_Q8(q_, e##K##T) QA8 a_; W1A_TA(a_, q_) \
-            QC8 p_ = QC8(0.0); MMA(p_, a_, id8) pT = MH(p_); }
+        // the lower tiles reuse the f16 exp registers through the EXACT fp16 identity (never
+        // quantize the unnormalized exp into e4m3: it spans [6e-8, 65504], far past +-448/2^-9)
+#define W1A_ELO(pT, T, K) MH pT = MH(0.0); if (KEPT(uint(T), uint(K))) { MA a_; CPA(a_, e##K##T) MMA(pT, a_, idb) }
 #define W1A_ATTN(ot) if (lv##ot) { \
             SM_E2(e2, p0, p1, p2, p3) SM_SUMR(sum, e2, p0, p1, p2, p3) \
             W1A_TAIL(ot) }

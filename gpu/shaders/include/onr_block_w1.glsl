@@ -285,9 +285,11 @@ void main() {
 #define W1_VB8 E4View(uint64_t(pc.in_b) + uint64_t(2u * ENC_X * ENC_C)).v
 #define W1_WOUT8 E4View(uint64_t(pc.wout) + uint64_t(4u * ENC_C * ENC_X)).v
     // quantize an accumulator / fragment tile into a B fragment (dims preserved; f32 pairs in)
-#define W1A_Q8(b8, q) { [[unroll]] for (int i_ = 0; i_ < 16; i_ += 2) { fe4m3vec2 w1q_ = qe4_pair32(vec2(q[i_], q[i_ + 1])); b8[i_] = w1q_.x, b8[i_ + 1] = w1q_.y; } }
+#define W1A_Q8(b8, q) { [[unroll]] for (int i_ = 0; i_ < 8; i_ += 2) { fe4m3vec2 w1q_ = qe4_pair32(vec2(q[i_], q[i_ + 1])); b8[i_] = w1q_.x, b8[i_ + 1] = w1q_.y; } }
+    // quantize straight into an A fragment: same lane element order, transposed meaning (V -> V^T)
+#define W1A_Q8A(a8, q) { [[unroll]] for (int i_ = 0; i_ < 8; i_ += 2) { fe4m3vec2 w1q_ = qe4_pair32(vec2(q[i_], q[i_ + 1])); a8[i_] = w1q_.x, a8[i_ + 1] = w1q_.y; } }
     // register transpose: a B fragment's components copied into an A fragment (and back)
-#define W1A_TA(a8, b8) { [[unroll]] for (int i_ = 0; i_ < 16; ++i_) a8[i_] = b8[i_]; }
+#define W1A_TA(a8, b8) { [[unroll]] for (int i_ = 0; i_ < 8; ++i_) a8[i_] = b8[i_]; }
     // x^T quantized once for both heads (8 QB8 = 16 VGPR); dead tiles quantize garbage nobody reads
     QB8 xq00, xq01, xq10, xq11, xq20, xq21, xq30, xq31;
     W1A_Q8(xq00, x00) W1A_Q8(xq01, x01) W1A_Q8(xq10, x10) W1A_Q8(xq11, x11)
@@ -302,12 +304,6 @@ void main() {
     MB idb; { float16_t t_[8]; for (int i_ = 0; i_ < 8; ++i_) t_[i_] = 8u * hh + uint(i_) == (ln & 15u) ? 1.0hf : 0.0hf; PUTB(idb, t_) }
 #else
     MB idb; for (int i_ = 0; i_ < idb.length(); ++i_) idb[i_] = 8u * hh + uint(i_) == (ln & 15u) ? 1.0hf : 0.0hf;
-#endif
-#ifdef LT_W1A8
-    // LT_W1A8: the identity as an e4m3 B fragment (1.0 is an exact code, 0.0 the zero code)
-    QB8 id8; { [[unroll]] for (int i_ = 0; i_ < 16; i_ += 2) { \
-        vec2 v_ = vec2(8u * hh + uint(i_) == (ln & 15u) ? 1.0 : 0.0, 8u * hh + uint(i_ + 1) == (ln & 15u) ? 1.0 : 0.0); \
-        fe4m3vec2 e_ = qe4_pair32(v_); id8[i_] = e_.x, id8[i_ + 1] = e_.y; } }
 #endif
 #endif
 #ifdef LT_FAR1
