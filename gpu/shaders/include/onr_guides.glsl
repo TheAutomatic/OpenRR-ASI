@@ -29,7 +29,11 @@ vec4 gtex(GuideTab t, uint s, ivec2 p) {
     if ((((g.z >> 16) & 255u) & 4u) != 0u) return vec4(0.0);
     // NaN -> 0 before any clamp, as the ingest does (on AMD clamp() turns a NaN into -65504)
     vec4 c = texelFetch(tex[g.x], ivec2(g.w & 65535u, g.w >> 16) + p, 0);
+#ifdef LT_ATTR_TAB
+    return mix(c, vec4(0.0), greaterThan(floatBitsToUint(c) & uvec4(0x7fffffffu), uvec4(0x7f800000u)));
+#else
     return mix(c, vec4(0.0), vec4(greaterThan(floatBitsToUint(c) & uvec4(0x7fffffffu), uvec4(0x7f800000u))));
+#endif
 }
 // the guide is read from the game's texture (or is absent), not from its buffer
 bool gdirect(GuideTab t, uint s) { return (gflags(t, s) & 12u) != 0u; }
@@ -60,6 +64,9 @@ float16_t g_r16f(GuideTab t, uint s, ivec2 p, int w) {
 float g_depth(GuideTab t, ivec2 p, int w) {
     if (!gdirect(t, GS_DEPTH)) return F32Buf(t.buf[GS_DEPTH]).v[p.y * w + p.x];
     float d = gtex(t, GS_DEPTH, p).x;
+#ifdef LT_ATTR_TAB
+    if ((floatBitsToUint(d) & 0x7fffffffu) >= 0x7f800000u) d = 0.0;
+#endif
     if ((gflags(t, GS_DEPTH) & 2u) != 0u) {
         float den = d * t.proj.y - t.proj.x;
         d = abs(den) > 1e-20 ? (t.proj.z - d * t.proj.w) / den * t.depth_sign : 1e30;

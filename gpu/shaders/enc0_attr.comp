@@ -207,7 +207,10 @@ void depth9_read(ivec2 X, out float z[9]) {
     float d[9] = float[9](0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
     if ((((g.z >> 16) & 255u) & 4u) == 0u) {
         const ivec2 o = ivec2(g.w & 65535u, g.w >> 16);
-        [[unroll]] for (int k = 0; k < 9; ++k) d[k] = texelFetch(tex[g.x], o + q[k], 0).x;
+        [[unroll]] for (int k = 0; k < 9; ++k) {
+            float dk = texelFetch(tex[g.x], o + q[k], 0).x;
+            d[k] = (floatBitsToUint(dk) & 0x7fffffffu) >= 0x7f800000u ? 0.0 : dk;
+        }
     }
     z = d;
 }
@@ -426,7 +429,11 @@ vec2 reflection_mv(ivec2 X, vec3 n) {
     bool ok = abs(cw) > 1e-5;
     AP float iw = rcp_c(ok ? cw : 1.0);
     AP float sx = (ok ? cy * iw : 0.0) - fx, sy = (ok ? cz * iw : 0.0) - fy;
+#ifdef LT_ATTR_TAB
+    AP float ox = clamp(no_nan(sx), -256.0, 256.0) * C(0x300), oy = clamp(no_nan(sy), -256.0, 256.0) * C(0x304);
+#else
     AP float ox = clamp_nan(sx, 256.0) * C(0x300), oy = clamp_nan(sy, 256.0) * C(0x304);
+#endif
     return vec2(ox, oy);
 }
 

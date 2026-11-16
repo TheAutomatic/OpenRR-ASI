@@ -113,8 +113,13 @@ vec3 bicubic_hist(float px, float py) {
     PP float by = floor(py - 0.5) + 0.5;
     PP float fx = clamp(px - bx, 0.0, 1.0);
     PP float fy = clamp(py - by, 0.0, 1.0);
+#ifdef LT_POST_PAIR
+    int ix = clamp(int(trunc(fma(fx, 512.0, 0.5))), 0, 512);
+    int iy = clamp(int(trunc(fma(fy, 512.0, 0.5))), 0, 512);
+#else
     int ix = min(int(trunc(fma(fx, 512.0, 0.5))), 512);
     int iy = min(int(trunc(fma(fy, 512.0, 0.5))), 512);
+#endif
     vec4 tx = bicubic_row(ix), ty = bicubic_row(iy);
     PP float xm = pc.inv_size.x * (bx + tx.w);
     PP float ym = pc.inv_size.y * (by + ty.w);
@@ -441,7 +446,7 @@ void pair_cands(int X, int Y0, float fx, float fy) {
         g_wc[i] = w;
         PP float px = fx7 + cs[i].mx;
         PP float py = cs[i].my + fy10;
-        bool ok = !(px < 0.0) && !(px > float(pc.size.x)) && !(py < 0.0) && !(py > float(pc.size.y)) && (pc.reset & 1u) == 0u;
+        bool ok = px >= 0.0 && px <= float(pc.size.x) && py >= 0.0 && py <= float(pc.size.y) && (pc.reset & 1u) == 0u;
         bool same = false;
         [[unroll]] for (int k = 0; k < i; ++k)
             if (!same && cs[k].mx == cs[i].mx && cs[k].my == cs[i].my) { g_sl[i] = g_sl[k]; same = true; }
@@ -630,8 +635,13 @@ void pixel(int X, int Y, float fx, float fy, Splat sp, out vec3 out1, out vec3 o
 #endif
     PP float s1v = abs((o1.x + o1.y) + o1.z);
     PP float s2v = abs((o2.x + o2.y) + o2.z);
+#ifdef LT_POST_PAIR
+    out1 = (s1v < uintBitsToFloat(0x7f800000u)) ? o1 : net;
+    out2 = (s2v < uintBitsToFloat(0x7f800000u)) ? o2 : net;
+#else
     out1 = (s1v <= uintBitsToFloat(0x7f800000u)) ? o1 : net;
     out2 = (s2v <= uintBitsToFloat(0x7f800000u)) ? o2 : net;
+#endif
 }
 
 void main() {

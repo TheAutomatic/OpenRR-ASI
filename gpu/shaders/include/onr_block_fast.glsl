@@ -596,8 +596,8 @@ f16vec2 gelu2(f16vec2 x) {
 #if ENC_EMBED && ENC_F32 && !W1
 #error "enc0_attr_f writes the dithered 64-byte record (ATTR64), which only the W1 embed reads"
 #endif
-#if defined(LT_PV8) && (W1 || W2 || !TR || SPLIT != 1 || !FP8QV)
-#error "LT_PV8 requires TR && SPLIT == 1 && FP8QV && !W1 && !W2"
+#if defined(LT_PV8) && (W1 || (!W2 && !TR) || !FP8QV)
+#error "LT_PV8 requires (TR || W2) && FP8QV && !W1"
 #endif
 #if W1
 #include "onr_block_w1.glsl"
@@ -955,14 +955,24 @@ void main() {
 #if FP8QV
             uint64_t w8 = (hf == 0u ? uint64_t(pc.in_a) : uint64_t(pc.in_b)) + uint64_t(QV8_OFF);
             QC8 a0 = QC8(0.0), a1 = QC8(0.0);
+#ifdef LT_PV8
+            if (hf == 0u) {
+#define QV_T8(yn, n) W8STEP(a0, w8, hd * 32u * ENC_C + (n) * 16u, yn) W8STEP(a1, w8, (hd * 32u + 16u) * ENC_C + (n) * 16u, yn)
+                FOR_NY(QV_T8)
+                qh0 = MH(a0), qh1 = MH(a1);
+                coopMatStore(qh0, lds, qb + r0 * QST, QST, COL);
+                coopMatStore(qh1, lds, qb + r0 * QST + 16u, QST, COL);
+            } else {
+#define QV_T8_V(yn, n) { QA8 ya_; [[unroll]] for (int i_ = 0; i_ < 8; ++i_) ya_[i_] = (yn)[i_]; \
+                QB8 wb_; coopMatLoad(wb_, E4View(w8).v, hd * 32u * ENC_C + (n) * 16u, ENC_C, COL); a0 = coopMatMulAdd(ya_, wb_, a0); \
+                coopMatLoad(wb_, E4View(w8).v, (hd * 32u + 16u) * ENC_C + (n) * 16u, ENC_C, COL); a1 = coopMatMulAdd(ya_, wb_, a1); }
+                FOR_NY(QV_T8_V)
+                lds2[(vb >> 2) + rt * 64u + ln] = pv8_pack(a0);
+                lds2[(vb >> 2) + rt * 64u + 32u + ln] = pv8_pack(a1);
+            }
+#else
 #define QV_T8(yn, n) W8STEP(a0, w8, hd * 32u * ENC_C + (n) * 16u, yn) W8STEP(a1, w8, (hd * 32u + 16u) * ENC_C + (n) * 16u, yn)
             FOR_NY(QV_T8)
-#else
-            F16Buf wqv = F16Buf(hf == 0u ? uint64_t(pc.in_a) : uint64_t(pc.in_b));
-            ACC a0 = ACC(0.0), a1 = ACC(0.0);
-#define QV_T2(cn, xn, n) { MBP blo, bhi; XPREP(blo, bhi, xn)             WSTEP(a0, wqv.v, hd * 32u * ENC_C + (n) * 16u, ENC_C, blo, bhi) WSTEP(a1, wqv.v, (hd * 32u + 16u) * ENC_C + (n) * 16u, ENC_C, blo, bhi) }
-            FOR_NX(QV_T2)
-#endif
             qh0 = MH(a0), qh1 = MH(a1);
             if (hf == 0u) {
                 coopMatStore(qh0, lds, qb + r0 * QST, QST, COL);
@@ -971,6 +981,21 @@ void main() {
                 coopMatStore(qh0, lds, vb + r0, VST, ROW);
                 coopMatStore(qh1, lds, vb + 16u * VST + r0, VST, ROW);
             }
+#endif
+#else
+            F16Buf wqv = F16Buf(hf == 0u ? uint64_t(pc.in_a) : uint64_t(pc.in_b));
+            ACC a0 = ACC(0.0), a1 = ACC(0.0);
+#define QV_T2(cn, xn, n) { MBP blo, bhi; XPREP(blo, bhi, xn)             WSTEP(a0, wqv.v, hd * 32u * ENC_C + (n) * 16u, ENC_C, blo, bhi) WSTEP(a1, wqv.v, (hd * 32u + 16u) * ENC_C + (n) * 16u, ENC_C, blo, bhi) }
+            FOR_NX(QV_T2)
+            qh0 = MH(a0), qh1 = MH(a1);
+            if (hf == 0u) {
+                coopMatStore(qh0, lds, qb + r0 * QST, QST, COL);
+                coopMatStore(qh1, lds, qb + r0 * QST + 16u, QST, COL);
+            } else {
+                coopMatStore(qh0, lds, vb + r0, VST, ROW);
+                coopMatStore(qh1, lds, vb + 16u * VST + r0, VST, ROW);
+            }
+#endif
         }
 #else
 #if FP8QV

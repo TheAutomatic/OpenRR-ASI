@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -510,6 +511,28 @@ static uint32_t FrameForHashKey(const std::string& key)
     return UINT32_MAX;
 }
 
+static std::string JsonStrOrNull(const char* v)
+{
+    if (!v) return "null";
+    std::string out = "\"";
+    for (const unsigned char ch : std::string(v))
+    {
+        if (ch == '"' || ch == '\\') { out += '\\'; out += char(ch); }
+        else if (ch == '\n') out += "\\n";
+        else if (ch == '\r') out += "\\r";
+        else if (ch == '\t') out += "\\t";
+        else if (ch < 0x20)
+        {
+            char buf[8];
+            std::snprintf(buf, sizeof(buf), "\\u%04x", unsigned(ch));
+            out += buf;
+        }
+        else out += char(ch);
+    }
+    out += '"';
+    return out;
+}
+
 int RunMain(const Args& args)
 {
     const rr_ref::FixtureSuite suite = args.suite == "v2_motion" ? rr_ref::FixtureSuite::V2_Motion : rr_ref::FixtureSuite::V1;
@@ -543,6 +566,16 @@ int RunMain(const Args& args)
     else if (args.config == "exp-llpc") cfg = { "exp-llpc", 2, 1 };
     else Fail("unknown --config " + args.config);
 
+    if (!args.dumpFramesDir.empty() && !args.compareFramesDir.empty())
+    {
+        const fs::path dumpRoot = fs::weakly_canonical(args.dumpFramesDir);
+        const fs::path cmpRoot = fs::weakly_canonical(args.compareFramesDir);
+        const fs::path dumpSuite = fs::weakly_canonical(args.dumpFramesDir / args.suite);
+        const fs::path cmpSuite = fs::weakly_canonical(args.compareFramesDir / args.suite);
+        Require(dumpRoot != cmpRoot && dumpSuite != cmpSuite,
+                "--dump-frames and --compare-frames must not resolve to the same directory");
+    }
+
     fs::create_directories(args.outDir);
     std::ofstream csv(args.outDir / "per_frame.csv", std::ios::binary);
     csv << "case_id,frame,phase,rw,rh,reset,hash_gate,ref_file,psnr01_db,psnr_reinhard_db,rgb_rmse,max_abs,mean_abs,max_ulp,exact_half_pct,non_finite,diff_halfs,output_sha256\n";
@@ -556,7 +589,14 @@ int RunMain(const Args& args)
     }
     if (!args.dumpFramesDir.empty()) fs::create_directories(args.dumpFramesDir / args.suite);
     std::ostringstream summary;
-    summary << "{\n  \"suite\": \"" << rr_ref::FixtureVersionForSuite(suite) << "\",\n  \"config\": \"" << cfg.name << "\",\n  \"cases\": [\n";
+    summary << "{\n  \"suite\": \"" << rr_ref::FixtureVersionForSuite(suite) << "\",\n  \"config\": \"" << cfg.name << "\",\n"
+            << "  \"env\": {\n"
+            << "    \"ONR_RR_FLOW\": " << JsonStrOrNull(std::getenv("ONR_RR_FLOW")) << ",\n"
+            << "    \"ONR_RR_DEEP\": " << JsonStrOrNull(std::getenv("ONR_RR_DEEP")) << ",\n"
+            << "    \"ONR_RR_DEEP_SERIAL\": " << JsonStrOrNull(std::getenv("ONR_RR_DEEP_SERIAL")) << ",\n"
+            << "    \"ONR_RR_DEEP_PART\": " << JsonStrOrNull(std::getenv("ONR_RR_DEEP_PART")) << ",\n"
+            << "    \"ONR_RR_NO_SAMPLER\": " << JsonStrOrNull(std::getenv("ONR_RR_NO_SAMPLER")) << "\n  },\n"
+            << "  \"cases\": [\n";
 
     Dev dev;
     if (!args.noGpu) dev.Init();
@@ -848,15 +888,6 @@ int RunMain(const Args& args)
                     totalNonFinite += curNonFinite;
                     const std::string outSha = rr_ref::Sha256BytesHex(px.data(), px.size() * sizeof(uint16_t));
 
-                    if (!args.dumpFramesDir.empty())
-                    {
-                        char fn[256];
-                        std::snprintf(fn, sizeof(fn), "%s_f%03u.rgba16f", c.id.c_str(), f);
-                        std::ofstream df(args.dumpFramesDir / args.suite / fn, std::ios::binary);
-                        Require(bool(df), "cannot write dump frame " + std::string(fn));
-                        df.write(reinterpret_cast<const char*>(px.data()), std::streamsize(px.size() * sizeof(uint16_t)));
-                    }
-
                     const char* phase = f < c.steady_frames ? "steady" : "drs";
                     if (!args.compareFramesDir.empty())
                     {
@@ -878,6 +909,15 @@ int RunMain(const Args& args)
                                << cm.diff_halfs << ',' << cm.max_ulp << ',' << cm.exact_half_pct << ','
                                << cm.psnr01_db << ',' << cm.psnr_reinhard_db << ',' << cm.rgb_rmse << ','
                                << cm.max_abs << ',' << cm.mean_abs << '\n';
+                    }
+
+                    if (!args.dumpFramesDir.empty())
+                    {
+                        char fn[256];
+                        std::snprintf(fn, sizeof(fn), "%s_f%03u.rgba16f", c.id.c_str(), f);
+                        std::ofstream df(args.dumpFramesDir / args.suite / fn, std::ios::binary);
+                        Require(bool(df), "cannot write dump frame " + std::string(fn));
+                        df.write(reinterpret_cast<const char*>(px.data()), std::streamsize(px.size() * sizeof(uint16_t)));
                     }
 
                     char refn[64];

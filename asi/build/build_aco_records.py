@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import struct
 import subprocess
 
@@ -184,92 +185,120 @@ def main():
     if ns.sample_wait_zero_shaders:
         policy['sample_wait_zero_shaders'] = sorted(set(ns.sample_wait_zero_shaders))
     fingerprint = hashlib.sha256(ns.capture.read_bytes() + ns.toolchain.read_bytes() + Path(__file__).read_bytes() + json.dumps(policy,sort_keys=True).encode()).hexdigest()
-    for spv in files:
-        data = spv.read_bytes()
-        key = f'{fnv(data):016x}'
-        previous = manifest.get('records', {}).get(key)
-        record_path = root/(key+'.nrp')
-        if not ns.refresh and manifest.get('fingerprint') == fingerprint and previous and record_path.exists():
-            if previous.get('record_sha256') == hashlib.sha256(record_path.read_bytes()).hexdigest():
-                records[key] = previous
-                continue
-        prefix = raw/key
+    stage_root = root.parent / f'.{LAYOUT}.staging.{os.getpid()}'
+    shutil.rmtree(stage_root, ignore_errors=True)
+    stage_root.mkdir(parents=True, exist_ok=True)
+    try:
+        for spv in files:
+            data = spv.read_bytes()
+            key = f'{fnv(data):016x}'
+            previous = manifest.get('records', {}).get(key)
+            record_path = root/(key+'.nrp')
+            stage_record_path = stage_root/(key+'.nrp')
+            if not ns.refresh and manifest.get('fingerprint') == fingerprint and previous and record_path.exists():
+                cached_bytes = record_path.read_bytes()
+                if previous.get('record_sha256') == hashlib.sha256(cached_bytes).hexdigest():
+                    stage_record_path.write_bytes(cached_bytes)
+                    records[key] = previous
+                    continue
+            try:
+                env = dict(os.environ, VK_ICD_FILENAMES=cfg['icd'], LD_PRELOAD=cfg['shim'],
+                           AMDGPU_GPU_ID='gfx1201', MESA_SHADER_CACHE_DISABLE='true',
+                           LD_LIBRARY_PATH=cfg['library_path'], ONR_ACO_PRECISION=precision_by_stem.get(spv.stem, ns.precision))
+                env.pop('ONR_ACO_VECTOR_LOADS', None)
+                # Never inherit a global experimental setting into unrelated shaders.
+                for env_k, flag_set in (('ONR_ACO_CMAT_ADDRESS', ns.cmat_address_shaders),
+                                        ('ONR_ACO_CU_MODE', ns.cu_mode_shaders),
+                                        ('ONR_ACO_WGP_MODE', ns.wgp_mode_shaders),
+                                        ('ONR_ACO_SAMPLE_WAIT_ZERO', ns.sample_wait_zero_shaders)):
+                    env.pop(env_k, None)
+                    if spv.stem in flag_set:
+                        env[env_k] = '1'
+                if ns.matrix_loads == 'vector8': env['ONR_ACO_VECTOR_LOADS'] = '1'
+                env.pop('ONR_ACO_SHARED_CMAT', None)   # never leak a parent-env global into non-listed shaders
+                if ns.shared_cmat != 'off' and (not ns.shared_cmat_shaders or spv.stem in ns.shared_cmat_shaders):
+                    env['ONR_ACO_SHARED_CMAT'] = ns.shared_cmat
+                captures=[]
+                for suffix,sentinel in (('a', '0x13579bdf'), ('b', '0x2468ace1')):
+                    pair_prefix=raw/(key+'-'+suffix)
+                    for ext in ('.code','.json','.layouts'):
+                        pair_prefix.with_suffix(ext).unlink(missing_ok=True)
+                    env.update(ONR_ACO_CAPTURE=str(pair_prefix.resolve()), ONR_ACO_ADDR32_HI=sentinel)
+                    result=subprocess.run([str(ns.capture.resolve()),str(spv)],env=env,text=True,capture_output=True)
+                    log=result.stdout+result.stderr
+                    pair_prefix.with_suffix('.log').write_text(log)
+                    result.check_returncode()
+                    captures.append((json.loads(pair_prefix.with_suffix('.json').read_text()),pair_prefix.with_suffix('.code').read_bytes(),log,pair_prefix.with_suffix('.layouts').read_bytes()))
+                info,code,log,layouts=captures[0]
+                other_info,other,other_log,other_layouts=captures[1]
+                if layouts != other_layouts: raise ValueError('descriptor layouts differ between sentinel captures')
+                if info['wave_size'] != 32 or info['push_bytes'] > 244:
+                    raise ValueError('unsupported wave size or push range')
+                dims = dimensions(data)
+                if dims[0]*dims[1]*dims[2] != info['workgroup_size']:
+                    raise ValueError('workgroup mismatch')
+                code, address_report = adapt_code(code, other, info['exec_bytes'], info, other_info, (log,other_log))
+                record_data = pack(info, code, fnv(data))
+                stage_record_path.write_bytes(record_data)
+                records[key] = dict(info, spv=spv.name, spv_hash=key, code_hash=f'{fnv(code):016x}',
+                                    workgroup=list(dims), layout='views' if spv.stem.startswith('d3d_') else 'sampled',
+                                    cmat_address=spv.stem in ns.cmat_address_shaders,
+                                    cu_mode=spv.stem in ns.cu_mode_shaders,
+                                    wgp_mode=spv.stem in ns.wgp_mode_shaders,
+                                    sample_wait_zero=spv.stem in ns.sample_wait_zero_shaders,
+                                    shared_cmat=ns.shared_cmat if (ns.shared_cmat != 'off' and (not ns.shared_cmat_shaders or spv.stem in ns.shared_cmat_shaders)) else 'off',
+                                    record_sha256=hashlib.sha256(record_data).hexdigest(),
+                                    address_report=address_report, record=key+'.nrp',
+                                    precision=precision_by_stem.get(spv.stem, ns.precision))
+                print(f'{spv.name}: {key} {len(code)} bytes, {info["vgprs"]} VGPR, set0={info["set0"]}', flush=True)
+            except (ValueError, KeyError, OSError, subprocess.SubprocessError) as e:
+                failures.append(dict(spv=str(spv), error=str(e)))
+                print(f'{spv.name}: FAILED: {e}', flush=True)
+        output = dict(schema=1, target='gfx1201', layout_version=LAYOUT, wave_size=32, layout_push_bytes=256,
+                      mesa_commit=cfg['mesa_commit'], patch_version=cfg['patch_version'], fingerprint=fingerprint,
+                      compile_options=dict(subgroup=32, require_full_subgroups=True, features='gpu/src/vk.cpp Device::init', **policy),
+                      records=records, failures=failures)
+        failure_report = raw / 'failures.json'
+        msgpack_path = root / 'manifest.msgpack'
+        if failures:
+            failure_report.parent.mkdir(parents=True, exist_ok=True)
+            failure_report.write_text(json.dumps(output, indent=2) + '\n')
+            manifest_path.unlink(missing_ok=True)
+            msgpack_path.unlink(missing_ok=True)
+            raise SystemExit(f'{len(failures)} capture(s) failed; see {failure_report}')
+        failure_report.unlink(missing_ok=True)
+        stage_manifest = stage_root / 'manifest.json'
+        stage_manifest.write_text(json.dumps(output, indent=2)+'\n')
+        # Runtime index uses the existing PAL MessagePack codec; bind it to the reviewable JSON.
+        index = {k: output[k] for k in ('schema', 'target', 'layout_version', 'wave_size', 'layout_push_bytes', 'mesa_commit', 'patch_version')}
+        index['manifest_hash'] = fnv(stage_manifest.read_bytes())
+        index['records'] = {k: {f: r[f] for f in ('spv_hash', 'code_hash', 'workgroup', 'layout', 'record')}
+                            for k, r in records.items()}
+        (stage_root / 'manifest.msgpack').write_bytes(msgpack(index))
+        staged_nrps = {p.name: p for p in stage_root.glob('*.nrp')}
+        expected_nrps = {r['record'] for r in records.values()}
+        if set(staged_nrps) != expected_nrps:
+            raise ValueError('staged .nrp set mismatch')
+        for k, r in records.items():
+            if hashlib.sha256(staged_nrps[r['record']].read_bytes()).hexdigest() != r['record_sha256']:
+                raise ValueError(f'staged .nrp digest mismatch for {r["record"]}')
+        if not ns.capture_dir and raw.exists() and raw.parent == root:
+            os.replace(raw, stage_root / 'capture')
+        backup_root = root.parent / f'.{LAYOUT}.backup.{os.getpid()}'
+        shutil.rmtree(backup_root, ignore_errors=True)
+        had_root = root.exists()
+        if had_root:
+            os.replace(root, backup_root)
         try:
-            env = dict(os.environ, VK_ICD_FILENAMES=cfg['icd'], LD_PRELOAD=cfg['shim'],
-                       AMDGPU_GPU_ID='gfx1201', MESA_SHADER_CACHE_DISABLE='true',
-                       LD_LIBRARY_PATH=cfg['library_path'], ONR_ACO_PRECISION=precision_by_stem.get(spv.stem, ns.precision))
-            env.pop('ONR_ACO_VECTOR_LOADS', None)
-            # Never inherit a global experimental setting into unrelated shaders.
-            for env_k, flag_set in (('ONR_ACO_CMAT_ADDRESS', ns.cmat_address_shaders),
-                                    ('ONR_ACO_CU_MODE', ns.cu_mode_shaders),
-                                    ('ONR_ACO_WGP_MODE', ns.wgp_mode_shaders),
-                                    ('ONR_ACO_SAMPLE_WAIT_ZERO', ns.sample_wait_zero_shaders)):
-                env.pop(env_k, None)
-                if spv.stem in flag_set:
-                    env[env_k] = '1'
-            if ns.matrix_loads == 'vector8': env['ONR_ACO_VECTOR_LOADS'] = '1'
-            env.pop('ONR_ACO_SHARED_CMAT', None)   # never leak a parent-env global into non-listed shaders
-            if ns.shared_cmat != 'off' and (not ns.shared_cmat_shaders or spv.stem in ns.shared_cmat_shaders):
-                env['ONR_ACO_SHARED_CMAT'] = ns.shared_cmat
-            captures=[]
-            for suffix,sentinel in (('a', '0x13579bdf'), ('b', '0x2468ace1')):
-                pair_prefix=raw/(key+'-'+suffix)
-                for ext in ('.code','.json','.layouts'):
-                    pair_prefix.with_suffix(ext).unlink(missing_ok=True)
-                env.update(ONR_ACO_CAPTURE=str(pair_prefix.resolve()), ONR_ACO_ADDR32_HI=sentinel)
-                result=subprocess.run([str(ns.capture.resolve()),str(spv)],env=env,text=True,capture_output=True)
-                log=result.stdout+result.stderr
-                pair_prefix.with_suffix('.log').write_text(log)
-                result.check_returncode()
-                captures.append((json.loads(pair_prefix.with_suffix('.json').read_text()),pair_prefix.with_suffix('.code').read_bytes(),log,pair_prefix.with_suffix('.layouts').read_bytes()))
-            info,code,log,layouts=captures[0]
-            other_info,other,other_log,other_layouts=captures[1]
-            if layouts != other_layouts: raise ValueError('descriptor layouts differ between sentinel captures')
-            if info['wave_size'] != 32 or info['push_bytes'] > 244:
-                raise ValueError('unsupported wave size or push range')
-            dims = dimensions(data)
-            if dims[0]*dims[1]*dims[2] != info['workgroup_size']:
-                raise ValueError('workgroup mismatch')
-            code, address_report = adapt_code(code, other, info['exec_bytes'], info, other_info, (log,other_log))
-            record_data = pack(info, code, fnv(data))
-            record_path.write_bytes(record_data)
-            records[key] = dict(info, spv=spv.name, spv_hash=key, code_hash=f'{fnv(code):016x}',
-                                workgroup=list(dims), layout='views' if spv.stem.startswith('d3d_') else 'sampled',
-                                cmat_address=spv.stem in ns.cmat_address_shaders,
-                                cu_mode=spv.stem in ns.cu_mode_shaders,
-                                wgp_mode=spv.stem in ns.wgp_mode_shaders,
-                                sample_wait_zero=spv.stem in ns.sample_wait_zero_shaders,
-                                shared_cmat=ns.shared_cmat if (ns.shared_cmat != 'off' and (not ns.shared_cmat_shaders or spv.stem in ns.shared_cmat_shaders)) else 'off',
-                                record_sha256=hashlib.sha256(record_data).hexdigest(),
-                                address_report=address_report, record=key+'.nrp',
-                                precision=precision_by_stem.get(spv.stem, ns.precision))
-            print(f'{spv.name}: {key} {len(code)} bytes, {info["vgprs"]} VGPR, set0={info["set0"]}', flush=True)
-        except (ValueError, KeyError, OSError, subprocess.SubprocessError) as e:
-            failures.append(dict(spv=str(spv), error=str(e)))
-            print(f'{spv.name}: FAILED: {e}', flush=True)
-    output = dict(schema=1, target='gfx1201', layout_version=LAYOUT, wave_size=32, layout_push_bytes=256,
-                  mesa_commit=cfg['mesa_commit'], patch_version=cfg['patch_version'], fingerprint=fingerprint,
-                  compile_options=dict(subgroup=32, require_full_subgroups=True, features='gpu/src/vk.cpp Device::init', **policy),
-                  records=records, failures=failures)
-    failure_report = raw / 'failures.json'
-    msgpack_path = root / 'manifest.msgpack'
-    if failures:
-        failure_report.parent.mkdir(parents=True, exist_ok=True)
-        failure_report.write_text(json.dumps(output, indent=2) + '\n')
-        manifest_path.unlink(missing_ok=True)
-        msgpack_path.unlink(missing_ok=True)
-        raise SystemExit(f'{len(failures)} capture(s) failed; see {failure_report}')
-    failure_report.unlink(missing_ok=True)
-    manifest_path.write_text(json.dumps(output, indent=2)+'\n')
-    # Runtime index uses the existing PAL MessagePack codec; bind it to the reviewable JSON.
-    index = {k: output[k] for k in ('schema', 'target', 'layout_version', 'wave_size', 'layout_push_bytes', 'mesa_commit', 'patch_version')}
-    index['manifest_hash'] = fnv(manifest_path.read_bytes())
-    index['records'] = {k: {f: r[f] for f in ('spv_hash', 'code_hash', 'workgroup', 'layout', 'record')}
-                        for k, r in records.items()}
-    msgpack_path.write_bytes(msgpack(index))
-    for stale in root.glob('*.nrp'):
-        if stale.stem not in records:
-            stale.unlink()
+            os.replace(stage_root, root)
+        except BaseException:
+            if had_root and backup_root.exists() and not root.exists():
+                os.replace(backup_root, root)
+            raise
+        finally:
+            shutil.rmtree(backup_root, ignore_errors=True)
+    finally:
+        shutil.rmtree(stage_root, ignore_errors=True)
 
 if __name__ == '__main__':
     main()

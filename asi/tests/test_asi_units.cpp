@@ -24,6 +24,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <exception>
@@ -1280,9 +1281,65 @@ static int test_d3d12_gpu_and_engine() {
                     if (e == 0x1Fu) return u32_to_f32(s | 0x7F800000u | (m << 13));
                     return u32_to_f32(s | ((e + 112u) << 23) | (m << 13));
                 };
+
+                // Manifest precision pin: all 4 downsample*_lt kernels must stay on 'global' while 37 _lt/_lx kernels use 'native'.
+                {
+                    const char* aco_env = std::getenv("ONR_ACO_DIR");
+                    const std::filesystem::path aco_dir = (aco_env && *aco_env)
+                        ? std::filesystem::path(aco_env)
+                        : std::filesystem::path(spv_dir_str).parent_path() / "aco" / "gfx1201" / "openrr-d3d12-v1";
+                    const std::filesystem::path mf_path = aco_dir / "manifest.json";
+                    std::ifstream mf_in(mf_path, std::ios::binary);
+                    if (!mf_in) {
+                        std::fprintf(stderr, "FAIL: NFMA cannot open manifest %s\n", mf_path.string().c_str());
+                        k2_failed = true;
+                    } else {
+                        const std::string mf_txt((std::istreambuf_iterator<char>(mf_in)), std::istreambuf_iterator<char>());
+                        auto prec_of = [&](const std::string& stem) -> std::string {
+                            const std::string needle = "\"spv\": \"" + stem + ".spv\"";
+                            size_t pos = mf_txt.find(needle);
+                            if (pos == std::string::npos) return "";
+                            size_t end = mf_txt.find("\n    }", pos);
+                            size_t pp = mf_txt.find("\"precision\": \"", pos);
+                            if (pp == std::string::npos || (end != std::string::npos && pp > end)) return "";
+                            pp += 14;
+                            size_t pe = mf_txt.find('"', pp);
+                            return pe == std::string::npos ? "" : mf_txt.substr(pp, pe - pp);
+                        };
+                        for (const char* gs : {"downsample_lt", "downsample_tl_lt", "d3d_downsample_lt", "d3d_downsample_tl_lt"}) {
+                            const std::string got = prec_of(gs);
+                            if (got != "global") {
+                                std::fprintf(stderr, "FAIL: NFMA manifest %s precision='%s' (expected global)\n", gs, got.c_str());
+                                k2_failed = true;
+                            }
+                        }
+                        const char* native_stems[] = {
+                            "post_f_lt", "d3d_enc0_attr_f_lt", "d3d_enc0_attr_f_w_lt", "enc0_attr_f_lt", "enc0_attr_f_w_lt",
+                            "post_dlt_f_lt", "dec_head_32_64_f_lt", "dec_head_32_64_f_lx", "enc0_stage_32_64_f_lt",
+                            "enc0_stage_32_64_f_lx", "enc0_stage_32_64_f_w_lt", "enc0_stage_32_64_f_w_lx",
+                            "dec_up_32_64_64_f_lt", "dec_up_32_64_64_f_lx", "enc_stage_64_64_96_f_lt",
+                            "dec_up_64_64_96_f_lt", "dec_dfn_64_64_f_lt", "enc_stage_96_128_128_f_lt",
+                            "enc_stage_96_128_128_fl_lt", "dec_up_96_128_128_f_lt", "dec_up_96_128_128_fl_lt",
+                            "dec_dfn_96_128_f_lt", "dec_dfn_96_128_fl_lt", "enc_stage_128_128_160_f_lt",
+                            "enc_stage_128_128_160_fl_lt", "dec_up_128_128_160_fl_lt", "dec_up_128_128_160_f_lt",
+                            "dec_dfn_128_128_f_lt", "dec_dfn_128_128_fl_lt", "dec_dfn_160_256_fl_lt",
+                            "dec_dfn_160_256_f_lt", "enc_stage_160_256_0_fl_lt", "enc_stage_160_256_0_f_lt",
+                            "enc_stage_160_256_160_fl_lt", "enc_stage_160_256_160_f_lt",
+                            "dec_up_160_256_160_f_lt", "dec_up_160_256_160_fl_lt"
+                        };
+                        for (const char* ns : native_stems) {
+                            const std::string got = prec_of(ns);
+                            if (got != "native") {
+                                std::fprintf(stderr, "FAIL: NFMA manifest %s precision='%s' (expected native)\n", ns, got.c_str());
+                                k2_failed = true;
+                            }
+                        }
+                    }
+                }
+
                 onr::Kernels k_ds_global, k_ds_native;
-                k_ds_global.load(d3d, spv_dir, {"downsample"});
-                k_ds_native.load_lite(d3d, spv_dir, {"downsample"});
+                k_ds_global.load(d3d, spv_dir, {"downsample", "downsample_tl", "d3d_downsample", "d3d_downsample_tl"});
+                k_ds_native.load_lite(d3d, spv_dir, {"downsample", "downsample_tl", "d3d_downsample", "d3d_downsample_tl"});
 
                 constexpr int kDsW = 24, kDsH = 24, kOutW = 16, kOutH = 16;
                 onr::Buffer ds_rg = d3d.create(size_t(kDsW) * kDsH * 4);
@@ -1316,7 +1373,7 @@ static int test_d3d12_gpu_and_engine() {
                     q_n = on[cidx];
                 };
 
-                // Sub-test A: half_rz FP16 grid, subnormal, 65504 boundary & midpoint tie-toward-zero sweep
+                // Sub-test A: half_rz FP16 grid, subnormal, 65600 overflow->0x7BFF clamp & midpoint tie-toward-zero sweep
                 d3d.fill(ds_rg, 0x3C003C00u);   // uniform 1.0hf -> clamped filter v == 1.0f exact
                 d3d.fill(ds_b,  0x3C003C00u);
                 const float ds_t = (1.0f * u32_to_f32(0x4031c71cu)) * u32_to_f32(0x40549a78u);
@@ -1363,7 +1420,7 @@ static int test_d3d12_gpu_and_engine() {
                         k2_failed = true;
                     }
                 }
-                // Above max normal (65520..65600 -> float16_t +Inf decremented by half_rz to 0x7bff = 65504.0hf) and subnormals
+                // Above max normal (65504.0 = 0x7bff is exact; 65520..65600 -> float16_t +Inf decremented by half_rz to 0x7bff) and subnormals
                 {
                     uint16_t q_max = 0, q_sub1 = 0, q_sub2 = 0, q_zero = 0;
                     check_ds_target(65600.0, q_max);
@@ -1377,7 +1434,7 @@ static int test_d3d12_gpu_and_engine() {
                     }
                 }
 
-                // Sub-test B: -0.0, +0.0, FP16 subnormals, and +-65504 checkerboard through native downsample_lt vs global downsample
+                // Sub-test B: -0.0, +0.0, FP16 subnormals, and +-65504 checkerboard through downsample_lt vs global downsample
                 std::vector<uint32_t> rg_pat(size_t(kDsW) * kDsH);
                 std::vector<uint16_t> b_pat(size_t(kDsW) * kDsH);
                 const uint16_t corner_vals[] = { 0x8000u /*-0*/, 0x0001u /*subnorm min*/, 0x03FFu /*subnorm max*/, 0x7BFFu /*+65504*/, 0xFBFFu /*-65504*/ };
@@ -1405,56 +1462,184 @@ static int test_d3d12_gpu_and_engine() {
                     std::fprintf(stderr, "FAIL: NFMA native vs global downsample had %zu bit mismatches in sweep\n", ds_parity_mismatches);
                     k2_failed = true;
                 }
+
+                // Sub-test B2: Cover downsample_tl_lt, d3d_downsample_lt, and d3d_downsample_tl_lt (65600 clamp + -0.0/subnorm/+-65504)
+                {
+                    const uint32_t uav_pitch = ((kOutW * 8u) + 255u) & ~255u;
+                    D3D12_HEAP_PROPERTIES hp_uav{D3D12_HEAP_TYPE_DEFAULT};
+                    D3D12_RESOURCE_DESC rd_uav{};
+                    rd_uav.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+                    rd_uav.Width = kOutW; rd_uav.Height = kOutH; rd_uav.DepthOrArraySize = 1; rd_uav.MipLevels = 1;
+                    rd_uav.Format = DXGI_FORMAT_R16G16B16A16_FLOAT; rd_uav.SampleDesc = {1, 0};
+                    rd_uav.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+                    ID3D12Resource* uav_tex = nullptr;
+                    if (FAILED(dev->CreateCommittedResource(&hp_uav, D3D12_HEAP_FLAG_NONE, &rd_uav, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&uav_tex)))) {
+                        std::fprintf(stderr, "FAIL: NFMA could not create UAV texture\n");
+                        k2_failed = true;
+                    } else {
+                        onr::Buffer uav_rb = d3d.create(size_t(uav_pitch) * kOutH);
+                        onr::Buffer tl_buf = d3d.create(size_t(kDsW) * kDsH * 8);
+                        onr::Buffer pmv_buf = d3d.create(size_t(kDsW) * kDsH * 8);
+                        onr::Buffer hist_in = d3d.create(size_t(kOutW) * kOutH * 8);
+                        onr::Buffer hist_out = d3d.create(size_t(kOutW) * kOutH * 8);
+                        onr::Buffer op_buf = d3d.create(size_t(kDsW) * kDsH * 8);
+                        onr::Buffer op_hi = d3d.create(size_t(kOutW) * kOutH * 8);
+                        onr::Buffer op_ho = d3d.create(size_t(kOutW) * kOutH * 8);
+                        d3d.fill(tl_buf, 0x38003800u);  // 0.5hf premult
+                        d3d.fill(op_buf, 0x38003800u);
+                        d3d.fill(ds_rg, 0x3C003C00u);
+                        d3d.fill(ds_b, 0x3C003C00u);
+                        const float exp_ovf = float(double(ds_num) / 65600.0);
+                        const float exp_tl_ovf = float(double(ds_num) / 131200.0);
+                        d3d.upload(ds_exp, &exp_ovf, 4);
+                        const float exp_prev = 1.0f;
+                        d3d.upload(ds_exp, &exp_prev, 4, 4);
+
+                        auto check_tex_uav = [&](const char* kname, const onr::Kernels& ks, bool is_tl) {
+                            d3d.begin_own();
+                            d3d.uav(uav_tex, 16, DXGI_FORMAT_R16G16B16A16_FLOAT);
+                            if (!is_tl) {
+                                onr::DownsamplePC pc{ds_rg.addr, ds_b.addr, 0ull, ds_exp.addr,
+                                                     {kDsW, kDsH}, {kOutW, kOutH}, {0, 0}, {kOutW, kOutH}, {kDsW, kDsH}, {0, kDsW}};
+                                d3d.dispatch(ks[kname], &pc, sizeof pc, (kOutW + 15) / 16, (kOutH + 15) / 16);
+                            } else {
+                                onr::DownsampleTlPC pc{{ds_rg.addr, ds_b.addr, 0ull, ds_exp.addr,
+                                    {kDsW, kDsH}, {kOutW, kOutH}, {0, 0}, {kOutW, kOutH}, {kDsW, kDsH}, {0, kDsW}},
+                                    tl_buf.addr, pmv_buf.addr, hist_in.addr, hist_out.addr, {kDsW, kDsH},
+                                    {1.5f, 1.5f}, {0.f, 0.f}, {0.f, 0.f}, {1.f, 1.f}, 0.25f, 1u,
+                                    0ull, {}, {}, op_buf.addr, op_hi.addr, op_ho.addr, 1u, 0u, 0u};
+                                d3d.dispatch(ks[kname], &pc, sizeof pc, (kOutW + 15) / 16, (kOutH + 15) / 16);
+                            }
+                            d3d.copy_texture_to_buffer(uav_tex, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, uav_rb, 0, uav_pitch, 0, 0, kOutW, kOutH);
+                            d3d.submit_own();
+                            std::vector<uint8_t> raw_rb(size_t(uav_pitch) * kOutH);
+                            d3d.download(uav_rb, raw_rb.data(), raw_rb.size());
+                            std::vector<uint16_t> out_px(size_t(kOutW) * kOutH * 4);
+                            for (int y = 0; y < kOutH; ++y)
+                                std::memcpy(out_px.data() + size_t(y) * kOutW * 4, raw_rb.data() + size_t(y) * uav_pitch, size_t(kOutW) * 8);
+                            return out_px;
+                        };
+                        auto run_tl_buf = [&](const onr::Kernels& ks) {
+                            onr::DownsampleTlPC pc{{ds_rg.addr, ds_b.addr, &ks == &k_ds_global ? ds_out_g.addr : ds_out_n.addr, ds_exp.addr,
+                                {kDsW, kDsH}, {kOutW, kOutH}, {0, 0}, {kOutW, kOutH}, {kDsW, kDsH}, {0, kDsW}},
+                                tl_buf.addr, pmv_buf.addr, hist_in.addr, hist_out.addr, {kDsW, kDsH},
+                                {1.5f, 1.5f}, {0.f, 0.f}, {0.f, 0.f}, {1.f, 1.f}, 0.25f, 1u,
+                                0ull, {}, {}, op_buf.addr, op_hi.addr, op_ho.addr, 1u, 0u, 0u};
+                            d3d.begin_own();
+                            d3d.dispatch(ks["downsample_tl"], &pc, sizeof pc, (kOutW + 15) / 16, (kOutH + 15) / 16);
+                            d3d.submit_own();
+                            std::vector<uint16_t> out_px(size_t(kOutW) * kOutH * 4);
+                            d3d.download(pc.d.dst == ds_out_g.addr ? ds_out_g : ds_out_n, out_px.data(), out_px.size() * 2);
+                            return out_px;
+                        };
+                        auto check_finite_and_max = [&](const char* tag, const std::vector<uint16_t>& a, const std::vector<uint16_t>& b, uint16_t expect_c) {
+                            size_t nf = 0;
+                            for (uint16_t h : b) if ((h & 0x7C00u) == 0x7C00u) ++nf;
+                            const size_t cidx = (size_t(8) * kOutW + 8u) * 4u;
+                            if (nf != 0 || a[cidx] != expect_c || b[cidx] != expect_c) {
+                                std::fprintf(stderr, "FAIL: NFMA %s 65600 clamp (nf=%zu global=0x%04x lt=0x%04x want=0x%04x)\n",
+                                             tag, nf, a[cidx], b[cidx], expect_c);
+                                k2_failed = true;
+                            }
+                        };
+                        check_finite_and_max("d3d_downsample_lt", check_tex_uav("d3d_downsample", k_ds_global, false), check_tex_uav("d3d_downsample", k_ds_native, false), 0x7BFFu);
+                        d3d.upload(ds_exp, &exp_tl_ovf, 4);
+                        check_finite_and_max("downsample_tl_lt", run_tl_buf(k_ds_global), run_tl_buf(k_ds_native), 0x7BFFu);
+                        check_finite_and_max("d3d_downsample_tl_lt", check_tex_uav("d3d_downsample_tl", k_ds_global, true), check_tex_uav("d3d_downsample_tl", k_ds_native, true), 0x7BFFu);
+                        for (onr::Buffer* b : {&uav_rb, &tl_buf, &pmv_buf, &hist_in, &hist_out, &op_buf, &op_hi, &op_ho}) d3d.destroy(*b);
+                        uav_tex->Release();
+                    }
+                }
                 for (onr::Buffer* db : {&ds_rg, &ds_b, &ds_exp, &ds_out_g, &ds_out_n}) d3d.destroy(*db);
                 k_ds_native.unload(d3d);
                 k_ds_global.unload(d3d);
 
-                // Sub-test C: Full 22-kernel native _lt pipeline stress with -0.0, min subnormals, and +-65504
+                // Sub-test C2: Retained native pooled_history2_lt + full 22-kernel New=1 (_lt) AND Fast=2 (_lx) stress (-0.0, subnorm, +-65504)
+                {
+                    onr::Kernels k_ph_g, k_ph_n;
+                    k_ph_g.load(d3d, spv_dir, {"pooled_history2"});
+                    k_ph_n.load_lite(d3d, spv_dir, {"pooled_history2"});
+                    onr::Buffer ph_in = d3d.create(32u * 32u * 4u), ph_og = d3d.create(16u * 16u * 4u), ph_on = d3d.create(16u * 16u * 4u);
+                    for (uint32_t pat : {0x80008000u, 0x000103FFu, 0x7BFFFBFFu}) {
+                        d3d.fill(ph_in, pat);
+                        d3d.begin_own();
+                        k_ph_g.pooled_history2(d3d, {ph_in.addr, ph_og.addr, {32, 32}, {16, 16}});
+                        k_ph_n.pooled_history2(d3d, {ph_in.addr, ph_on.addr, {32, 32}, {16, 16}});
+                        d3d.submit_own();
+                        std::vector<uint16_t> vg(16u * 16u * 2), vn(16u * 16u * 2);
+                        d3d.download(ph_og, vg.data(), vg.size() * 2);
+                        d3d.download(ph_on, vn.data(), vn.size() * 2);
+                        for (uint16_t h : vn) {
+                            if ((h & 0x7C00u) == 0x7C00u) {
+                                std::fprintf(stderr, "FAIL: NFMA pooled_history2_lt non-finite half 0x%04x pat=0x%08x\n", h, pat);
+                                k2_failed = true;
+                                break;
+                            }
+                        }
+                    }
+                    for (onr::Buffer* b : {&ph_in, &ph_og, &ph_on}) d3d.destroy(*b);
+                    k_ph_n.unload(d3d);
+                    k_ph_g.unload(d3d);
+                }
+
+                onr::Kernels k_lx;
+                k_lx.load_lite(d3d, spv_dir, names, "_lx");
+                k_lx.load_lite(d3d, spv_dir, names, "_lt");
+                k_lx.load_lite(d3d, spv_dir, flow_names, "_lt");
+
                 eng.resize(r_a, out_sz);
                 eng.set_fast(true);
-                eng.set_lite(&k_lite);
-                eng.set_lite_on(true);
-                ef.render = r_a;
-                ef.output = out_sz;
-                const uint32_t stress_fills[] = { 0x80008000u /*-0.0*/, 0x00010001u /*subnorm min*/, 0x7BFF7BFFu /*+65504*/ };
-                std::vector<uint16_t> stress_a, stress_b;
-                for (size_t si = 0; si < 3; ++si) {
-                    const uint32_t col_w = stress_fills[si];
-                    d3d.begin_batch();
-                    d3d.fill(b_col, col_w);
-                    d3d.fill(b_alb, 0x80808080u);
-                    d3d.fill(b_spc, 0x20202020u);
-                    d3d.fill(b_nrm, 0x00003C00u);
-                    d3d.fill(b_rgh, 0x38003800u);
-                    d3d.fill(b_dep, 0x3F800000u);
-                    d3d.fill(b_mv, 0u);
-                    d3d.fill(b_hit, 0x38003800u);
-                    d3d.fill(b_out, 0u);
-                    d3d.end_batch();
-                    const int repeats = (si == 2) ? 10 : 1;
-                    for (int rep = 0; rep < repeats; ++rep) {
-                        ef.reset = (si != 2) || (rep == 0 || rep == 1 || rep == 9);
-                        d3d.begin_own();
-                        eng.record(ef, g, b_out.addr);
-                        d3d.submit_own();
-                        std::vector<uint16_t> sout(size_t(out_sz.x) * out_sz.y * 4);
-                        d3d.download(b_out, sout.data(), sout.size() * 2);
-                        size_t s_nf = 0;
-                        for (uint16_t h : sout) if ((h & 0x7C00u) == 0x7C00u) ++s_nf;
-                        if (s_nf != 0) {
-                            std::fprintf(stderr, "FAIL: NFMA k_lite full pipeline non_finite=%zu on fill=0x%08x rep=%d\n", s_nf, col_w, rep);
-                            k2_failed = true;
+                const uint32_t stress_fills[] = { 0x80008000u /*-0.0*/, 0x00010001u /*subnorm min*/, 0x7BFF7BFFu /*+65504*/, 0xFBFFFBFFu /*-65504*/ };
+                for (int mode_idx = 0; mode_idx < 2; ++mode_idx) {
+                    const bool is_lx = (mode_idx == 1);
+                    eng.set_lite(is_lx ? &k_lx : &k_lite);
+                    eng.set_deep_on(is_lx);
+                    eng.set_lite_on(true);
+                    ef.render = r_a;
+                    ef.output = out_sz;
+                    std::vector<uint16_t> stress_a, stress_b;
+                    for (size_t si = 0; si < 4; ++si) {
+                        const uint32_t col_w = stress_fills[si];
+                        d3d.begin_batch();
+                        d3d.fill(b_col, col_w);
+                        d3d.fill(b_alb, 0x80808080u);
+                        d3d.fill(b_spc, 0x20202020u);
+                        d3d.fill(b_nrm, 0x00003C00u);
+                        d3d.fill(b_rgh, 0x38003800u);
+                        d3d.fill(b_dep, 0x3F800000u);
+                        d3d.fill(b_mv, 0u);
+                        d3d.fill(b_hit, 0x38003800u);
+                        d3d.fill(b_out, 0u);
+                        d3d.end_batch();
+                        const int repeats = (si == 2) ? 10 : 1;
+                        for (int rep = 0; rep < repeats; ++rep) {
+                            ef.reset = (si != 2) || (rep == 0 || rep == 1 || rep == 9);
+                            d3d.begin_own();
+                            eng.record(ef, g, b_out.addr);
+                            d3d.submit_own();
+                            std::vector<uint16_t> sout(size_t(out_sz.x) * out_sz.y * 4);
+                            d3d.download(b_out, sout.data(), sout.size() * 2);
+                            size_t s_nf = 0;
+                            for (uint16_t h : sout) if ((h & 0x7C00u) == 0x7C00u) ++s_nf;
+                            if (s_nf != 0) {
+                                std::fprintf(stderr, "FAIL: NFMA %s pipeline non_finite=%zu on fill=0x%08x rep=%d\n",
+                                             is_lx ? "k_lx" : "k_lite", s_nf, col_w, rep);
+                                k2_failed = true;
+                            }
+                            if (si == 2 && rep == 1) stress_a = std::move(sout);
+                            else if (si == 2 && rep == 9) stress_b = std::move(sout);
                         }
-                        if (si == 2 && rep == 1) stress_a = std::move(sout);
-                        else if (si == 2 && rep == 9) stress_b = std::move(sout);
+                    }
+                    if (stress_a.empty() || stress_a != stress_b) {
+                        std::fprintf(stderr, "FAIL: NFMA %s 65504 8-frame phase-aligned repeat run non-deterministic\n", is_lx ? "k_lx" : "k_lite");
+                        k2_failed = true;
                     }
                 }
-                if (stress_a.empty() || stress_a != stress_b) {
-                    std::fprintf(stderr, "FAIL: NFMA k_lite 65504 8-frame phase-aligned repeat run non-deterministic\n");
-                    k2_failed = true;
-                }
+                eng.set_deep_on(false);
+                eng.set_lite(&k_lite);
+                k_lx.unload(d3d);
                 if (!k2_failed) {
-                    std::printf("[PASS] Item NFMA (native ACO FP16 FMA & half_rz: 0/%zu downsample bit mismatches, 4 odd-tie + subnorm + 65504 + -0.0 checks, 22-kernel finite & deterministic)\n",
+                    std::printf("[PASS] Item NFMA (native ACO FP16 FMA & half_rz: manifest 4 global + 37 native, 0/%zu downsample_lt mismatches, tl/d3d_uav/pooled_history2_lt, 22-kernel New+Fast -0.0/subnorm/+-65504/65600 finite & deterministic)\n",
                                 size_t(4 * 14 + 4));
                 }
             }
@@ -1590,6 +1775,7 @@ static int test_d3d12_gpu_and_engine() {
                         OnrRrNotifyD3d12AllocatorReset(sat_alloc);
                         OnrRrNotifyD3d12AllocatorReleased(sat_alloc);
                         sat_alloc->Release();
+
                         for (ID3D12Resource* r : {t_col, t_alb, t_spc, t_nrm, t_rgh, t_dep, t_mv, t_out})
                             if (r) r->Release();
                         api4.v3.v2.v1.Destroy(rt);
@@ -1615,6 +1801,330 @@ static int test_d3d12_gpu_and_engine() {
                         }
                         std::printf("[PASS] Item #3/#4 (D3D12 ONR_RR_BUSY saturation & >127-frame allocator reset loop): %d in-flight slots accepted, 128th returned ONR_RR_BUSY (%d), 135 post-reset Records OK\n",
                                     ok_count, busy_rc);
+                    }
+
+                    // ---- Item NFMA Direct D3D12 guides: NaN / +-Inf / -0.0 / subnormal / +-65504 stress in a fresh context ----
+                    // (exercises native d3d_ae + d3d_enc0_attr_f_lt + all _lt/_lx + post_f_lt + d3d_downsample_lt).
+                    const UINT w_in = 512, h_in = 288, w_out = 1024, h_out = 576;
+                    OnrRrCreateInfo ci_nf = ci;
+                    ci_nf.max_render_width = w_in;
+                    ci_nf.max_render_height = h_in;
+                    ci_nf.output_width = w_out;
+                    ci_nf.output_height = h_out;
+                    void* rt_nf = nullptr;
+                    if (api4.v3.v2.v1.Create(&ci_nf, &rt_nf) == ONR_RR_OK && rt_nf) {
+                        bool nf_guides_ok = true;
+                        const uint32_t srv_st = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+                        auto make_nf_tex = [&](UINT tw, UINT th, DXGI_FORMAT fmt, bool uav) {
+                            D3D12_HEAP_PROPERTIES hp{D3D12_HEAP_TYPE_DEFAULT};
+                            D3D12_RESOURCE_DESC rd{};
+                            rd.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+                            rd.Width = tw; rd.Height = th;
+                            rd.DepthOrArraySize = 1; rd.MipLevels = 1;
+                            rd.Format = fmt; rd.SampleDesc = {1, 0};
+                            if (uav) rd.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+                            ID3D12Resource* r = nullptr;
+                            dev->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &rd,
+                                uav ? D3D12_RESOURCE_STATE_UNORDERED_ACCESS : D3D12_RESOURCE_STATES(srv_st),
+                                nullptr, IID_PPV_ARGS(&r));
+                            return r;
+                        };
+                        ID3D12Resource* t_col = make_nf_tex(w_in, h_in, DXGI_FORMAT_R16G16B16A16_FLOAT, false);
+                        ID3D12Resource* t_alb = make_nf_tex(w_in, h_in, DXGI_FORMAT_R8G8B8A8_UNORM, false);
+                        ID3D12Resource* t_spc = make_nf_tex(w_in, h_in, DXGI_FORMAT_R8G8B8A8_UNORM, false);
+                        ID3D12Resource* t_nrm = make_nf_tex(w_in, h_in, DXGI_FORMAT_R16G16B16A16_FLOAT, false);
+                        ID3D12Resource* t_dep = make_nf_tex(w_in, h_in, DXGI_FORMAT_R32_FLOAT, false);
+                        ID3D12Resource* t_mv  = make_nf_tex(w_in, h_in, DXGI_FORMAT_R16G16_FLOAT, false);
+                        ID3D12Resource* t_out = make_nf_tex(w_out, h_out, DXGI_FORMAT_R16G16B16A16_FLOAT, true);
+
+                        OnrRrFrame fr_nf{};
+                        fr_nf.size = sizeof(fr_nf);
+                        fr_nf.render_width = w_in; fr_nf.render_height = h_in;
+                        fr_nf.mv_scale_x = 1.0f; fr_nf.mv_scale_y = 1.0f;
+                        fr_nf.flags = ONR_RR_FRAME_HW_DEPTH | ONR_RR_FRAME_DEPTH_INVERTED | ONR_RR_FRAME_ROUGHNESS_PACKED;
+                        for (int i = 0; i < 16; ++i)
+                            fr_nf.world_to_view[i] = (i % 5 == 0) ? 1.0f : 0.0f;
+                        fr_nf.view_to_clip[0] = 1.0f;
+                        fr_nf.view_to_clip[5] = 1.777f;
+                        fr_nf.view_to_clip[11] = -1.0f;
+                        fr_nf.view_to_clip[14] = 0.05f;
+                        fr_nf.color          = {t_col, srv_st, 0, 0};
+                        fr_nf.diffuse_albedo = {t_alb, srv_st, 0, 0};
+                        fr_nf.specular_albedo= {t_spc, srv_st, 0, 0};
+                        fr_nf.normals        = {t_nrm, srv_st, 0, 0};
+                        fr_nf.depth          = {t_dep, srv_st, 0, 0};
+                        fr_nf.motion         = {t_mv,  srv_st, 0, 0};
+                        fr_nf.output         = {t_out, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, 0, 0};
+
+                        D3D12_COMMAND_QUEUE_DESC qd_nf{D3D12_COMMAND_LIST_TYPE_DIRECT};
+                        ID3D12CommandQueue* q_nf = nullptr;
+                        ID3D12CommandAllocator* ca_nf = nullptr;
+                        ID3D12GraphicsCommandList* cl_nf = nullptr;
+                        ID3D12Fence* fn_nf = nullptr;
+                        dev->CreateCommandQueue(&qd_nf, IID_PPV_ARGS(&q_nf));
+                        dev->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&ca_nf));
+                        dev->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, ca_nf, nullptr, IID_PPV_ARGS(&cl_nf));
+                        dev->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fn_nf));
+                        HANDLE ev_nf = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+                        UINT64 fv_nf = 0;
+                        const char* nf_fail_phase = "none";
+                        HRESULT nf_fail_hr = S_OK;
+                        auto note_nf_fail = [&](const char* phase, HRESULT hr) {
+                            if (nf_guides_ok) {
+                                nf_fail_phase = phase;
+                                nf_fail_hr = hr;
+                            }
+                            nf_guides_ok = false;
+                        };
+                        auto sync_nf = [&](const char* phase) {
+                            HRESULT hr = cl_nf->Close();
+                            if (FAILED(hr)) { note_nf_fail(phase, hr); return; }
+                            ID3D12CommandList* lst = cl_nf;
+                            q_nf->ExecuteCommandLists(1, &lst);
+                            hr = q_nf->Signal(fn_nf, ++fv_nf);
+                            if (FAILED(hr)) { note_nf_fail(phase, hr); return; }
+                            if (fn_nf->GetCompletedValue() < fv_nf) {
+                                fn_nf->SetEventOnCompletion(fv_nf, ev_nf);
+                                if (WaitForSingleObject(ev_nf, 10000) != WAIT_OBJECT_0) {
+                                    note_nf_fail(phase, dev->GetDeviceRemovedReason());
+                                    return;
+                                }
+                            }
+                            hr = dev->GetDeviceRemovedReason();
+                            if (FAILED(hr)) note_nf_fail(phase, hr);
+                        };
+                        auto make_cpu_buf = [&](UINT64 bytes, D3D12_HEAP_TYPE htype, D3D12_RESOURCE_STATES st) {
+                            D3D12_HEAP_PROPERTIES hpp{htype};
+                            D3D12_RESOURCE_DESC rdb{};
+                            rdb.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+                            rdb.Width = bytes; rdb.Height = 1; rdb.DepthOrArraySize = 1; rdb.MipLevels = 1;
+                            rdb.SampleDesc = {1, 0}; rdb.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+                            ID3D12Resource* res = nullptr;
+                            dev->CreateCommittedResource(&hpp, D3D12_HEAP_FLAG_NONE, &rdb, st, nullptr, IID_PPV_ARGS(&res));
+                            return res;
+                        };
+                        const UINT p_8 = (w_in * 8u + 255u) & ~255u, p_4 = (w_in * 4u + 255u) & ~255u, p_out = (w_out * 8u + 255u) & ~255u;
+                        ID3D12Resource* up_col = make_cpu_buf(UINT64(p_8) * h_in, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+                        ID3D12Resource* up_nrm = make_cpu_buf(UINT64(p_8) * h_in, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+                        ID3D12Resource* up_mv  = make_cpu_buf(UINT64(p_4) * h_in, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+                        ID3D12Resource* up_dep = make_cpu_buf(UINT64(p_4) * h_in, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+                        ID3D12Resource* up_alb = make_cpu_buf(UINT64(p_4) * h_in, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+                        ID3D12Resource* up_spc = make_cpu_buf(UINT64(p_4) * h_in, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+                        ID3D12Resource* rb_out = make_cpu_buf(UINT64(p_out) * h_out, D3D12_HEAP_TYPE_READBACK, D3D12_RESOURCE_STATE_COPY_DEST);
+
+                        unsigned nf_mask = 15u;
+                        if (const char* m_env = std::getenv("ONR_TEST_NF_MASK")) {
+                            nf_mask = static_cast<unsigned>(std::strtoul(m_env, nullptr, 0));
+                        }
+                        auto upload_guides = [&](unsigned mask, bool open_list) {
+                            const uint16_t h_vals[8] = {0x7E00u /*qNaN*/, 0x7C00u /*+Inf*/, 0xFC00u /*-Inf*/, 0x8000u /*-0*/, 0x0001u /*submin*/, 0x7BFFu /*+65504*/, 0xFBFFu /*-65504*/, 0x3C00u /*1.0*/};
+                            const uint32_t f_vals[4] = {0x7FC00000u, 0x7F800000u, 0xFF800000u, 0x3F800000u};
+                            auto fill_up16x4 = [&](ID3D12Resource* ub, UINT pitch, bool adv, bool norm) {
+                                uint8_t* ptr = nullptr;
+                                if (SUCCEEDED(ub->Map(0, nullptr, reinterpret_cast<void**>(&ptr))) && ptr) {
+                                    for (UINT y = 0; y < h_in; ++y) {
+                                        uint16_t* row = reinterpret_cast<uint16_t*>(ptr + y * pitch);
+                                        for (UINT x = 0; x < w_in; ++x) {
+                                            const uint16_t hv = !adv ? 0x3C00u : (norm && ((x + y) & 1) ? 0x3C00u : h_vals[(x + y) & 7u]);
+                                            row[4 * x + 0] = hv; row[4 * x + 1] = hv; row[4 * x + 2] = hv; row[4 * x + 3] = 0x3C00u;
+                                        }
+                                    }
+                                    ub->Unmap(0, nullptr);
+                                }
+                            };
+                            fill_up16x4(up_col, p_8, (mask & 1u) != 0u, false);
+                            fill_up16x4(up_nrm, p_8, (mask & 2u) != 0u, true);
+                            {
+                                const bool adv_mv = (mask & 4u) != 0u;
+                                const bool adv_dp = (mask & 8u) != 0u;
+                                uint8_t* pm = nullptr; uint8_t* pd = nullptr; uint8_t* pa = nullptr; uint8_t* ps = nullptr;
+                                up_mv->Map(0, nullptr, reinterpret_cast<void**>(&pm));
+                                up_dep->Map(0, nullptr, reinterpret_cast<void**>(&pd));
+                                up_alb->Map(0, nullptr, reinterpret_cast<void**>(&pa));
+                                up_spc->Map(0, nullptr, reinterpret_cast<void**>(&ps));
+                                for (UINT y = 0; y < h_in; ++y) {
+                                    uint16_t* rmv = reinterpret_cast<uint16_t*>(pm + y * p_4);
+                                    uint32_t* rdp = reinterpret_cast<uint32_t*>(pd + y * p_4);
+                                    uint32_t* ralb = reinterpret_cast<uint32_t*>(pa + y * p_4);
+                                    uint32_t* rspc = reinterpret_cast<uint32_t*>(ps + y * p_4);
+                                    for (UINT x = 0; x < w_in; ++x) {
+                                        rmv[2 * x + 0] = adv_mv ? h_vals[(x * 3 + y) & 7u] : 0u;
+                                        rmv[2 * x + 1] = adv_mv ? h_vals[(x * 3 + y) & 7u] : 0u;
+                                        rdp[x] = adv_dp ? f_vals[(x + y) & 3u] : 0x3F800000u;
+                                        ralb[x] = 0x80808080u;
+                                        rspc[x] = 0x80808080u;
+                                    }
+                                }
+                                up_mv->Unmap(0, nullptr);
+                                up_dep->Unmap(0, nullptr);
+                                up_alb->Unmap(0, nullptr);
+                                up_spc->Unmap(0, nullptr);
+                            }
+                            if (!open_list) {
+                                ca_nf->Reset();
+                                OnrRrNotifyD3d12AllocatorReset(ca_nf);
+                                cl_nf->Reset(ca_nf, nullptr);
+                                OnrRrNotifyD3d12ListReset(cl_nf, ca_nf);
+                            }
+                            D3D12_RESOURCE_BARRIER b_in[6]{};
+                            ID3D12Resource* dsts[6] = {t_col, t_nrm, t_mv, t_dep, t_alb, t_spc};
+                            ID3D12Resource* srcs[6] = {up_col, up_nrm, up_mv, up_dep, up_alb, up_spc};
+                            UINT pitches[6] = {p_8, p_8, p_4, p_4, p_4, p_4};
+                            DXGI_FORMAT fmts[6] = {DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_R16G16_FLOAT, DXGI_FORMAT_R32_FLOAT, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM};
+                            for (int i = 0; i < 6; ++i) {
+                                b_in[i].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+                                b_in[i].Transition.pResource = dsts[i];
+                                b_in[i].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+                                b_in[i].Transition.StateBefore = D3D12_RESOURCE_STATES(srv_st);
+                                b_in[i].Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
+                            }
+                            cl_nf->ResourceBarrier(6, b_in);
+                            for (int i = 0; i < 6; ++i) {
+                                D3D12_TEXTURE_COPY_LOCATION td{};
+                                td.pResource = dsts[i];
+                                td.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+                                D3D12_TEXTURE_COPY_LOCATION ts{};
+                                ts.pResource = srcs[i];
+                                ts.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+                                ts.PlacedFootprint.Footprint.Format = fmts[i];
+                                ts.PlacedFootprint.Footprint.Width = w_in;
+                                ts.PlacedFootprint.Footprint.Height = h_in;
+                                ts.PlacedFootprint.Footprint.Depth = 1;
+                                ts.PlacedFootprint.Footprint.RowPitch = pitches[i];
+                                cl_nf->CopyTextureRegion(&td, 0, 0, 0, &ts, nullptr);
+                                std::swap(b_in[i].Transition.StateBefore, b_in[i].Transition.StateAfter);
+                            }
+                            cl_nf->ResourceBarrier(6, b_in);
+                            sync_nf(mask ? "upload_adv" : "upload_finite");
+                        };
+
+                        // Prime with finite unit textures first so _lt builds and Legacy kernels never run on NaN/Inf.
+                        upload_guides(0u, true);
+                        OnrRrSetFastMode(rt_nf, 1);
+                        bool nf_primed = false;
+                        for (int pstep = 0; pstep < 200 && nf_guides_ok; ++pstep) {
+                            ca_nf->Reset();
+                            OnrRrNotifyD3d12AllocatorReset(ca_nf);
+                            cl_nf->Reset(ca_nf, nullptr);
+                            OnrRrNotifyD3d12ListReset(cl_nf, ca_nf);
+                            OnrRrFrame fr_p = fr_nf;
+                            fr_p.flags = fr_nf.flags | ONR_RR_FRAME_RESET;
+                            void* job_p = nullptr;
+                            const int32_t rc_p = api4.Record(rt_nf, &fr_p, cl_nf, ONR_RR_EDIT_OFF, nullptr, &job_p);
+                            if (rc_p != ONR_RR_OK) note_nf_fail("pstep_record", HRESULT(rc_p));
+                            sync_nf("pstep");
+                            OnrRrInfo info_nf{sizeof(OnrRrInfo)};
+                            api4.v3.v2.v1.GetInfo(rt_nf, &info_nf);
+                            if (info_nf.state == ONR_RR_STATE_READY && OnrRrGetFastMode(rt_nf) == 1) { nf_primed = true; break; }
+                            if (info_nf.state == ONR_RR_STATE_FAILED) break;
+                            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                        }
+                        if (!nf_primed && nf_guides_ok) note_nf_fail("prime_timeout", E_FAIL);
+
+                        char nf_phase_buf[32]{};
+                        if (nf_guides_ok) upload_guides(nf_mask, false);
+                        for (int fm_req : {1, 2}) {
+                            if (!nf_guides_ok) break;
+                            OnrRrSetFastMode(rt_nf, fm_req);
+                            const int want_state = (fm_req == 2) ? 4 : 1;
+                            std::snprintf(nf_phase_buf, sizeof(nf_phase_buf), "fm%d_wait", fm_req);
+                            for (int wait_i = 0; wait_i < 200 && nf_guides_ok; ++wait_i) {
+                                ca_nf->Reset();
+                                OnrRrNotifyD3d12AllocatorReset(ca_nf);
+                                cl_nf->Reset(ca_nf, nullptr);
+                                OnrRrNotifyD3d12ListReset(cl_nf, ca_nf);
+                                OnrRrFrame fr_w = fr_nf;
+                                fr_w.flags = fr_nf.flags | ONR_RR_FRAME_RESET;
+                                void* job_w = nullptr;
+                                const int32_t rc_w = api4.Record(rt_nf, &fr_w, cl_nf, ONR_RR_EDIT_OFF, nullptr, &job_w);
+                                if (rc_w != ONR_RR_OK) note_nf_fail(nf_phase_buf, HRESULT(rc_w));
+                                sync_nf(nf_phase_buf);
+                                if (OnrRrGetFastMode(rt_nf) == want_state) break;
+                                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                            }
+                            if (nf_guides_ok && OnrRrGetFastMode(rt_nf) != want_state) note_nf_fail(nf_phase_buf, E_FAIL);
+
+                            for (int step = 0; step < 6 && nf_guides_ok; ++step) {
+                                std::snprintf(nf_phase_buf, sizeof(nf_phase_buf), "fm%d_step%d", fm_req, step);
+                                ca_nf->Reset();
+                                OnrRrNotifyD3d12AllocatorReset(ca_nf);
+                                cl_nf->Reset(ca_nf, nullptr);
+                                OnrRrNotifyD3d12ListReset(cl_nf, ca_nf);
+                                OnrRrFrame fr_s = fr_nf;
+                                fr_s.flags = fr_nf.flags | (step == 0 ? ONR_RR_FRAME_RESET : 0u);
+                                void* job_s = nullptr;
+                                const int32_t rc_s = api4.Record(rt_nf, &fr_s, cl_nf, ONR_RR_EDIT_OFF, nullptr, &job_s);
+                                if (rc_s != ONR_RR_OK) note_nf_fail(nf_phase_buf, HRESULT(rc_s));
+                                sync_nf(nf_phase_buf);
+                            }
+                            if (!nf_guides_ok) break;
+
+                            ca_nf->Reset();
+                            cl_nf->Reset(ca_nf, nullptr);
+                            D3D12_RESOURCE_BARRIER bo{};
+                            bo.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+                            bo.Transition.pResource = t_out;
+                            bo.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+                            bo.Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+                            bo.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
+                            cl_nf->ResourceBarrier(1, &bo);
+                            D3D12_TEXTURE_COPY_LOCATION to{};
+                            to.pResource = rb_out;
+                            to.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+                            to.PlacedFootprint.Footprint.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+                            to.PlacedFootprint.Footprint.Width = w_out;
+                            to.PlacedFootprint.Footprint.Height = h_out;
+                            to.PlacedFootprint.Footprint.Depth = 1;
+                            to.PlacedFootprint.Footprint.RowPitch = p_out;
+                            D3D12_TEXTURE_COPY_LOCATION from{};
+                            from.pResource = t_out;
+                            from.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+                            cl_nf->CopyTextureRegion(&to, 0, 0, 0, &from, nullptr);
+                            std::swap(bo.Transition.StateBefore, bo.Transition.StateAfter);
+                            cl_nf->ResourceBarrier(1, &bo);
+                            std::snprintf(nf_phase_buf, sizeof(nf_phase_buf), "fm%d_copy", fm_req);
+                            sync_nf(nf_phase_buf);
+                            if (!nf_guides_ok) break;
+
+                            uint8_t* rp = nullptr;
+                            size_t nf_out = 0;
+                            if (SUCCEEDED(rb_out->Map(0, nullptr, reinterpret_cast<void**>(&rp))) && rp) {
+                                for (UINT y = 0; y < h_out; ++y) {
+                                    const uint16_t* row = reinterpret_cast<const uint16_t*>(rp + y * p_out);
+                                    for (UINT x = 0; x < w_out * 4u; ++x)
+                                        if ((row[x] & 0x7C00u) == 0x7C00u) ++nf_out;
+                                }
+                                rb_out->Unmap(0, nullptr);
+                            } else {
+                                note_nf_fail("rb_out_map", E_FAIL);
+                            }
+                            if (nf_out != 0) {
+                                std::fprintf(stderr, "FAIL: NFMA direct D3D12 NaN/Inf guide stress mode=%d non_finite=%zu\n", fm_req, nf_out);
+                                note_nf_fail("non_finite", E_FAIL);
+                            }
+                        }
+                        OnrRrNotifyD3d12ListReleased(cl_nf);
+                        OnrRrNotifyD3d12AllocatorReset(ca_nf);
+                        OnrRrNotifyD3d12AllocatorReleased(ca_nf);
+                        CloseHandle(ev_nf);
+                        for (ID3D12Resource* r : {up_col, up_nrm, up_mv, up_dep, up_alb, up_spc, rb_out}) r->Release();
+                        fn_nf->Release(); cl_nf->Release(); ca_nf->Release(); q_nf->Release();
+                        for (ID3D12Resource* r : {t_col, t_alb, t_spc, t_nrm, t_dep, t_mv, t_out})
+                            if (r) r->Release();
+                        api4.v3.v2.v1.Destroy(rt_nf);
+
+                        if (!nf_guides_ok) {
+                            std::fprintf(stderr, "FAIL: Item NFMA Direct D3D12 guides failed (phase=%s, hr=0x%lX, mask=%u, primed=%d, dev_reason=0x%lX)\n",
+                                         nf_fail_phase, static_cast<unsigned long>(nf_fail_hr), nf_mask,
+                                         int(nf_primed), static_cast<unsigned long>(dev->GetDeviceRemovedReason()));
+                            dev->Release();
+                            return 1;
+                        }
+                        std::printf("[PASS] Item NFMA Direct D3D12 guides (d3d_ae + d3d_enc0_attr_f_lt + post_f_lt + d3d_downsample_lt + _lt/_lx under NaN/+-Inf/-0/subnorm/+-65504): 0 non-finite\n");
+                    } else {
+                        std::fprintf(stderr, "FAIL: Item NFMA Direct D3D12 guides could not create fresh runtime context\n");
+                        dev->Release();
+                        return 1;
                     }
 
                     // ---- Vulkan Split Bridge test (ONR_RR_BACKEND_CHOICE_VULKAN: RecordInputs -> Enqueue -> RecordOutput) ----

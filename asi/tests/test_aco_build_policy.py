@@ -1,11 +1,13 @@
 # SPDX-License-Identifier: MIT
 """CPU-only tests of opt-in record policy, fingerprint and cache integrity."""
 import contextlib
+import hashlib
 import importlib.util
 import io
 import json
 import os
 from pathlib import Path
+import shutil
 import struct
 import subprocess
 import sys
@@ -201,6 +203,62 @@ class BuildPolicyTests(unittest.TestCase):
         failures = json.loads((self.raw / 'failures.json').read_text())
         self.assertEqual(len(failures['failures']), 1)
         self.assertIn('selected.spv', failures['failures'][0]['spv'])
+
+    def test_interrupted_capture_preserves_consistent_previous_package(self):
+        m = self.build()
+        root = self.manifest_path.parent
+        orig_manifest = self.manifest_path.read_bytes()
+        orig_msgpack = (root / 'manifest.msgpack').read_bytes()
+        orig_nrps = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in root.glob('*.nrp')}
+        def interrupt_on_selected(args, **kwargs):
+            if Path(args[1]).stem == 'selected':
+                raise KeyboardInterrupt()
+            # Mutate returned code for ordinary.spv so an un-staged write would diverge from manifest.
+            env = kwargs['env']
+            prefix = Path(env['ONR_ACO_CAPTURE'])
+            info = dict(inline=[], rsrc1=0, rsrc2=0, rsrc3=0, exec_bytes=4, workgroup_size=32,
+                shared_bytes=0, push_bytes=0, user_sgprs=0, set0=-1, push=-1, grid=-1,
+                scratch_bytes=0, wave_size=32, vgprs=8)
+            prefix.with_suffix('.json').write_text(json.dumps(info))
+            prefix.with_suffix('.code').write_bytes(struct.pack('<I', 0xbf800000))
+            prefix.with_suffix('.layouts').write_bytes(b'layout')
+            return subprocess.CompletedProcess(args, 0, 'ONR_M0 subst=0 writes=0 constdata=0 pc_relative=0\n', '')
+        args = ['records', str(self.inputs), '--out', str(self.out), '--toolchain', str(self.cfg),
+                '--capture', str(self.capture), '--capture-dir', str(self.raw),
+                '--precision', 'global', '--matrix-loads', 'vector8', '--cmat-address-shaders', 'selected', '--refresh']
+        with patch.object(sys, 'argv', args), patch.object(producer.subprocess, 'run', interrupt_on_selected), \
+             contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()), \
+             self.assertRaises(KeyboardInterrupt):
+            producer.main()
+        self.assertEqual(self.manifest_path.read_bytes(), orig_manifest)
+        self.assertEqual((root / 'manifest.msgpack').read_bytes(), orig_msgpack)
+        self.assertEqual({p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in root.glob('*.nrp')}, orig_nrps)
+        for rec in m['records'].values():
+            self.assertEqual(hashlib.sha256((root / rec['record']).read_bytes()).hexdigest(), rec['record_sha256'])
+        self.assertEqual(list(root.parent.glob('.openrr-d3d12-v1.*')), [])
+
+    def test_gfx11_shader_strip_policy(self):
+        bs_spec = importlib.util.spec_from_file_location('build_shaders', Path(__file__).parents[1]/'build/build_shaders.py')
+        bs_mod = importlib.util.module_from_spec(bs_spec)
+        bs_spec.loader.exec_module(bs_mod)
+        src_text = (Path(__file__).parents[1]/'build/build_shaders.py').read_text()
+        self.assertIn('"W2_96UP=1"', src_text)
+        self.assertIn('"LT_PV8=1"', src_text)
+        glslang = shutil.which('glslangValidator') or shutil.which('glslang')
+        if not glslang:
+            for cand in (r'C:\VulkanSDK\1.4.304.0\Bin\glslangValidator.exe', r'C:\VulkanSDK\1.3.296.0\Bin\glslangValidator.exe'):
+                if os.path.exists(cand):
+                    glslang = cand
+                    break
+        if glslang:
+            gpu_dir = Path(__file__).parents[2]/'gpu'
+            out_g12 = self.root/'spv_g12'
+            out_g11 = self.root/'spv_g11'
+            subprocess.run([sys.executable, str(Path(__file__).parents[1]/'build/build_shaders.py'), glslang, str(gpu_dir), str(out_g12)], check=True, stdout=subprocess.DEVNULL)
+            subprocess.run([sys.executable, str(Path(__file__).parents[1]/'build/build_shaders.py'), glslang, str(gpu_dir), str(out_g11), '--gfx11'], check=True, stdout=subprocess.DEVNULL)
+            for suffix in ('f_lt', 'fl_lt'):
+                self.assertEqual(producer.dimensions((out_g12/f'dec_up_96_128_128_{suffix}.spv').read_bytes()), (64, 1, 1))
+                self.assertEqual(producer.dimensions((out_g11/f'dec_up_96_128_128_{suffix}.spv').read_bytes()), (128, 1, 1))
 
 if __name__ == '__main__':
     unittest.main()
