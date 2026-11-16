@@ -19,13 +19,6 @@ struct EngineTestAccess {
         for(int i=4;i>=0;--i){add("dec"+std::to_string(i)+".tensor",e.dec1_l_[i].tensor);add("dec"+std::to_string(i)+".dfn",e.dec1_l_[i].dfn);}
         add("history",e.hist_[cur]);add("down",e.down_[cur]);return v;
     }
-};
-}
-        std::vector<std::pair<std::string, Buffer>> v;
-            if (e.enc_[i].mrg_w.size) v.emplace_back("enc" + std::to_string(i), e.enc_[i].mrg_w);
-    }
-    // WP-D5: every stage's uploaded out buffer (fp16 + tiles + e4m3 tail), enc0..enc5 / dec0_0..4 / dec1_0..4
-    static std::vector<std::pair<std::string, Buffer>> stage_out(const Engine& e) {
     // WP-D1: the encoders' uploaded mrg_w buffers (enc0 .. enc5), for layout-tail checks
     static std::vector<std::pair<std::string, Buffer>> stage_mrg(const Engine& e) {
         std::vector<std::pair<std::string, Buffer>> v;
@@ -46,13 +39,7 @@ struct EngineTestAccess {
     // WP-D1/D5: the packed weight blob the stage buffers address into (D3D12: res == null, addr only)
     static const std::vector<Buffer>& fixed(const Engine& e) { return e.fixed_; }
 };
-        };
-        add("enc", e.enc_, 6); add("dec0", e.dec0_, 5); add("dec1", e.dec1_, 5);
-        return v;
-    }
-    // WP-D1/D5: the packed weight blob the stage buffers address into (D3D12: res == null, addr only)
-    static const std::vector<Buffer>& fixed(const Engine& e) { return e.fixed_; }
-};
+}
 
 static int aco_compare(onr::Device& vk, onr::D3dDevice& d, const std::string& dir) {
     if(getenv("OPENRR_ACO_MATH")) {
