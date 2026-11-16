@@ -207,6 +207,44 @@ new = old.replace(anchor, '''.address32_hi = getenv("ONR_ACO_ADDR32_HI") ?
                strtoul(getenv("ONR_ACO_ADDR32_HI"), NULL, 0) : pdev->info.address32_hi,''')
 changes.append((p, old, new))
 
+# ONR_ACO_CU_MODE / ONR_ACO_WGP_MODE: per-shader CU/WGP mode override at compile time
+# so ACO scheduling, waitcnt, and PGM rsrc1 bit 29 all agree. Composed onto the existing
+# radv_shader.c change entry (never add a duplicate radv_shader.c tuple).
+a1 = """   if (gfx_level < GFX10)
+      return false;
+"""
+for _i, (_p, _old, _new) in enumerate(changes):
+    if _p == ROOT / "src/amd/vulkan/radv_shader.c":
+        assert _new.count(a1) == 1, "wgp gate anchor not found"
+        composed = _new.replace(a1, a1 + """
+   /* OpenRR capture: per-shader CU/WGP mode override */
+   if (stage == MESA_SHADER_COMPUTE) {
+      if (getenv("ONR_ACO_CU_MODE") && getenv("ONR_ACO_CU_MODE")[0] != '0')
+         return false;
+      if (getenv("ONR_ACO_WGP_MODE") && getenv("ONR_ACO_WGP_MODE")[0] != '0')
+         return true;
+   }
+""", 1)
+        changes[_i] = (_p, _old, composed)
+        break
+else:
+    raise SystemExit("radv_shader.c change entry missing")
+
+# ONR_ACO_SAMPLE_WAIT_ZERO: coalesce GFX12 sampler waits to s_wait_samplecnt 0x0 instead
+# of decrementing partial counts 0x3->0x2->0x1->0x0 across consecutive sample reads.
+p = ROOT / "src/amd/compiler/aco_insert_waitcnt.cpp"
+old = p.read_text()
+anc_inc = "#include <map>\n"
+assert old.count(anc_inc) == 1, "aco_insert_waitcnt include anchor not found"
+new = old.replace(anc_inc, "#include <cstdlib>\n" + anc_inc, 1)
+anc_cnt = "      for (unsigned i = 0; i < wait_type_num; i++)\n         max_cnt[i] = max_cnt[i] ? max_cnt[i] - 1 : 0;\n"
+assert new.count(anc_cnt) == 1, "aco_insert_waitcnt max_cnt anchor not found"
+new = new.replace(anc_cnt, anc_cnt + """      if (gfx_level >= GFX12 && std::getenv("ONR_ACO_SAMPLE_WAIT_ZERO") &&
+          std::getenv("ONR_ACO_SAMPLE_WAIT_ZERO")[0] != '0')
+         max_cnt[wait_type_sample] = 0;
+""", 1)
+changes.append((p, old, new))
+
 patch = []
 for p, old, new in changes:
     rel = p.relative_to(ROOT).as_posix()

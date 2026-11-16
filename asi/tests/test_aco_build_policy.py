@@ -38,7 +38,9 @@ class BuildPolicyTests(unittest.TestCase):
 
     def fake_capture(self, args, **kwargs):
         env = kwargs['env']
-        self.calls.append((Path(args[1]).stem, env.get('ONR_ACO_CMAT_ADDRESS')))
+        self.calls.append((Path(args[1]).stem, env.get('ONR_ACO_CMAT_ADDRESS'),
+                           env.get('ONR_ACO_CU_MODE'), env.get('ONR_ACO_WGP_MODE'),
+                           env.get('ONR_ACO_SAMPLE_WAIT_ZERO')))
         prefix = Path(env['ONR_ACO_CAPTURE'])
         info = dict(inline=[], rsrc1=0, rsrc2=0, rsrc3=0, exec_bytes=4, workgroup_size=32,
             shared_bytes=0, push_bytes=0, user_sgprs=0, set0=-1, push=-1, grid=-1,
@@ -48,19 +50,22 @@ class BuildPolicyTests(unittest.TestCase):
         prefix.with_suffix('.layouts').write_bytes(b'layout')
         return subprocess.CompletedProcess(args, 0, 'ONR_M0 subst=0 writes=0 constdata=0 pc_relative=0\n', '')
 
-    def build(self, selected=('selected',)):
+    def build(self, selected=('selected',), cu=(), wgp=(), swz=()):
         args = ['records', str(self.inputs), '--out', str(self.out), '--toolchain', str(self.cfg),
             '--capture', str(self.capture), '--capture-dir', str(self.raw),
-            '--precision', 'global', '--matrix-loads', 'vector8', '--cmat-address-shaders', *selected]
+            '--precision', 'global', '--matrix-loads', 'vector8', '--cmat-address-shaders', *selected,
+            '--cu-mode-shaders', *cu, '--wgp-mode-shaders', *wgp, '--sample-wait-zero-shaders', *swz]
         with patch.object(sys, 'argv', args), patch.object(producer.subprocess, 'run', self.fake_capture), \
-             patch.dict(os.environ, {'ONR_ACO_CMAT_ADDRESS':'1'}), contextlib.redirect_stdout(io.StringIO()):
+             patch.dict(os.environ, {'ONR_ACO_CMAT_ADDRESS': '1', 'ONR_ACO_CU_MODE': '1',
+                                     'ONR_ACO_WGP_MODE': '1', 'ONR_ACO_SAMPLE_WAIT_ZERO': '1'}), \
+             contextlib.redirect_stdout(io.StringIO()):
             producer.main()
         self.manifest_path = self.out/'gfx1201/openrr-d3d12-v1/manifest.json'
         return json.loads(self.manifest_path.read_text())
 
     def test_exact_selection_and_cache(self):
         m = self.build()
-        self.assertEqual(sorted(self.calls), [('ordinary',None)]*2+[('selected','1')]*2)
+        self.assertEqual(sorted(self.calls), [('ordinary',None,None,None,None)]*2+[('selected','1',None,None,None)]*2)
         self.assertEqual(m['compile_options']['cmat_address_shaders'], ['selected'])
         self.calls.clear()
         self.build()
@@ -73,7 +78,7 @@ class BuildPolicyTests(unittest.TestCase):
         b = self.build(())
         self.assertNotEqual(a['fingerprint'], b['fingerprint'])
         self.assertEqual(len(self.calls), 4)
-        self.assertTrue(all(flag is None for _, flag in self.calls))
+        self.assertTrue(all(t[1:] == (None,)*4 for t in self.calls))
         cfg = json.loads(self.cfg.read_text())
         cfg['cmat_address_patch_sha256'] = 'patch-b'
         self.cfg.write_text(json.dumps(cfg))
@@ -101,6 +106,30 @@ class BuildPolicyTests(unittest.TestCase):
         (self.inputs/'ordinary.spv').write_bytes((self.inputs/'selected.spv').read_bytes())
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             self.build()
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            self.build((), cu=('selected',))
+
+    def test_cu_wgp_and_sample_wait_selection_and_isolation(self):
+        m = self.build((), cu=('selected',), wgp=('ordinary',), swz=('ordinary',))
+        self.assertEqual(sorted(self.calls),
+                         [('ordinary', None, None, '1', '1')] * 2 + [('selected', None, '1', None, None)] * 2)
+        self.assertEqual(m['compile_options']['cu_mode_shaders'], ['selected'])
+        self.assertEqual(m['compile_options']['wgp_mode_shaders'], ['ordinary'])
+        self.assertEqual(m['compile_options']['sample_wait_zero_shaders'], ['ordinary'])
+        self.calls.clear()
+        self.build((), cu=('selected',), wgp=('ordinary',), swz=('ordinary',))
+        self.assertEqual(self.calls, [])
+        n = self.build((), (), (), ())
+        self.assertEqual(len(self.calls), 4)
+        for k in ('cu_mode_shaders', 'wgp_mode_shaders', 'sample_wait_zero_shaders'):
+            self.assertNotIn(k, n['compile_options'])
+
+    def test_cu_wgp_overlap_or_missing_rejected(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            self.build((), cu=('selected',), wgp=('selected',))
+        for kw in (dict(cu=('absent',)), dict(wgp=('absent',)), dict(swz=('absent',))):
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                self.build((), **kw)
 
 if __name__ == '__main__':
     unittest.main()

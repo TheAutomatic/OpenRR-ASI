@@ -42,6 +42,9 @@ python3 asi/build/mesa/prepare_global_address.py "$source"
 cmat_src=$source/src/amd/vulkan/nir/radv_nir_lower_cooperative_matrix.c
 grep -q ONR_ACO_SHARED_CMAT "$cmat_src" || { echo "FATAL: ONR_ACO_SHARED_CMAT missing after patching" >&2; exit 1; }
 grep -q elem_bytes "$cmat_src" || { echo "FATAL: elem_bytes missing after patching" >&2; exit 1; }
+grep -q ONR_ACO_CU_MODE "$source/src/amd/vulkan/radv_shader.c" || { echo "FATAL: ONR_ACO_CU_MODE missing after patching" >&2; exit 1; }
+grep -q ONR_ACO_WGP_MODE "$source/src/amd/vulkan/radv_shader.c" || { echo "FATAL: ONR_ACO_WGP_MODE missing after patching" >&2; exit 1; }
+grep -q ONR_ACO_SAMPLE_WAIT_ZERO "$source/src/amd/compiler/aco_insert_waitcnt.cpp" || { echo "FATAL: ONR_ACO_SAMPLE_WAIT_ZERO missing after patching" >&2; exit 1; }
 
 # drirc: suppress the compute-queue custom-border-color state SGPR.
 drirc_dir=$repo/build/mesa-comparison/mesa-263-drirc/drirc

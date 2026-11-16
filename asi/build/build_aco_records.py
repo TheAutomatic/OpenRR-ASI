@@ -103,6 +103,12 @@ def main():
     ap.add_argument('--capture-dir', type=Path, help='Build-only capture diagnostics (outside the package stage)')
     ap.add_argument('--cmat-address-shaders', nargs='*', default=[],
                     help='Exact shader stems using bounded cmat lane offsets; all others stay off')
+    ap.add_argument('--cu-mode-shaders', nargs='*', default=[],
+                    help='Compute kernels forced onto CU mode at compile time (rsrc1 bit 29 = 0)')
+    ap.add_argument('--wgp-mode-shaders', nargs='*', default=[],
+                    help='Compute kernels forced onto WGP mode at compile time (rsrc1 bit 29 = 1)')
+    ap.add_argument('--sample-wait-zero-shaders', nargs='*', default=[],
+                    help='Compute kernels coalescing GFX12 sampler waits to s_wait_samplecnt 0x0')
     ap.add_argument('--shared-cmat', choices=('off', 'load', 'loadstore'), default='off',
                     help='Vectorize same-lane contiguous shared-memory coopmat runs: loads only (load) or loads+stores (loadstore)')
     ns = ap.parse_args()
@@ -114,9 +120,15 @@ def main():
     manifest_path = root/'manifest.json'
     manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
     files = sorted({p.resolve() for arg in ns.inputs for p in (arg.rglob('*.spv') if arg.is_dir() else [arg])})
-    missing_address_shaders = set(ns.cmat_address_shaders) - {p.stem for p in files}
-    if missing_address_shaders:
-        ap.error('cmat address shader inputs missing: ' + ', '.join(sorted(missing_address_shaders)))
+    stems = {p.stem for p in files}
+    for label, selected in (('cmat address', ns.cmat_address_shaders), ('cu-mode', ns.cu_mode_shaders),
+                            ('wgp-mode', ns.wgp_mode_shaders), ('sample-wait-zero', ns.sample_wait_zero_shaders)):
+        missing = set(selected) - stems
+        if missing:
+            ap.error(f'{label} shader inputs missing: ' + ', '.join(sorted(missing)))
+    overlap = set(ns.cu_mode_shaders) & set(ns.wgp_mode_shaders)
+    if overlap:
+        ap.error('shaders cannot request both cu-mode and wgp-mode: ' + ', '.join(sorted(overlap)))
     if ns.cmat_address_shaders and not cfg.get('cmat_address_patch_sha256'):
         ap.error('selected toolchain does not declare the bounded cmat address patch')
     # Records are addressed by SPIR-V hash, so identical input bytes cannot
@@ -125,10 +137,11 @@ def main():
     input_policies = {}
     for spv in files:
         key = f'{fnv(spv.read_bytes()):016x}'
-        address = spv.stem in ns.cmat_address_shaders
-        if key in input_policies and input_policies[key] != address:
-            ap.error('identical SPIR-V requests conflicting cmat address policies: ' + spv.name)
-        input_policies[key] = address
+        stem_pol = (spv.stem in ns.cmat_address_shaders, spv.stem in ns.cu_mode_shaders,
+                    spv.stem in ns.wgp_mode_shaders, spv.stem in ns.sample_wait_zero_shaders)
+        if key in input_policies and input_policies[key] != stem_pol:
+            ap.error('identical SPIR-V requests conflicting per-stem policies: ' + spv.name)
+        input_policies[key] = stem_pol
     # Variant-split precision: fast variants (*_lt / *_lx) may run at native
     # precision while every legacy shader keeps the requested default, so
     # legacy records stay bit-identical. A fast SPIR-V whose hash is shared
@@ -157,6 +170,12 @@ def main():
         policy['shared_cmat'] = ns.shared_cmat
     if ns.cmat_address_shaders:
         policy['cmat_address_shaders'] = sorted(set(ns.cmat_address_shaders))
+    if ns.cu_mode_shaders:
+        policy['cu_mode_shaders'] = sorted(set(ns.cu_mode_shaders))
+    if ns.wgp_mode_shaders:
+        policy['wgp_mode_shaders'] = sorted(set(ns.wgp_mode_shaders))
+    if ns.sample_wait_zero_shaders:
+        policy['sample_wait_zero_shaders'] = sorted(set(ns.sample_wait_zero_shaders))
     fingerprint = hashlib.sha256(ns.capture.read_bytes() + ns.toolchain.read_bytes() + Path(__file__).read_bytes() + json.dumps(policy,sort_keys=True).encode()).hexdigest()
     for spv in files:
         data = spv.read_bytes()
@@ -174,9 +193,13 @@ def main():
                        LD_LIBRARY_PATH=cfg['library_path'], ONR_ACO_PRECISION=precision_by_stem.get(spv.stem, ns.precision))
             env.pop('ONR_ACO_VECTOR_LOADS', None)
             # Never inherit a global experimental setting into unrelated shaders.
-            env.pop('ONR_ACO_CMAT_ADDRESS', None)
-            if spv.stem in ns.cmat_address_shaders:
-                env['ONR_ACO_CMAT_ADDRESS'] = '1'
+            for env_k, flag_set in (('ONR_ACO_CMAT_ADDRESS', ns.cmat_address_shaders),
+                                    ('ONR_ACO_CU_MODE', ns.cu_mode_shaders),
+                                    ('ONR_ACO_WGP_MODE', ns.wgp_mode_shaders),
+                                    ('ONR_ACO_SAMPLE_WAIT_ZERO', ns.sample_wait_zero_shaders)):
+                env.pop(env_k, None)
+                if spv.stem in flag_set:
+                    env[env_k] = '1'
             if ns.matrix_loads == 'vector8': env['ONR_ACO_VECTOR_LOADS'] = '1'
             if ns.shared_cmat != 'off': env['ONR_ACO_SHARED_CMAT'] = ns.shared_cmat
             captures=[]
@@ -204,6 +227,9 @@ def main():
             records[key] = dict(info, spv=spv.name, spv_hash=key, code_hash=f'{fnv(code):016x}',
                                 workgroup=list(dims), layout='views' if spv.stem.startswith('d3d_') else 'sampled',
                                 cmat_address=spv.stem in ns.cmat_address_shaders,
+                                cu_mode=spv.stem in ns.cu_mode_shaders,
+                                wgp_mode=spv.stem in ns.wgp_mode_shaders,
+                                sample_wait_zero=spv.stem in ns.sample_wait_zero_shaders,
                                 record_sha256=hashlib.sha256(record_data).hexdigest(),
                                 address_report=address_report, record=key+'.nrp',
                                 precision=precision_by_stem.get(spv.stem, ns.precision))
