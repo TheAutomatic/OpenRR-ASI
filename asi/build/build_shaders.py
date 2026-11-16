@@ -68,7 +68,7 @@ def main():
     if gfx11:
         glsl_extra = ["-DONR_GFX11=1", "-DFP8QV=0", "-DSPLIT_C=128"]
         strip_defs = {"LT_UP8=1", "LT_MI8=1", "LT_MLP8=1", "LT_MRG8=1", "LT_EMB8=1",
-                      "LT_QV8=1", "LT_DFN8=1", "LT_E8RAW=1", "LT_VO8=1", "LT_W1A8=1", "FP8QV=1"}
+                      "LT_QV8=1", "LT_DFN8=1", "LT_E8RAW=1", "LT_VO8=1", "LT_W1A8=1", "LT_PV8=1", "FP8QV=1"}
         lt_defs = {k: [x for x in v if x not in strip_defs] for k, v in lt_defs.items()}
         lx_defs = {k: [x for x in v if x not in strip_defs] for k, v in lx_defs.items()}
     plain_runtime, flow_kernels = parse_shader_lists(gpu_dir)
@@ -148,6 +148,11 @@ def main():
 
     with concurrent.futures.ThreadPoolExecutor() as ex:
         list(ex.map(run_job, jobs))
+
+    expected = {f"{name}.spv" for name, _ in jobs}
+    for spv in glob.glob(os.path.join(out_dir, "*.spv")):
+        if os.path.basename(spv) not in expected:
+            os.remove(spv)
 
     print(f"built {len(jobs)} runtime SPIR-V shaders in {out_dir}")
     return 0

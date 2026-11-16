@@ -125,8 +125,8 @@ Full license text in `asi/third_party/vulkan/LICENSE.md`.
 
 ## 6. Mesa RADV / ACO (offline build tool)
 
-Offline shader records are generated with Mesa 26.2.4, pinned to
-`96cb43121031992b85767f9c1be8f3f48e22b1d2`, with the source patches in
+Offline shader records are generated with Mesa 26.3.0, pinned to
+`0a6fa60abb737d26ac8a316a4aad7c9ddf64f9e4`, with the source patches in
 `asi/build/mesa/`. Mesa RADV/ACO sources used here retain their upstream MIT
 license notices. The package includes generated shader records; Mesa shared
 libraries, the noop DRM shim and the capture executable are build tools and

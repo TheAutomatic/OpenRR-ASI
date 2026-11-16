@@ -484,7 +484,7 @@ struct Config
 
 struct Args
 {
-    fs::path asi, dataDir, dlssd, refDir, outDir, casesJson;
+    fs::path asi, dataDir, dlssd, refDir, outDir, casesJson, dumpFramesDir, compareFramesDir;
     std::string suite = "v1", config = "fast-aco";
     std::vector<std::string> onlyPasses, onlyCases;
     bool noGpu = false;
@@ -545,9 +545,16 @@ int RunMain(const Args& args)
 
     fs::create_directories(args.outDir);
     std::ofstream csv(args.outDir / "per_frame.csv", std::ios::binary);
-    csv << "case_id,frame,phase,rw,rh,reset,hash_gate,ref_file,psnr01_db,psnr_reinhard_db,rgb_rmse,max_abs,mean_abs,max_ulp,exact_half_pct,non_finite,diff_halfs\n";
+    csv << "case_id,frame,phase,rw,rh,reset,hash_gate,ref_file,psnr01_db,psnr_reinhard_db,rgb_rmse,max_abs,mean_abs,max_ulp,exact_half_pct,non_finite,diff_halfs,output_sha256\n";
     std::ofstream gatesCsv(args.outDir / "hash_gates.csv", std::ios::binary);
     gatesCsv << "case_id,key,expected,computed,pass\n";
+    std::ofstream cmpCsv;
+    if (!args.compareFramesDir.empty())
+    {
+        cmpCsv.open(args.outDir / "frame_compare.csv", std::ios::binary);
+        cmpCsv << "case_id,frame,phase,rw,rh,reset,non_finite_other,non_finite_cur,diff_halfs,max_ulp,exact_half_pct,psnr01_db,psnr_reinhard_db,rgb_rmse,max_abs,mean_abs\n";
+    }
+    if (!args.dumpFramesDir.empty()) fs::create_directories(args.dumpFramesDir / args.suite);
     std::ostringstream summary;
     summary << "{\n  \"suite\": \"" << rr_ref::FixtureVersionForSuite(suite) << "\",\n  \"config\": \"" << cfg.name << "\",\n  \"cases\": [\n";
 
@@ -572,6 +579,10 @@ int RunMain(const Args& args)
     }
 
     size_t written = 0;
+    size_t totalRefFrames = 0, totalMissingRefFrames = 0, totalNonFinite = 0;
+    size_t cmpFrames = 0, cmpDiffFrames = 0, cmpTotalDiffHalfs = 0;
+    uint32_t cmpMaxUlp = 0;
+    double cmpMinPsnr01 = 999.0;
     std::map<std::string, FrameMetrics> probeF015;             // OpenRR self f015 metrics vs P00 / pair
     std::map<std::string, std::vector<uint16_t>> probeF015Px;  // own pixels for pair comparisons
     std::string p00F015Sha;
@@ -626,7 +637,9 @@ int RunMain(const Args& args)
         }
 
         FrameMetrics f000VsP00, f015VsP00, f015VsPair, f015Vs5090;
-        std::map<uint32_t, FrameMetrics> frameMetrics;   // vs 5090 ref
+        std::map<uint32_t, FrameMetrics> frameMetrics;   // vs 5090 ref (referenced frames only)
+        size_t caseRefFrames = 0, caseMissingRefFrames = 0, caseNonFinite = 0;
+        bool haveF015Vs5090 = false;
         std::vector<uint16_t> ownF015;
         std::string status = "ok";
 
@@ -829,30 +842,79 @@ int RunMain(const Args& args)
                 if (save)
                 {
                     auto px = ReadbackOutput(dev, output);
+                    size_t curNonFinite = 0;
+                    for (uint16_t h : px) if (!rr_ref::IsFiniteHalf(h)) ++curNonFinite;
+                    caseNonFinite += curNonFinite;
+                    totalNonFinite += curNonFinite;
+                    const std::string outSha = rr_ref::Sha256BytesHex(px.data(), px.size() * sizeof(uint16_t));
+
+                    if (!args.dumpFramesDir.empty())
+                    {
+                        char fn[256];
+                        std::snprintf(fn, sizeof(fn), "%s_f%03u.rgba16f", c.id.c_str(), f);
+                        std::ofstream df(args.dumpFramesDir / args.suite / fn, std::ios::binary);
+                        Require(bool(df), "cannot write dump frame " + std::string(fn));
+                        df.write(reinterpret_cast<const char*>(px.data()), std::streamsize(px.size() * sizeof(uint16_t)));
+                    }
+
+                    const char* phase = f < c.steady_frames ? "steady" : "drs";
+                    if (!args.compareFramesDir.empty())
+                    {
+                        char fn[256];
+                        std::snprintf(fn, sizeof(fn), "%s_f%03u.rgba16f", c.id.c_str(), f);
+                        const fs::path otherPath = args.compareFramesDir / args.suite / fn;
+                        std::vector<uint16_t> otherPx;
+                        Require(TryLoadRawRgba16f(otherPath, px.size(), otherPx), "missing compare frame " + otherPath.string());
+                        size_t otherNonFinite = 0;
+                        for (uint16_t h : otherPx) if (!rr_ref::IsFiniteHalf(h)) ++otherNonFinite;
+                        FrameMetrics cm = CompareRgba16f(otherPx, px);
+                        ++cmpFrames;
+                        if (cm.diff_halfs > 0) ++cmpDiffFrames;
+                        cmpTotalDiffHalfs += cm.diff_halfs;
+                        cmpMaxUlp = std::max(cmpMaxUlp, cm.max_ulp);
+                        cmpMinPsnr01 = std::min(cmpMinPsnr01, cm.psnr01_db);
+                        cmpCsv << c.id << ',' << f << ',' << phase << ',' << rw << ',' << rh << ',' << reset << ','
+                               << otherNonFinite << ',' << curNonFinite << ','
+                               << cm.diff_halfs << ',' << cm.max_ulp << ',' << cm.exact_half_pct << ','
+                               << cm.psnr01_db << ',' << cm.psnr_reinhard_db << ',' << cm.rgb_rmse << ','
+                               << cm.max_abs << ',' << cm.mean_abs << '\n';
+                    }
+
                     char refn[64];
                     if (c.pass == "probes") std::snprintf(refn, sizeof(refn), "f%03u.rgba16f", f);
                     else std::snprintf(refn, sizeof(refn), "f%03u_%ux%u_to_%ux%u.rgba16f", f, rw, rh, c.out_w, c.out_h);
                     const fs::path refFile = args.refDir.empty() ? fs::path()
                         : args.refDir / (c.pass == "probes" ? "05_probes" : (c.pass == "quality-ext" ? "04_quality_ext" : "02_quality_core")) / c.id / refn;
                     std::vector<uint16_t> ref;
-                    bool haveRef = !args.refDir.empty() && TryLoadRawRgba16f(refFile, px.size(), ref);
-                    FrameMetrics m = haveRef ? CompareRgba16f(ref, px) : FrameMetrics {};
-                    frameMetrics[f] = m;
-                    const char* phase = f < c.steady_frames ? "steady" : "drs";
-                    csv << c.id << ',' << f << ',' << phase << ',' << rw << ',' << rh << ',' << reset << ','
-                        << (haveRef ? "ref" : "self") << ',' << (haveRef ? refFile.filename().string() : "") << ','
-                        << m.psnr01_db << ',' << m.psnr_reinhard_db << ',' << m.rgb_rmse << ',' << m.max_abs << ',' << m.mean_abs << ','
-                        << m.max_ulp << ',' << m.exact_half_pct << ',' << m.non_finite << ',' << m.diff_halfs << '\n';
+                    const bool haveRef = !args.refDir.empty() && TryLoadRawRgba16f(refFile, px.size(), ref);
+                    if (haveRef)
+                    {
+                        FrameMetrics m = CompareRgba16f(ref, px);
+                        m.non_finite = curNonFinite;
+                        frameMetrics[f] = m;
+                        ++caseRefFrames;
+                        ++totalRefFrames;
+                        csv << c.id << ',' << f << ',' << phase << ',' << rw << ',' << rh << ',' << reset << ','
+                            << "ref" << ',' << refFile.filename().string() << ','
+                            << m.psnr01_db << ',' << m.psnr_reinhard_db << ',' << m.rgb_rmse << ',' << m.max_abs << ',' << m.mean_abs << ','
+                            << m.max_ulp << ',' << m.exact_half_pct << ',' << curNonFinite << ',' << m.diff_halfs << ',' << outSha << '\n';
+                    }
+                    else
+                    {
+                        ++caseMissingRefFrames;
+                        ++totalMissingRefFrames;
+                        csv << c.id << ',' << f << ',' << phase << ',' << rw << ',' << rh << ',' << reset << ','
+                            << "missing_ref" << ",,,,,,,,," << curNonFinite << ",," << outSha << '\n';
+                    }
                     if (c.pass == "probes" && f == 15)
                     {
                         ownF015 = px;
-                        if (!args.refDir.empty())
+                        if (haveRef)
                         {
-                            std::vector<uint16_t> ref5090;
-                            if (TryLoadRawRgba16f(refFile, px.size(), ref5090)) f015Vs5090 = CompareRgba16f(ref5090, px);
+                            f015Vs5090 = frameMetrics[f];
+                            haveF015Vs5090 = true;
                         }
                     }
-                    if (f == 0 && c.pass == "probes") { /* kept for potential f000 comparisons */ }
                 }
             }
             Require(api.v3.v2.v1.Destroy(ctx) == ONR_RR_OK, "Destroy failed");
@@ -869,18 +931,29 @@ int RunMain(const Args& args)
         // Summary row
         summary << (written++ ? ",\n" : "") << "    {\n"
                 << "      \"id\": \"" << c.id << "\",\n"
-                << "      \"status\": \"" << status << "\",\n";
+                << "      \"status\": \"" << status << "\",\n"
+                << "      \"ref_frames\": " << caseRefFrames << ",\n"
+                << "      \"missing_ref_frames\": " << caseMissingRefFrames << ",\n"
+                << "      \"non_finite\": " << caseNonFinite << ",\n";
         if (!frameMetrics.empty())
         {
             double worst = 999.0, worstRmse = 0.0;
             for (auto& [f, m] : frameMetrics) { worst = std::min(worst, m.psnr01_db); worstRmse = std::max(worstRmse, m.rgb_rmse); }
             auto at = [&](uint32_t f) { auto it = frameMetrics.find(f); return it == frameMetrics.end() ? -1.0 : it->second.psnr01_db; };
             summary << "      \"min_psnr01_db\": " << worst << ",\n"
+                    << "      \"worst_rgb_rmse\": " << worstRmse << ",\n"
                     << "      \"f000_psnr01_db\": " << at(0) << ",\n"
                     << "      \"f063_psnr01_db\": " << at(63) << ",\n"
                     << "      \"drs_f067_psnr01_db\": " << at(67) << ",\n"
-                    << "      \"drs_f075_psnr01_db\": " << at(75) << ",\n"
-                    << "      \"f015_vs_5090_psnr01_db\": " << f015Vs5090.psnr01_db << ",\n"
+                    << "      \"drs_f075_psnr01_db\": " << at(75) << ",\n";
+        }
+        else
+        {
+            summary << "      \"min_psnr01_db\": null,\n";
+        }
+        if (haveF015Vs5090)
+        {
+            summary << "      \"f015_vs_5090_psnr01_db\": " << f015Vs5090.psnr01_db << ",\n"
                     << "      \"f015_vs_5090_max_ulp\": " << f015Vs5090.max_ulp << ",\n"
                     << "      \"f015_vs_5090_rgb_rmse\": " << f015Vs5090.rgb_rmse << ",\n"
                     << "      \"f015_vs_5090_diff_halfs\": " << f015Vs5090.diff_halfs << ",\n";
@@ -923,9 +996,23 @@ int RunMain(const Args& args)
         }
     }
 
-    summary << "\n  ]\n}\n";
+    summary << "\n  ],\n"
+            << "  \"total_ref_frames\": " << totalRefFrames << ",\n"
+            << "  \"total_missing_ref_frames\": " << totalMissingRefFrames << ",\n"
+            << "  \"total_non_finite\": " << totalNonFinite << "\n}\n";
     std::ofstream(args.outDir / "summary.json", std::ios::binary) << summary.str();
-    std::printf("DONE %s / %s -> %s\n", args.suite.c_str(), cfg.name.c_str(), args.outDir.string().c_str());
+    csv.close();
+    gatesCsv.close();
+    if (cmpCsv.is_open()) cmpCsv.close();
+    if (!args.compareFramesDir.empty())
+    {
+        std::printf("COMPARE %s (%s): frames=%zu diff_frames=%zu total_diff_halfs=%zu max_ulp=%u min_psnr01_db=%.3f\n",
+                    args.suite.c_str(), cfg.name.c_str(), cmpFrames, cmpDiffFrames, cmpTotalDiffHalfs, cmpMaxUlp, cmpMinPsnr01);
+    }
+    Require(totalNonFinite == 0, "non-finite output halfs detected across readback frames: " + std::to_string(totalNonFinite));
+    std::printf("DONE %s / %s -> %s (ref=%zu, missing_ref=%zu, non_finite=%zu)\n",
+                args.suite.c_str(), cfg.name.c_str(), args.outDir.string().c_str(),
+                totalRefFrames, totalMissingRefFrames, totalNonFinite);
     return 0;
 }
 
@@ -942,6 +1029,8 @@ int main(int argc, char** argv)
         else if (a == "--dlssd") args.dlssd = next("--dlssd");
         else if (a == "--ref-dir") args.refDir = next("--ref-dir");
         else if (a == "--out") args.outDir = next("--out");
+        else if (a == "--dump-frames") args.dumpFramesDir = next("--dump-frames");
+        else if (a == "--compare-frames") args.compareFramesDir = next("--compare-frames");
         else if (a == "--suite") args.suite = next("--suite");
         else if (a == "--config") args.config = next("--config");
         else if (a == "--cases") args.casesJson = next("--cases");

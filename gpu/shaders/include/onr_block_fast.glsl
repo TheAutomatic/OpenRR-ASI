@@ -326,7 +326,7 @@ ACC bias_acc_t(F16Buf b, uint n0) {
 // LT_UP8 (decoder _0, W1 and W2) and LT_MI8 (enc1): the up and the input merge products on e4m3 x e4m3 -> fp32 as well. Their B
 // operands are the e4m3 bytes of the planes they read and their weights are exact e4m3 (Engine::upload_stage keeps the codes
 // after the fp16 values); one rounding to fp16 per output instead of one per 16 K
-#if FP8QV || defined(LT_UP8) || defined(LT_MI8) || defined(LT_MLP8) || defined(LT_VO8) || (defined(LT_E8RAW) && (!defined(ONR_GFX11) || !ONR_GFX11))
+#if FP8QV || defined(LT_UP8) || defined(LT_MI8) || defined(LT_MLP8) || defined(LT_VO8) || defined(LT_PV8) || (defined(LT_E8RAW) && (!defined(ONR_GFX11) || !ONR_GFX11))
 #extension GL_EXT_float_e4m3 : require
 #define QA8 coopmat<floate4m3_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseA>
 #define QB8 coopmat<floate4m3_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseB>
@@ -396,6 +396,20 @@ float gelu_f32(float x) {
 #define GELUQ8(h, g8) { [[unroll]] for (int i_ = 0; i_ < (g8).length(); i_ += 2) { \
         fe4m3vec2 q_ = qe4_pair32(vec2(gelu_f32((h)[i_]), gelu_f32((h)[i_ + 1]))); \
         (g8)[i_] = q_.x, (g8)[i_ + 1] = q_.y; } }
+#ifdef LT_PV8
+#if ONR_GFX11
+#error "LT_PV8 requires RDNA4 wave32 cooperative matrix fragment layout"
+#endif
+uvec2 pv8_pack(QC8 v) {
+    return uvec2(qe4_pack2(qe4_pair32(vec2(v[0], v[1])), qe4_pair32(vec2(v[2], v[3]))),
+                 qe4_pack2(qe4_pair32(vec2(v[4], v[5])), qe4_pair32(vec2(v[6], v[7]))));
+}
+#define PV8_LOAD_A(a, idx2) { uvec2 w_ = lds2[idx2]; u8vec4 b0_ = unpack8(w_.x), b1_ = unpack8(w_.y); \
+        (a)[0] = uintBitsToFloate4m3EXT(b0_.x), (a)[1] = uintBitsToFloate4m3EXT(b0_.y), \
+        (a)[2] = uintBitsToFloate4m3EXT(b0_.z), (a)[3] = uintBitsToFloate4m3EXT(b0_.w), \
+        (a)[4] = uintBitsToFloate4m3EXT(b1_.x), (a)[5] = uintBitsToFloate4m3EXT(b1_.y), \
+        (a)[6] = uintBitsToFloate4m3EXT(b1_.z), (a)[7] = uintBitsToFloate4m3EXT(b1_.w); }
+#endif
 #endif
 
 // GPU fragment position of arena channel a (inverse of arena_channel within a plane)
@@ -581,6 +595,9 @@ f16vec2 gelu2(f16vec2 x) {
 
 #if ENC_EMBED && ENC_F32 && !W1
 #error "enc0_attr_f writes the dithered 64-byte record (ATTR64), which only the W1 embed reads"
+#endif
+#if defined(LT_PV8) && (W1 || W2 || !TR || SPLIT != 1 || !FP8QV)
+#error "LT_PV8 requires TR && SPLIT == 1 && FP8QV && !W1 && !W2"
 #endif
 #if W1
 #include "onr_block_w1.glsl"
@@ -959,8 +976,17 @@ void main() {
 #if FP8QV
         QC8 q0 = QC8(0.0), q1 = QC8(0.0), v0 = QC8(0.0), v1 = QC8(0.0);
         uint64_t wa8 = uint64_t(pc.in_a) + uint64_t(QV8_OFF), wb8 = uint64_t(pc.in_b) + uint64_t(QV8_OFF);
+#ifdef LT_PV8
+#define QV_T8_PV(yn, n) W8STEP(q0, wa8, hd * 32u * ENC_C + (n) * 16u, yn) W8STEP(q1, wa8, (hd * 32u + 16u) * ENC_C + (n) * 16u, yn) \
+            { QA8 ya_; [[unroll]] for (int i_ = 0; i_ < 8; ++i_) ya_[i_] = (yn)[i_]; \
+              QB8 wb_; coopMatLoad(wb_, E4View(wb8).v, hd * 32u * ENC_C + (n) * 16u, ENC_C, COL); v0 = coopMatMulAdd(ya_, wb_, v0); \
+              coopMatLoad(wb_, E4View(wb8).v, (hd * 32u + 16u) * ENC_C + (n) * 16u, ENC_C, COL); v1 = coopMatMulAdd(ya_, wb_, v1); }
+        FOR_NY(QV_T8_PV)
+#undef QV_T8_PV
+#else
 #define QV_T8(yn, n) W8STEP(q0, wa8, hd * 32u * ENC_C + (n) * 16u, yn) W8STEP(q1, wa8, (hd * 32u + 16u) * ENC_C + (n) * 16u, yn)             W8STEP(v0, wb8, hd * 32u * ENC_C + (n) * 16u, yn) W8STEP(v1, wb8, (hd * 32u + 16u) * ENC_C + (n) * 16u, yn)
         FOR_NY(QV_T8)
+#endif
 #else
         ACC q0 = ACC(0.0), q1 = ACC(0.0), v0 = ACC(0.0), v1 = ACC(0.0);
 #define QV_T(cn, xn, n) { MBP blo, bhi; XPREP(blo, bhi, xn) \
@@ -985,7 +1011,10 @@ void main() {
         coopMatStore(qh0, lds, qb + r0 * QST, QST, COL);
         coopMatStore(qh1, lds, qb + r0 * QST + 16u, QST, COL);
         // V_h^T [32 dims][VST], so the A operand of P V loads by rows
-#if VROW && !FP8QV
+#ifdef LT_PV8
+        lds2[(vb >> 2) + rt * 64u + ln] = pv8_pack(v0);
+        lds2[(vb >> 2) + rt * 64u + 32u + ln] = pv8_pack(v1);
+#elif VROW && !FP8QV
         coopMatStore(MH(v0), lds, vb + r0, VST, COL);
         coopMatStore(MH(v1), lds, vb + 16u * VST + r0, VST, COL);
 #else
@@ -1036,6 +1065,9 @@ void main() {
             e2[e >> 1] = sm;
         }
         SM_SUM(sum, e2, p0, p1, p2, p3)
+#ifdef LT_PV8
+        float r256_ = float(RCP_SUM(sum)) * 256.0;
+#else
         float16_t r = RCP_SUM(sum);
         [[unroll]] for (int e = 0; e < 8; e += 2) {
             precise f16vec2 u0 = f16vec2(p0[e], p0[e + 1]) * r, u1 = f16vec2(p1[e], p1[e + 1]) * r;
@@ -1044,12 +1076,34 @@ void main() {
             p2[e] = u2.x, p2[e + 1] = u2.y, p3[e] = u3.x, p3[e + 1] = u3.y;
         }
 #endif
+#endif
         // O_h^T [32 dims][16 rows] = V_h^T P^T, K = keys
+#ifdef LT_PV8
+        MH o0, o1;
+        {
+#ifdef PROF_NOSM
+            float r256_ = 256.0;
+#endif
+            QC8 o0_8 = QC8(0.0), o1_8 = QC8(0.0);
+#define PV8_T(p, kt) { QB8 pb_; [[unroll]] for (int e_ = 0; e_ < 8; e_ += 2) { \
+                    fe4m3vec2 q_ = qe4_pair32(vec2(f16vec2((p)[e_], (p)[e_ + 1])) * r256_); \
+                    pb_[e_] = q_.x, pb_[e_ + 1] = q_.y; } \
+                QA8 va_; PV8_LOAD_A(va_, (vb >> 2) + (kt) * 64u + ln) o0_8 = coopMatMulAdd(va_, pb_, o0_8); \
+                PV8_LOAD_A(va_, (vb >> 2) + (kt) * 64u + 32u + ln) o1_8 = coopMatMulAdd(va_, pb_, o1_8); }
+            IFK(rt, 0u) PV8_T(p0, 0u) IFK(rt, 1u) PV8_T(p1, 1u) IFK(rt, 2u) PV8_T(p2, 2u) IFK(rt, 3u) PV8_T(p3, 3u)
+#undef PV8_T
+            [[unroll]] for (int i_ = 0; i_ < 8; ++i_) {
+                o0[i_] = float16_t(o0_8[i_] * (1.0 / 256.0));
+                o1[i_] = float16_t(o1_8[i_] * (1.0 / 256.0));
+            }
+        }
+#else
         ACC o0 = ACC(0.0), o1 = ACC(0.0);
 #define PV_T(p, kt) { MBP blo, bhi; BPREP(blo, bhi, p) MA a_; \
             coopMatLoad(a_, lds, vb + (kt) * 16u, VST, ROW); TSTEP(o0, a_, blo, bhi) \
             coopMatLoad(a_, lds, vb + 16u * VST + (kt) * 16u, VST, ROW); TSTEP(o1, a_, blo, bhi) }
         IFK(rt, 0u) PV_T(p0, 0u) IFK(rt, 1u) PV_T(p1, 1u) IFK(rt, 2u) PV_T(p2, 2u) IFK(rt, 3u) PV_T(p3, 3u)
+#endif
         // out projection, K = 32 hd + dims
         {
             MBP blo, bhi;

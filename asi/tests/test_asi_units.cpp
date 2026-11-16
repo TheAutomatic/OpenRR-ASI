@@ -1268,6 +1268,197 @@ static int test_d3d12_gpu_and_engine() {
                 profile_res({2560, 1440}, {3840, 2160}, "4K Quality");
             }
 
+            // ---- Item NFMA: Shipped native ACO FP16 FMA & half_rz numerical boundary checks ----
+            {
+                auto u32_to_f32 = [](uint32_t u) -> float { float f; std::memcpy(&f, &u, sizeof f); return f; };
+                auto f32_to_u32 = [](float f) -> uint32_t { uint32_t u; std::memcpy(&u, &f, sizeof u); return u; };
+                auto f16_to_f32 = [&](uint16_t h) -> float {
+                    const uint32_t s = (uint32_t(h & 0x8000u)) << 16;
+                    const uint32_t e = (h >> 10) & 0x1Fu;
+                    const uint32_t m = h & 0x03FFu;
+                    if (e == 0u) return m ? (s ? -std::ldexp(float(m), -24) : std::ldexp(float(m), -24)) : u32_to_f32(s);
+                    if (e == 0x1Fu) return u32_to_f32(s | 0x7F800000u | (m << 13));
+                    return u32_to_f32(s | ((e + 112u) << 23) | (m << 13));
+                };
+                onr::Kernels k_ds_global, k_ds_native;
+                k_ds_global.load(d3d, spv_dir, {"downsample"});
+                k_ds_native.load_lite(d3d, spv_dir, {"downsample"});
+
+                constexpr int kDsW = 24, kDsH = 24, kOutW = 16, kOutH = 16;
+                onr::Buffer ds_rg = d3d.create(size_t(kDsW) * kDsH * 4);
+                onr::Buffer ds_b  = d3d.create(size_t(kDsW) * kDsH * 2);
+                onr::Buffer ds_exp = d3d.create(16);
+                onr::Buffer ds_out_g = d3d.create(size_t(kOutW) * kOutH * 8);
+                onr::Buffer ds_out_n = d3d.create(size_t(kOutW) * kOutH * 8);
+
+                auto run_ds_pair = [&](float exposure_val, uint16_t& q_g, uint16_t& q_n) {
+                    d3d.upload(ds_exp, &exposure_val, 4);
+                    onr::DownsamplePC pc{ds_rg.addr, ds_b.addr, ds_out_g.addr, ds_exp.addr,
+                                         {kDsW, kDsH}, {kOutW, kOutH}, {0, 0}, {kOutW, kOutH}, {kDsW, kDsH}, {0, kDsW}};
+                    d3d.begin_own();
+                    k_ds_global.downsample(d3d, pc);
+                    pc.dst = ds_out_n.addr;
+                    k_ds_native.downsample(d3d, pc);
+                    d3d.submit_own();
+                    std::vector<uint16_t> og(size_t(kOutW) * kOutH * 4), on(size_t(kOutW) * kOutH * 4);
+                    d3d.download(ds_out_g, og.data(), og.size() * 2);
+                    d3d.download(ds_out_n, on.data(), on.size() * 2);
+                    for (uint16_t h : on) {
+                        if ((h & 0x7C00u) == 0x7C00u) {
+                            std::fprintf(stderr, "FAIL: NFMA downsample_lt produced non-finite half 0x%04x (exp=%g)\n", h, exposure_val);
+                            k2_failed = true;
+                            break;
+                        }
+                    }
+                    // Center pixel (8, 8) avoids border clamp effects on non-uniform tests too.
+                    const size_t cidx = (size_t(8) * kOutW + 8u) * 4u;
+                    q_g = og[cidx];
+                    q_n = on[cidx];
+                };
+
+                // Sub-test A: half_rz FP16 grid, subnormal, 65504 boundary & midpoint tie-toward-zero sweep
+                d3d.fill(ds_rg, 0x3C003C00u);   // uniform 1.0hf -> clamped filter v == 1.0f exact
+                d3d.fill(ds_b,  0x3C003C00u);
+                const float ds_t = (1.0f * u32_to_f32(0x4031c71cu)) * u32_to_f32(0x40549a78u);
+                const float ds_num = (std::exp2(ds_t) - 1.0f) * u32_to_f32(0x3c23d70au);
+
+                size_t ds_parity_mismatches = 0;
+                auto check_ds_target = [&](double target_y, uint16_t& q_n) {
+                    const float exp_v = float(double(ds_num) / target_y);
+                    uint16_t q_g = 0;
+                    run_ds_pair(exp_v, q_g, q_n);
+                    if (q_g != q_n) ++ds_parity_mismatches;
+                };
+
+                // Sweep across odd-mantissa midpoints (where RNE rounds up 0x3c01->0x3c02, 0x4001->0x4002, 0x7bfe->0x7bff)
+                // and across exact grid points to prove half_rz always truncates toward zero instead of rounding up.
+                struct TieCase { double mid; uint16_t lo_h, hi_h; };
+                const TieCase ties[] = {
+                    { 1.0 + std::ldexp(1.0, -10) + std::ldexp(1.0, -11), 0x3C01u, 0x3C02u },
+                    { 1.0 + std::ldexp(3.0, -10) + std::ldexp(1.0, -11), 0x3C03u, 0x3C04u },
+                    { 2.0 + std::ldexp(1.0, -9)  + std::ldexp(1.0, -10), 0x4001u, 0x4002u },
+                    { 65472.0 + 16.0,                                    0x7BFEu, 0x7BFFu },
+                };
+                for (const TieCase& tc : ties) {
+                    bool saw_lo = false, saw_hi = false;
+                    uint32_t hi_at_mid_minus1ulp = 0;
+                    for (int ulp = -6; ulp <= 6; ++ulp) {
+                        const double target = u32_to_f32(f32_to_u32(float(tc.mid)) + ulp);
+                        uint16_t qn = 0;
+                        check_ds_target(target, qn);
+                        if (qn == tc.lo_h) saw_lo = true;
+                        if (qn == tc.hi_h) saw_hi = true;
+                        // At ulp >= +3 above midpoint, y is strictly above tie so RNE rounds up, yet y < hi_h so half_rz must still give lo_h
+                        if (ulp >= 2 && ulp <= 4 && qn != tc.lo_h) ++hi_at_mid_minus1ulp;
+                    }
+                    if (!saw_lo || saw_hi || hi_at_mid_minus1ulp != 0) {
+                        std::fprintf(stderr, "FAIL: NFMA half_rz tie-toward-zero failed for lo=0x%04x hi=0x%04x (saw_lo=%d saw_hi=%d hi_at_mid=%u)\n",
+                                     tc.lo_h, tc.hi_h, int(saw_lo), int(saw_hi), hi_at_mid_minus1ulp);
+                        k2_failed = true;
+                    }
+                    uint16_t q_hi_check = 0;
+                    check_ds_target(u32_to_f32(f32_to_u32(f16_to_f32(tc.hi_h)) + 4), q_hi_check);
+                    if (q_hi_check != tc.hi_h) {
+                        std::fprintf(stderr, "FAIL: NFMA half_rz upper step failed for hi=0x%04x (got 0x%04x)\n", tc.hi_h, q_hi_check);
+                        k2_failed = true;
+                    }
+                }
+                // Above max normal (65520..65600 -> float16_t +Inf decremented by half_rz to 0x7bff = 65504.0hf) and subnormals
+                {
+                    uint16_t q_max = 0, q_sub1 = 0, q_sub2 = 0, q_zero = 0;
+                    check_ds_target(65600.0, q_max);
+                    check_ds_target(std::ldexp(1.0, -24), q_sub1);
+                    check_ds_target(std::ldexp(1.0, -15), q_sub2);
+                    check_ds_target(std::ldexp(1.0, -26), q_zero);
+                    if (q_max != 0x7BFFu || q_zero != 0x0000u || (q_sub1 & 0x7C00u) != 0u) {
+                        std::fprintf(stderr, "FAIL: NFMA half_rz boundary (q_max=0x%04x q_sub1=0x%04x q_sub2=0x%04x q_zero=0x%04x)\n",
+                                     q_max, q_sub1, q_sub2, q_zero);
+                        k2_failed = true;
+                    }
+                }
+
+                // Sub-test B: -0.0, +0.0, FP16 subnormals, and +-65504 checkerboard through native downsample_lt vs global downsample
+                std::vector<uint32_t> rg_pat(size_t(kDsW) * kDsH);
+                std::vector<uint16_t> b_pat(size_t(kDsW) * kDsH);
+                const uint16_t corner_vals[] = { 0x8000u /*-0*/, 0x0001u /*subnorm min*/, 0x03FFu /*subnorm max*/, 0x7BFFu /*+65504*/, 0xFBFFu /*-65504*/ };
+                for (int ci = 0; ci < 5; ++ci) {
+                    const uint16_t h0 = corner_vals[ci];
+                    const uint16_t h1 = (ci >= 3) ? uint16_t(h0 ^ 0x8000u) : h0;
+                    for (int y = 0; y < kDsH; ++y) {
+                        for (int x = 0; x < kDsW; ++x) {
+                            const uint16_t hv = ((x ^ y) & 1) ? h1 : h0;
+                            rg_pat[size_t(y) * kDsW + x] = uint32_t(hv) | (uint32_t(hv) << 16);
+                            b_pat[size_t(y) * kDsW + x] = hv;
+                        }
+                    }
+                    d3d.upload(ds_rg, rg_pat.data(), rg_pat.size() * 4);
+                    d3d.upload(ds_b, b_pat.data(), b_pat.size() * 2);
+                    uint16_t qg = 0, qn = 0;
+                    run_ds_pair(1.0f, qg, qn);
+                    const uint16_t diff_ulp = (qg > qn) ? (qg - qn) : (qn - qg);
+                    if (diff_ulp > 1u || !std::isfinite(f16_to_f32(qn))) {
+                        std::fprintf(stderr, "FAIL: NFMA downsample_lt corner val=0x%04x global=0x%04x native=0x%04x\n", h0, qg, qn);
+                        k2_failed = true;
+                    }
+                }
+                if (ds_parity_mismatches != 0) {
+                    std::fprintf(stderr, "FAIL: NFMA native vs global downsample had %zu bit mismatches in sweep\n", ds_parity_mismatches);
+                    k2_failed = true;
+                }
+                for (onr::Buffer* db : {&ds_rg, &ds_b, &ds_exp, &ds_out_g, &ds_out_n}) d3d.destroy(*db);
+                k_ds_native.unload(d3d);
+                k_ds_global.unload(d3d);
+
+                // Sub-test C: Full 22-kernel native _lt pipeline stress with -0.0, min subnormals, and +-65504
+                eng.resize(r_a, out_sz);
+                eng.set_fast(true);
+                eng.set_lite(&k_lite);
+                eng.set_lite_on(true);
+                ef.render = r_a;
+                ef.output = out_sz;
+                const uint32_t stress_fills[] = { 0x80008000u /*-0.0*/, 0x00010001u /*subnorm min*/, 0x7BFF7BFFu /*+65504*/ };
+                std::vector<uint16_t> stress_a, stress_b;
+                for (size_t si = 0; si < 3; ++si) {
+                    const uint32_t col_w = stress_fills[si];
+                    d3d.begin_batch();
+                    d3d.fill(b_col, col_w);
+                    d3d.fill(b_alb, 0x80808080u);
+                    d3d.fill(b_spc, 0x20202020u);
+                    d3d.fill(b_nrm, 0x00003C00u);
+                    d3d.fill(b_rgh, 0x38003800u);
+                    d3d.fill(b_dep, 0x3F800000u);
+                    d3d.fill(b_mv, 0u);
+                    d3d.fill(b_hit, 0x38003800u);
+                    d3d.fill(b_out, 0u);
+                    d3d.end_batch();
+                    const int repeats = (si == 2) ? 10 : 1;
+                    for (int rep = 0; rep < repeats; ++rep) {
+                        ef.reset = (si != 2) || (rep == 0 || rep == 1 || rep == 9);
+                        d3d.begin_own();
+                        eng.record(ef, g, b_out.addr);
+                        d3d.submit_own();
+                        std::vector<uint16_t> sout(size_t(out_sz.x) * out_sz.y * 4);
+                        d3d.download(b_out, sout.data(), sout.size() * 2);
+                        size_t s_nf = 0;
+                        for (uint16_t h : sout) if ((h & 0x7C00u) == 0x7C00u) ++s_nf;
+                        if (s_nf != 0) {
+                            std::fprintf(stderr, "FAIL: NFMA k_lite full pipeline non_finite=%zu on fill=0x%08x rep=%d\n", s_nf, col_w, rep);
+                            k2_failed = true;
+                        }
+                        if (si == 2 && rep == 1) stress_a = std::move(sout);
+                        else if (si == 2 && rep == 9) stress_b = std::move(sout);
+                    }
+                }
+                if (stress_a.empty() || stress_a != stress_b) {
+                    std::fprintf(stderr, "FAIL: NFMA k_lite 65504 8-frame phase-aligned repeat run non-deterministic\n");
+                    k2_failed = true;
+                }
+                if (!k2_failed) {
+                    std::printf("[PASS] Item NFMA (native ACO FP16 FMA & half_rz: 0/%zu downsample bit mismatches, 4 odd-tie + subnorm + 65504 + -0.0 checks, 22-kernel finite & deterministic)\n",
+                                size_t(4 * 14 + 4));
+                }
+            }
+
             for (onr::Buffer* b : {&b_col, &b_alb, &b_spc, &b_nrm, &b_rgh, &b_dep, &b_mv, &b_hit, &b_out})
                 d3d.destroy(*b);
             eng.destroy();

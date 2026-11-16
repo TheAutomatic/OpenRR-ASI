@@ -251,15 +251,22 @@ def main():
                   mesa_commit=cfg['mesa_commit'], patch_version=cfg['patch_version'], fingerprint=fingerprint,
                   compile_options=dict(subgroup=32, require_full_subgroups=True, features='gpu/src/vk.cpp Device::init', **policy),
                   records=records, failures=failures)
+    failure_report = raw / 'failures.json'
+    msgpack_path = root / 'manifest.msgpack'
+    if failures:
+        failure_report.parent.mkdir(parents=True, exist_ok=True)
+        failure_report.write_text(json.dumps(output, indent=2) + '\n')
+        manifest_path.unlink(missing_ok=True)
+        msgpack_path.unlink(missing_ok=True)
+        raise SystemExit(f'{len(failures)} capture(s) failed; see {failure_report}')
+    failure_report.unlink(missing_ok=True)
     manifest_path.write_text(json.dumps(output, indent=2)+'\n')
     # Runtime index uses the existing PAL MessagePack codec; bind it to the reviewable JSON.
     index = {k: output[k] for k in ('schema', 'target', 'layout_version', 'wave_size', 'layout_push_bytes', 'mesa_commit', 'patch_version')}
     index['manifest_hash'] = fnv(manifest_path.read_bytes())
     index['records'] = {k: {f: r[f] for f in ('spv_hash', 'code_hash', 'workgroup', 'layout', 'record')}
                         for k, r in records.items()}
-    (root/'manifest.msgpack').write_bytes(msgpack(index))
-    if failures:
-        raise SystemExit(f'{len(failures)} capture(s) failed; see {manifest_path}')
+    msgpack_path.write_bytes(msgpack(index))
     for stale in root.glob('*.nrp'):
         if stale.stem not in records:
             stale.unlink()

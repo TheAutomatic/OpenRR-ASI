@@ -181,5 +181,26 @@ class BuildPolicyTests(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in self.manifest_path.parent.glob('*.nrp')),
                          sorted(r['record'] for r in m['records'].values()))
 
+    def test_failed_capture_does_not_publish_partial_manifest(self):
+        self.build()
+        msgpack_path = self.manifest_path.parent / 'manifest.msgpack'
+        self.assertTrue(self.manifest_path.exists() and msgpack_path.exists())
+        def fail_selected(args, **kwargs):
+            if Path(args[1]).stem == 'selected':
+                return subprocess.CompletedProcess(args, 1, '', 'simulated capture crash')
+            return self.fake_capture(args, **kwargs)
+        args = ['records', str(self.inputs), '--out', str(self.out), '--toolchain', str(self.cfg),
+                '--capture', str(self.capture), '--capture-dir', str(self.raw),
+                '--precision', 'native', '--matrix-loads', 'vector8', '--refresh']
+        with patch.object(sys, 'argv', args), patch.object(producer.subprocess, 'run', fail_selected), \
+             contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()), \
+             self.assertRaises(SystemExit):
+            producer.main()
+        self.assertFalse(self.manifest_path.exists())
+        self.assertFalse(msgpack_path.exists())
+        failures = json.loads((self.raw / 'failures.json').read_text())
+        self.assertEqual(len(failures['failures']), 1)
+        self.assertIn('selected.spv', failures['failures'][0]['spv'])
+
 if __name__ == '__main__':
     unittest.main()
