@@ -50,7 +50,9 @@
 
 ---
 
-## 维度 3 — 终局同宿主同 SPIR-V ACO vs 驱动 LLPC（对照③，`New=1`）
+## 维度 3 — 终局同宿主同 SPIR-V ACO vs 驱动 LLPC（对照③：`mode-4` FP8 驱动回退惩罚检验）
+
+> **口径补充说明（Stage 9 核定）**：本节使用与离线 ACO 相同的 **`mode-4` `saturatedConvertEXT` FP8 着色器**强行交由 Windows 驱动 LLPC 编译。由于驱动 LLPC 缺乏硬件饱和折叠通道而展开为软件 `clamp + class + cndmask` 指令海，此口径下的 LLPC（`13.089 ms`）比官方上游原版 `OpenRR v0.1.6` 使用其原版 FP16 为主着色器跑驱动 LLPC（`11.386 ms`）慢约 `+15.0%`。因此本节量化的是**“这套 ACO 专用 FP8 着色器回退驱动 LLPC 时的惩罚幅度（论证必须绑定 `.nrp` 发布）”**，并非跨栈对标官方原版 `v0.1.6` 的净提速。与官方上游原版 `v0.1.6`（`OpenNrRrRuntime.dll`）的正面对决实测见 [`v016-stage9-wave-d-final-audit.md`](v016-stage9-wave-d-final-audit.md) §2.1（解沙袋终态下 `New=1` 提速 `+5.0%..+6.8%`、`Fast=2` 提速 `+6.6%..+7.9%`）。
 
 使用同一封板宿主 `e745d71`、同一组 SPIR-V 仅切换 `--candidate-compiler llpc` vs `aco-strict`：
 

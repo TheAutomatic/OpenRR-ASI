@@ -27,7 +27,7 @@
 |---|---|---|
 | ① `ref-stage7-b2`（15286e3 冻结包） | 22 核 @idx 4K + 3×ABBA 双分辨率 | @idx：94 记录中 81 逐字节一致；13 核静态变化全部可解释（enc0_attr 家族 = NaN 位级+视图直读；downsample_tl = TLLDS；enc0/dec_head `_f` = w1 布局桥代码重排，VGPR 216→240）；**帧级 ABBA：4K −0.028%（4/6 负，噪声内），1080p +0.411%（0/6 负，噪声外，≈+12µs）** |
 | ② `ref-016-release`（7e1df92 原生包，独立 worktree 构建，LLPC） | **Anchor #1**：Legacy=0 位级 | **1080p & 4K steady+DRS 全部 100.0000% 0-ULP（999.00 dB），parity_passed=True** |
-| ③ `ref-016-samehost-llpc`（同宿主同 SPIR-V，仅 `--candidate-compiler llpc`） | @idx 4K + 3×ABBA 双分辨率 | **LLPC 帧级慢 +18.85% @4K（0/6）/ +17.07% @1080p（0/6）**；核级 +18.7%（FP8 核最重：enc_64 +49.0%、dec_up_96 +50.0%、dec_head +26.7%；LLPC 反超仅 downsample −10.2%、enc0_stage −9.8%、dec_up_128 −17.5%、enc0_attr −6.8%）。旧跨包 LLPC 差值全部作废 |
+| ③ `ref-016-samehost-llpc`（同宿主同 SPIR-V，仅 `--candidate-compiler llpc`） | @idx 4K + 3×ABBA 双分辨率 | **LLPC 帧级慢 +18.85% @4K（0/6）/ +17.07% @1080p（0/6）**；核级 +18.7%（FP8 核最重：enc_64 +49.0%、dec_up_96 +50.0%、dec_head +26.7%；LLPC 反超仅 downsample −10.2%、enc0_stage −9.8%、dec_up_128 −17.5%、enc0_attr −6.8%）。旧跨包 LLPC 差值全部作废 *(注：本对照检验的是 ACO 专用 `saturatedConvertEXT` FP8 着色器回退给驱动 LLPC 编译时的惩罚——其耗时慢于上游原版 FP16 着色器跑 LLPC；跨栈对标官方原版 `v0.1.6` `OpenNrRrRuntime.dll` 见 [`v016-stage9-wave-d-final-audit.md`](v016-stage9-wave-d-final-audit.md) §2.1)* |
 | A/A 噪声带（同包自比 3×ABBA） | 4K / 1080p | 中位 +0.014% / −0.090%；对带 ±0.23% / ±0.26%。**未改动核 ±0.5% 为异常排查触发线** |
 
 **双列 Anchor #2（fast-aco，v1 76 + v2_motion 44）**：合流包哈希门 v1 76/76、v2 44/44 全过，双侧 non_finite=0；与合流前 `final-anchor2` 逐帧 PSNR 差 **全部 +0.0000 dB**（画质零变化，`Q_S0_4k_perf` 52.0368 / `Q_S1_1080p_qual` 39.0973 与晋级时一致）。相对固定 `4332470` 累计账本不变；相对 `frozen-016-base` 本轮增量差 = 0（首个封板点）。

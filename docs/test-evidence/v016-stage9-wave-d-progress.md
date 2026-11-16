@@ -109,3 +109,31 @@ FLOW=0 净赢 ~55 µs（空隙 −108.6 µs 吸收 barriers 串行 +24.9 µs；3
 - 全部构建：WSL `build_asi.sh build/aco-v015` + `build_runtime_trace.sh`；`94/94` 记录 + `94/94` 磁盘 `.nrp`（`build_aco_records.py` 已固化自动清退孤儿 `.nrp`）、`0` failures、`scratch=0` 每轮核验。
 - 套件：`test_aco_build_policy`（**10/10**，新增 `test_stale_nrp_pruned_on_success`）、`test_present_scope`、`test_dxgi_queue`、`test_asi_units`（含新 WP-D1/D5 断言 + 引擎 1080p/4K 档）全部 PASS。
 - 事故 1：anchor2 首跑指向正被 W1A8 重建覆写的 `build/aco-v015` → "missing metadata" 假失败；改为冻结包 `-Pkg` 后通过（教训：测量一律用冻结目录）。
+
+## 10. 第三轮：ACO 捕获解沙袋（`be5b1ce`）与对照 ③ 口径纠偏
+
+### 10.1 排查动机与三项实锤定位
+
+对比官方原版 `OpenRR v0.1.6`（`OpenNrRrRuntime.dll`）时发现两条线索：① `Legacy=0`（同 `.spv`）下 ACO 比官方 LLPC 慢 `5%~9%`（符合 `ONR_ACO_PRECISION=global` 保 `0-ULP` 的代价）；② 查看 `manifest.json` 与 `asi/build/build_asi.sh:139-141` 发现 Stage 7/8 手写白名单与 Mesa 26.3 捕获补丁给 `New=1` 和 `Fast=2` 留了三袋“沙袋”：
+
+1. **6 处快模式核漏进 `--cmat-address-shaders`**：`enc0_stage_32_64_f_lx`、`enc0_stage_32_64_f_w_lx`、`dec_up_32_64_64_f_lx`、`dec_head_32_64_f_lx`、`dec_up_64_64_96_f_lt`、`dec_dfn_64_64_f_lt` 全被遗漏（`cmat_address=false`；不加 Legacy `_f` 核以保 50/50 Legacy `0-ULP` 不变量）。
+2. **`precision=native` 触发 `v_pk_fma_f16` 被迫拆半（−16..−72 条/核）的 NIR 根因**：`spirv-dis` 排查 `dec_up_32_64_64_f_lt.spv` 证实，GLSL `exp_bits2()` 中的 `precise f16vec2 tl = fma(zl, -zl, 4*POLY_A)` 经 `glslang` 生成带 `NoContraction` 的 `OpFNegate (-zl)` + 无 `NoContraction` 的 `OpExtInst Fma`（在 `spirv_to_nir` 落作 `ffma_weak@16`）。在 `ONR_ACO_PRECISION=native` 下，早先代码未把 16 位 `ffma_weak` 升为 `ffma`，且 RADV 未像 RadeonSI 那样为 16 位开启 `nir_float_muladd_support_fuse`，导致 `nir_opt_algebraic` 将 `ffma_weak@16` 拆成 `fmul // exact` + `fsub // exact`，随后因 `// exact` 无法在 late pass 重融合。修复（`asi/build/mesa/prepare_capture.py`）：
+   - `native` 模式下设置 `options->float_mul_add16 |= nir_float_muladd_support_fuse`（保持 `float_mul_add32` 不动以保留 `post_f_lt` 的 60 条 `v_dual_fmac_f32`）；
+   - 将 `alu->op == nir_op_ffma_weak` 且 `alu->def.bit_size == 16` 在 `native` 下同 `!onr_native` 一样直接升格为 `nir_op_ffma`（不附加 `nir_fp_exact`）。
+3. **11 个 `New=1` 神经网络主干核 + 全部 `_lx` 核及 `downsample_lt/tl_lt` 仍锁在 `precision=global`（全 ALU 强打 `nir_fp_exact`）**：经 44 核干式采集与 HW IR 清点，解锁全部 41 个零 VGPR 升档的 `_lt`/`_lx` 核（保留 `dfn_import_lt / dfn_export_lt / pooled_history2_lt` 于 `global`）后，全 44 核 `v_pk_fma_f16` **0 拆半（`pkfma=+0`）**、**`TIER_BUMPS: []`**（零 VGPR 驻留升档）、**全核 `scratch=0`**、`enc_stage_64_64_96_f_lt` 体积净减 `-908 B`。
+
+### 10.2 构建与门禁全绿（`be5b1ce` vs 冻结 `pre-unshackle-9ebfb19`）
+
+- **不变量**：`manifest.json` 94/94、`failures=0`、磁盘实存 94/94 `.nrp`、全核 `scratch=0`、**50/50 Legacy `.nrp` `code_hash` 较 `9ebfb19` 零变化**；`shaders-gfx11` 94/94 零 `Float8`/4212/4213；`test_aco_build_policy` 10/10、`test_present_scope` / `test_dxgi_queue` / `test_asi_units` 及 `%TEMP%\cold-install-unshackle`（130/130 `compiler=ACO`）全 `EXIT=0`。
+- **配对 `@idx 4K`（600 帧，`FLOW=1`，Pareto 检查零核退化 >+1.6 µs，全 41 核无剔除保留）**：
+  - `New=1` 22 核总和 `10584.8 -> 10525.7 µs`（**`−59.1 µs / −0.56%`**）：主力胜出 `enc0_stage_32_64_f_lt −12.6`、`dec_up_64_64_96_f_lt −11.9`、`enc_stage_64_64_96_f_lt −10.8`、`dec_head_32_64_f_lt −8.1`、`dec_up_32_64_64_f_lt −7.4 µs`。
+  - `Fast=2` 22 核总和 `10234.3 -> 10118.2 µs`（**`−116.1 µs / −1.13%`**）：主力胜出 `dec_head_32_64_f_lx −28.6`（`−2.82%`）、`dec_up_32_64_64_f_lx −18.5`、`dec_up_64_64_96_f_lt −17.4`、`enc_stage_64_64_96_f_lt −15.1`、`enc0_stage_32_64_f_lx −14.8`、`dec_dfn_64_64_f_lt −7.0 µs`。
+- **解沙袋前后同栈 `3×ABBA`（默认 `FLOW=0`，240f，`nf=0`）**：
+  - `New=1`：1080p `2.8264 -> 2.8133 ms`（**`−0.47%` / 6/6**）、4K `10.7154 -> 10.6590 ms`（**`−0.53%` / 5/6**）；
+  - `Fast=2`：1080p `2.6568 -> 2.6380 ms`（**`−0.71%` / 6/6**）、4K `10.3448 -> 10.2722 ms`（**`−0.70%` / 6/6**）。
+- **质量门禁**：Anchor #1 vs 官方 `OpenNrRrRuntime.dll v0.1.6`（1080p+4K steady+DRS）**100% 0-ULP**；Anchor #2 三列全绿——`fast-aco` vs `stage8-seal` v1 `76/76`（`+0.0051..+0.0082 dB`）、v2 `44/44` 最差 **−0.0736 dB**（较 `9ebfb19` 的 `−0.1415` 更优；vs 固定 `4332470` v1 `+3.80..+18.05` / v2 `−0.0490`）；`exp-aco` vs `s8-exp` v1 最差 `+0.0405` / v2 最差 `−0.0374`；`FLOW=0` 与 `FLOW=1` 全用例 **`+0.0000 dB`**；`nf=0`。
+
+### 10.3 对标官方原版 `v0.1.6` 与对照 ③ 口径纠偏
+
+- 下载并校验上游官方 `openrr-0.1.6.zip`（`OpenNrRrRuntime.dll` + 93 `.spv`，官方开箱默认 `FLOW=1`），在同热态交错 `3×ABBA` 8 组共 **48/48** 腿全胜（`nf=0`）：开箱默认下 `New=1` 1080p `−4.74%`（提速 `+4.98%`）、4K **`−6.11%`**（提速 **`+6.51%`**，`−0.695 ms`）；`Fast=2` 1080p `−6.16%`（提速 `+6.57%`）、4K **`−7.31%`**（提速 **`+7.89%`**，`−0.810 ms`）。全表见 [`v016-stage9-wave-d-final-audit.md`](v016-stage9-wave-d-final-audit.md) §2.1。
+- **对照 ③ 勘误**：Stage 8/9 中“同宿主同 SPIR-V ACO vs LLPC（+21.6%）”实为将 ACO 专用的 `mode-4 saturatedConvertEXT` FP8 着色器硬喂给无硬件饱和折叠的驱动 LLPC（导致该“瘸腿 LLPC”跑到 `13.089 ms`，反比官方原版用自家 FP16 着色器跑 LLPC 的 `11.386 ms` 慢 `+15.0%`）。该数据仅用于证明“魔改 FP8 着色器必须配发离线 ACO 记录、不可回退驱动 LLPC”，跨栈对标原版 `v0.1.6` 统一以 §2.1 为准。
