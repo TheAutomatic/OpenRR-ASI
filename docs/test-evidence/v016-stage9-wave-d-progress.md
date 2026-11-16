@@ -83,6 +83,10 @@ FLOW=0 净赢 ~55 µs（空隙 −108.6 µs 吸收 barriers 串行 +24.9 µs；3
 
 ## 5. 其他已落地（待终包测量）
 
+- **WP-D2a**：`build_aco_records.py` 新增 `--shared-cmat-shaders`（逐核限定 `ONR_ACO_SHARED_CMAT` 作用域；指纹含 `shared_cmat_shaders`；记录含 per-record `shared_cmat`）；`test_aco_build_policy.py` 扩到 8 测全绿（作用域隔离、缓存指纹、off+名单报错、全局模式兼容）。
+- **WP-D3 前置**：`onr_block_w2.glsl` LT_UP8 路径支持 `ENC_CP == 128`（`w3` 记录 + `UP_K3_8`），`>128` 拒绝；`W2_96UP` 门已存在，启用留待测量。
+- **WP-D6 前置**：`XIN2Y`（w2 体）拆为 fma 段 + 集中量化段（压 `s_setreg` MODE 翻转）；`XQ8Y` 审视为纯量化无需拆。
+
 ## 7. 第二轮 Step 2–4 结果（全部按五项证据归档）
 
 - **WP-D2a 实验 A（dec_dfn_160_256 WGP，`--wgp-mode-shaders`，rsrc1 bit29=1 验证）**：帧内配对 `dec_dfn_160_256_fl_lt` **86.8 → 96.3 µs（+9.5/+11%）**，下游 `dec_up_128_128_160_fl_lt` +6.2 µs；Phase-1 的单核 −10.1 µs 为孤立测量，帧内 WGP 反效 → 回退。
@@ -99,11 +103,8 @@ FLOW=0 净赢 ~55 µs（空隙 −108.6 µs 吸收 barriers 串行 +24.9 µs；3
 - Anchor #2 三列：fast-aco v1 全 ≥0（best +0.0307）/ v2 最差 −0.1415；exp-aco vs exp 基线 v1 最差 0.0000（best +0.0406）/ v2 最差 −0.1217；FLOW=0 与 FLOW=1 逐值一致；全部 `non_finite=0`。
 - 6 档 × 3 模式水位（默认 FLOW=0）：Fast 4K Qual **10.4988 ms（3.60x 5090）**、1080p Qual 2.7706（3.18x）、1440p Qual 4.7235（3.36x）、4K Perf 6.6800（3.41x）、1080p DLAA 5.4492（3.53x）、4K UltraPerf 3.8916（3.02x）。
 - 无探针 FLOW 终裁：4K `FLOW=1` 快 −49.1 µs（3×交错中位）——**第一轮 STAMPS 口径的 "F0 快 55 µs" 系探针串行化扭曲**；1080p 中性。宿主默认维持 FLOW=0，双列不混标。
-- **WP-D2a**：`build_aco_records.py` 新增 `--shared-cmat-shaders`（逐核限定 `ONR_ACO_SHARED_CMAT` 作用域；指纹含 `shared_cmat_shaders`；记录含 per-record `shared_cmat`）；`test_aco_build_policy.py` 扩到 8 测全绿（作用域隔离、缓存指纹、off+名单报错、全局模式兼容）。
-- **WP-D3 前置**：`onr_block_w2.glsl` LT_UP8 路径支持 `ENC_CP == 128`（`w3` 记录 + `UP_K3_8`），`>128` 拒绝；`W2_96UP` 门已存在，启用留待测量。
-- **WP-D6 前置**：`XIN2Y`（w2 体）拆为 fma 段 + 集中量化段（压 `s_setreg` MODE 翻转）；`XQ8Y` 审视为纯量化无需拆。
 
-## 6. 构建/门禁记录
+## 9. 构建/门禁记录
 
 - 全部构建：WSL `build_asi.sh build/aco-v015` + `build_runtime_trace.sh`；94/94 记录、0 failures、`scratch=0` 每轮核验。
 - 套件：`test_aco_build_policy`（8/8）、`test_present_scope`、`test_dxgi_queue`、`test_asi_units`（含新 WP-D1/D5 断言 + 引擎 1080p/4K 档）全部 PASS。
