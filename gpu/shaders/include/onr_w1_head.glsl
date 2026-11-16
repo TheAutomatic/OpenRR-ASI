@@ -2,6 +2,103 @@
 // One attention head of the W1 body (onr_block_w1.glsl), hd in scope: once in its loop, or once per head with hd a
 // constant (LT_FAR1), so each head keeps only its own key tiles.
         uint wq = hd * 32u * ENC_C;
+#ifdef LT_W1A8
+        // WP-D5: one head fully on exact-e4m3 weights, f32 accumulators, 8-cycle FP8 WMMA only.
+        // A = the head's Wq rows (codes of in_a), B = quantized x^T; Q^T dims preserved into QB8
+        QA8 wqa0_, wqa1_;
+        coopMatLoad(wqa0_, W1_QA8, wq, ENC_C, ROW);
+        coopMatLoad(wqa1_, W1_QA8, wq + 16u * ENC_C, ENC_C, ROW);
+        QB8 qk00, qk01, qk10, qk11, qk20, qk21, qk30, qk31;   // qk<token tile><dim half>
+        {
+            QC8 t00 = QC8(0.0), t01 = QC8(0.0), t10 = QC8(0.0), t11 = QC8(0.0);
+            QC8 t20 = QC8(0.0), t21 = QC8(0.0), t30 = QC8(0.0), t31 = QC8(0.0);
+            MMA(t00, wqa0_, xq00) MMA(t01, wqa1_, xq00)
+            MMA(t10, wqa0_, xq10) MMA(t11, wqa1_, xq10)
+            MMA(t20, wqa0_, xq20) MMA(t21, wqa1_, xq20)
+            MMA(t30, wqa0_, xq30) MMA(t31, wqa1_, xq30)
+            W1A_Q8(qk00, t00) W1A_Q8(qk01, t01) W1A_Q8(qk10, t10) W1A_Q8(qk11, t11)
+            W1A_Q8(qk20, t20) W1A_Q8(qk21, t21) W1A_Q8(qk30, t30) W1A_Q8(qk31, t31)
+        }
+        // V[tokens][dim half] = x Wv^T: A = the x^T register transpose, B = the head's Wv rows
+        QB8 wvb0_, wvb1_;
+        coopMatLoad(wvb0_, W1_VB8, wq, ENC_C, COL);
+        coopMatLoad(wvb1_, W1_VB8, wq + 16u * ENC_C, ENC_C, COL);
+        QB8 v800, v801, v810, v811, v820, v821, v830, v831;   // v8<token tile><dim half>
+#define W1A_VT(n) { QA8 a_; W1A_TA(a_, xq##n##0) QC8 u0_ = QC8(0.0), u1_ = QC8(0.0); \
+            MMA(u0_, a_, wvb0_) MMA(u1_, a_, wvb1_) W1A_Q8(v8##n##0, u0_) W1A_Q8(v8##n##1, u1_) }
+        W1A_VT(0) W1A_VT(1) W1A_VT(2) W1A_VT(3)
+#undef W1A_VT
+        // S = Q_keys Q_own^T + bias per own tile: A = the key tile's transpose, B = the own tile
+#define W1A_S(s_, ot, j) { MH bh_; coopMatLoad(bh_, pc.bias.v, hd * 4096u + (ot) * 1024u + (j) * 16u, 64u, COL); s_ = QC8(ACC(bh_)); \
+            IFK(j, ot) { QA8 a_; W1A_TA(a_, qk##j##0) MMA(s_, a_, qk##ot##0) W1A_TA(a_, qk##j##1) MMA(s_, a_, qk##ot##1) } }
+        // the softmax's probabilities as f32 products straight into the pair quantizer
+#define W1A_PB(pbj, pj, rf) { [[unroll]] for (int e = 0; e < 8; e += 2) { \
+            vec2 w_ = vec2(float(pj[e]), float(pj[e + 1])) * (rf); \
+            fe4m3vec2 q_ = qe4_pair32(w_); pbj[e] = q_.x, pbj[e + 1] = q_.y; } }
+        // O^T[dim half][own] = sum over key tiles V^T x P, then W_out (UT8 tail) into the oc tiles
+#define W1A_OKT(kt) { QA8 a_; W1A_TA(a_, v8##kt##0) MMA(oh0_, a_, pb##kt) W1A_TA(a_, v8##kt##1) MMA(oh1_, a_, pb##kt) }
+#define W1A_OW(ot) { QB8 oh80_, oh81_; W1A_Q8(oh80_, oh0_) W1A_Q8(oh81_, oh1_) QA8 w_; \
+            coopMatLoad(w_, W1_WOUT8, 0u, ENC_X, ROW); MMA(oc##ot##0, w_, oh80_) \
+            coopMatLoad(w_, W1_WOUT8, 16u, ENC_X, ROW); MMA(oc##ot##0, w_, oh81_) \
+            coopMatLoad(w_, W1_WOUT8, 16u * ENC_X, ENC_X, ROW); MMA(oc##ot##1, w_, oh80_) \
+            coopMatLoad(w_, W1_WOUT8, 16u * ENC_X + 16u, ENC_X, ROW); MMA(oc##ot##1, w_, oh81_) }
+#define W1A_TAIL(ot) { float rf_ = float(RCP_SUM(sum)); \
+            QB8 pb0, pb1, pb2, pb3; \
+            W1A_PB(pb0, p0, rf_) W1A_PB(pb1, p1, rf_) W1A_PB(pb2, p2, rf_) W1A_PB(pb3, p3, rf_) \
+            QC8 oh0_ = QC8(0.0), oh1_ = QC8(0.0); \
+            W1A_OKT(0) W1A_OKT(1) W1A_OKT(2) W1A_OKT(3) \
+            W1A_OW(ot) }
+#define W1A_ATT(ot) if (lv##ot) { \
+            QC8 s0_, s1_, s2_, s3_; \
+            W1A_S(s0_, ot, 0) W1A_S(s1_, ot, 1) W1A_S(s2_, ot, 2) W1A_S(s3_, ot, 3) \
+            MH p0 = MH(s0_), p1 = MH(s1_), p2 = MH(s2_), p3 = MH(s3_); \
+            f16vec2 e2[4]; \
+            [[unroll]] for (int e = 0; e < 8; e += 2) { \
+                f16vec2 t0 = TK(ot, 0u, unpackFloat2x16(exp_bits2(f16vec2(p0[e], p0[e + 1])))); \
+                f16vec2 t1 = TK(ot, 1u, unpackFloat2x16(exp_bits2(f16vec2(p1[e], p1[e + 1])))); \
+                f16vec2 t2 = TK(ot, 2u, unpackFloat2x16(exp_bits2(f16vec2(p2[e], p2[e + 1])))); \
+                f16vec2 t3 = TK(ot, 3u, unpackFloat2x16(exp_bits2(f16vec2(p3[e], p3[e + 1])))); \
+                p0[e] = t0.x, p0[e + 1] = t0.y, p1[e] = t1.x, p1[e + 1] = t1.y; \
+                p2[e] = t2.x, p2[e + 1] = t2.y, p3[e] = t3.x, p3[e + 1] = t3.y; \
+                precise f16vec2 sm = (t0 + t1) + (t2 + t3); \
+                e2[e >> 1] = sm; } \
+            SM_SUM(sum, e2, p0, p1, p2, p3) \
+            W1A_TAIL(ot) }
+#ifdef LT_SYM
+        // symmetric scores: each pair once through the FP8 products, exp in f16 registers
+#define W1A_EDIR(pT, T, K) { MH bh_; coopMatLoad(bh_, pc.bias.v, hd * 4096u + (T) * 1024u + (K) * 16u, 64u, COL); QC8 p_ = QC8(ACC(bh_)); \
+            QA8 a_; W1A_TA(a_, qk##T##0) MMA(p_, a_, qk##K##0) W1A_TA(a_, qk##T##1) MMA(p_, a_, qk##K##1) \
+            pT = MH(p_); \
+            [[unroll]] for (int e = 0; e < 8; e += 2) { f16vec2 t_ = unpackFloat2x16(exp_bits2(f16vec2(pT[e], pT[e + 1]))); pT[e] = t_.x, pT[e + 1] = t_.y; } }
+#define W1A_EUP(T, K) MH e##T##K = MH(0.0); if (KEPT(uint(T), uint(K)) && (lv##T || lv##K)) W1A_EDIR(e##T##K, T, K)
+#define W1A_EOWN(pT, T) MH pT = MH(0.0); W1A_EDIR(pT, T, T)
+#define W1A_ELO(pT, T, K) MH pT = MH(0.0); if (KEPT(uint(T), uint(K))) { QB8 q_; W1A_Q8(q_, e##K##T) QA8 a_; W1A_TA(a_, q_) \
+            QC8 p_ = QC8(0.0); MMA(p_, a_, id8) pT = MH(p_); }
+#define W1A_ATTN(ot) if (lv##ot) { \
+            SM_E2(e2, p0, p1, p2, p3) SM_SUMR(sum, e2, p0, p1, p2, p3) \
+            W1A_TAIL(ot) }
+        W1A_EUP(0, 1) W1A_EUP(0, 2) W1A_EUP(0, 3) W1A_EUP(1, 2) W1A_EUP(1, 3) W1A_EUP(2, 3)
+        if (lv0) { W1A_EOWN(p0, 0) MH p1 = e01, p2 = e02, p3 = e03; W1A_ATTN(0) }
+        if (lv1) { W1A_ELO(p0, 1, 0) W1A_EOWN(p1, 1) MH p2 = e12, p3 = e13; W1A_ATTN(1) }
+        if (lv2) { W1A_ELO(p0, 2, 0) W1A_ELO(p1, 2, 1) W1A_EOWN(p2, 2) MH p3 = e23; W1A_ATTN(2) }
+        if (lv3) { W1A_ELO(p0, 3, 0) W1A_ELO(p1, 3, 1) W1A_ELO(p2, 3, 2) W1A_EOWN(p3, 3) W1A_ATTN(3) }
+#else
+        W1A_ATT(0) W1A_ATT(1) W1A_ATT(2) W1A_ATT(3)
+#endif
+#undef W1A_S
+#undef W1A_PB
+#undef W1A_OKT
+#undef W1A_OW
+#undef W1A_TAIL
+#undef W1A_ATT
+#ifdef LT_SYM
+#undef W1A_EDIR
+#undef W1A_EUP
+#undef W1A_EOWN
+#undef W1A_ELO
+#undef W1A_ATTN
+#endif
+#else
         // Q^T [dim tile][token tile] = in_a x^T, V [token tile][dim tile] = x in_b^T; K = channel tiles in order
 #if defined(LT_VO8) && defined(LT_VO)
         // LT_VO8: compute V before Q using e4m3(vo_values) at 5n bytes in a non-unrolled token loop
@@ -148,3 +245,4 @@
         if (lv2) ATT(32u, q20, q21, c20, c21)
         if (lv3) ATT(48u, q30, q31, c30, c31)
 #endif
+#endif  // LT_W1A8

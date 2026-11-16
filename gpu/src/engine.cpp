@@ -263,7 +263,7 @@ static H16 vo_values(const H16& in_b, const H16& out, int C, int X) {
 
 // fp16 bits -> OCP e4m3 code, round-to-nearest-even with satfinite semantics: |x| >= 448 (and inf/NaN)
 // maps to the largest finite code +-448. The NaN codes 0x7f/0xff are never emitted.
-inline uint8_t e4m3_rne(uint16_t h) {
+uint8_t e4m3_rne(uint16_t h) {
     _Float16 v;
     std::memcpy(&v, &h, sizeof v);
     const float x = float(v);
@@ -312,8 +312,6 @@ void Engine::upload_stage(const StageWeights& s, StageBufs& b) {
     };
     UQ(b.in_a, s.b.in_a, s.b.C == 32 ? lr_keys(s.b.in_a, s.b.C, s.b.X) : H16{});
     UQ(b.in_b, s.b.in_b, s.b.C == 32 ? vo_values(s.b.in_b, s.b.out, s.b.C, s.b.X) : H16{});
-    U(b.out, with_tiles(s.b.out, s.b.X));
-    U(b.out_b, s.b.out_b);
     // LT_MLP8: fc1/fc2 get an RNE-saturated e4m3 code copy of the ORIGINAL (untiled) matrix appended after
     // the fp16 values + tiles, natural [row][K] order - the fast kernels load it straight as 1-byte A tiles
     // (zero conversions); Legacy reads only the fp16 prefix. The weights sit far inside +-448 and above the
@@ -326,6 +324,11 @@ void Engine::upload_stage(const StageWeights& s, StageBufs& b) {
         for (size_t i = 0; i < orig.size(); ++i) d[tiled.size() * 2 + i] = e4m3_rne(orig[i]);
         pack_bytes(dev_, fixed_, d.data(), d.size(), &dst);
     };
+    // WP-D5/D6: the out matrix keeps its fp16 + tiles prefix byte-identical and carries the exact
+    // e4m3 codes of the ORIGINAL [row][K] matrix after it (4 * C * X bytes in), for the FP8 W_out
+    // products (natural ROW loads, same shape as the fc1/fc2 tails above)
+    UT8(b.out, with_tiles(s.b.out, s.b.X), s.b.out);
+    U(b.out_b, s.b.out_b);
     UT8(b.fc1, with_tiles(s.b.fc1, s.b.C), s.b.fc1);
     U(b.fc1_b, s.b.fc1_b);
     UT8(b.fc2, with_tiles(s.b.fc2, 4 * s.b.C), s.b.fc2);

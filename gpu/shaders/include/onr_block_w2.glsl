@@ -92,16 +92,24 @@ void main() {
         uvec4 w0 = lo.v[plane_index_sz(q, int(hh) * 16, pc.lo_size) >> 4], w1 = lo.v[plane_index_sz(q, 32 + int(hh) * 16, pc.lo_size) >> 4];
         uvec4 w2 = lo.v[plane_index_sz(q, 64 + int(hh) * 16, pc.lo_size) >> 4];
 #ifdef LT_UP8
-#if ENC_CP > 96
-#error "LT_UP8 in the W2 body: Cp = 96 only"
+#if ENC_CP > 128
+#error "LT_UP8 in the W2 body: Cp = 128 at most"
 #endif
 #define UP8_W E4View(uint64_t(pc.up_w) + uint64_t(8u * ENC_C * ENC_CP)).v
         QB8 a0, a1, a2, a3, a4, a5;
         REC2Y(a0, a1, w0) REC2Y(a2, a3, w1) REC2Y(a4, a5, w2)
+#if ENC_CP > 96
+        uvec4 w3 = lo.v[plane_index_sz(q, 96 + int(hh) * 16, pc.lo_size) >> 4];
+        QB8 a6, a7;
+        REC2Y(a6, a7, w3)
+#define UP_K3_8(o_) coopMatLoad(w_, UP8_W, o_ + 96u, ENC_CP, ROW); MMA(u, w_, a6) coopMatLoad(w_, UP8_W, o_ + 112u, ENC_CP, ROW); MMA(u, w_, a7)
+#else
+#define UP_K3_8(o_)
+#endif
 #define UP_T(p, n) { QC8 u = QC8(bias_acc_t(pc.up_b, (p) * ENC_C + (n) * 16u)); QA8 w_; uint o_ = ((p) * ENC_C + (n) * 16u) * ENC_CP; \
             coopMatLoad(w_, UP8_W, o_, ENC_CP, ROW); MMA(u, w_, a0) coopMatLoad(w_, UP8_W, o_ + 16u, ENC_CP, ROW); MMA(u, w_, a1) \
             coopMatLoad(w_, UP8_W, o_ + 32u, ENC_CP, ROW); MMA(u, w_, a2) coopMatLoad(w_, UP8_W, o_ + 48u, ENC_CP, ROW); MMA(u, w_, a3) \
-            coopMatLoad(w_, UP8_W, o_ + 64u, ENC_CP, ROW); MMA(u, w_, a4) coopMatLoad(w_, UP8_W, o_ + 80u, ENC_CP, ROW); MMA(u, w_, a5) \
+            coopMatLoad(w_, UP8_W, o_ + 64u, ENC_CP, ROW); MMA(u, w_, a4) coopMatLoad(w_, UP8_W, o_ + 80u, ENC_CP, ROW); MMA(u, w_, a5) UP_K3_8(o_) \
             ROWS8(h_, MH(u)) lds4[(((p) * 16u + (ln & 15u)) * ENC_C + (n) * 16u + 8u * hh) >> 3] = uvec4(packFloat2x16(f16vec2(h_[0], h_[1])), \
                 packFloat2x16(f16vec2(h_[2], h_[3])), packFloat2x16(f16vec2(h_[4], h_[5])), packFloat2x16(f16vec2(h_[6], h_[7]))); }
 #else
@@ -145,12 +153,14 @@ void main() {
 // heads' QV products read (the same values XOUTQ writes; RDNA4 only - gfx11 strips FP8QV)
 #define XIN2Y(xa, xb, ya, yb, tp, t0, pl) MH xa, xb; QB8 ya, yb; { uvec4 w_ = U32x4View(uint64_t(pc.x)).v[plane_index(tp, int(pl) * 32 + int(hh) * 16) >> 4]; \
         uint t_ = (t0) + (ln & 15u), ua_ = (((((t_ >> 3) & 1u) << 1) + (t_ & 1u)) * 16u * ENC_C + (((t_ >> 4) << 2) + ((t_ & 7u) >> 1)) * ENC_C + (pl) * 32u + 8u * hh) >> 1; \
+        precise f16vec2 za_[4], zb_[4]; \
         [[unroll]] for (int k_ = 0; k_ < 4; ++k_) { \
             f16vec2 a_ = unpackFloat2x16(e4m3_lo(w_[k_])), b_ = unpackFloat2x16(e4m3_hi(w_[k_])); \
             f16vec2 ua = unpackFloat2x16(lds1[ua_ + uint(k_)]), ubv = unpackFloat2x16(lds1[ua_ + 8u + uint(k_)]); \
-            precise f16vec2 za = fma(a_, f16vec2(sc), ua), zb = fma(b_, f16vec2(sc), ubv); \
-            xa[2 * k_] = za.x, xa[2 * k_ + 1] = za.y, xb[2 * k_] = zb.x, xb[2 * k_ + 1] = zb.y; \
-            fe4m3vec2 qa_ = qe4_pair32(vec2(za)), qb_ = qe4_pair32(vec2(zb)); \
+            za_[k_] = fma(a_, f16vec2(sc), ua), zb_[k_] = fma(b_, f16vec2(sc), ubv); \
+            xa[2 * k_] = za_[k_].x, xa[2 * k_ + 1] = za_[k_].y, xb[2 * k_] = zb_[k_].x, xb[2 * k_ + 1] = zb_[k_].y; } \
+        [[unroll]] for (int k_ = 0; k_ < 4; ++k_) { \
+            fe4m3vec2 qa_ = qe4_pair32(vec2(za_[k_])), qb_ = qe4_pair32(vec2(zb_[k_])); \
             ya[2 * k_] = qa_.x, ya[2 * k_ + 1] = qa_.y, yb[2 * k_] = qb_.x, yb[2 * k_ + 1] = qb_.y; } }
 #define XIN_A(pl, a, b) XIN2Y(x0##a, x0##b, y0##a, y0##b, tpa, ra, uint(pl))
 #define XIN_B(pl, a, b) XIN2Y(x1##a, x1##b, y1##a, y1##b, tpb, rb, uint(pl))
@@ -560,7 +570,13 @@ void main() {
     // MRG8: pooled (16 x Co) = A(mrg codes) x B(x2 code mirror) + b. The mrg_w buffer already carries
     // the e4m3 codes of everything after its fp16 values (U8/qv_bytes, shared with LT_MI8); the B
     // fragments read the XOUT2 code mirror exactly like the input merge reads the enc0 planes
+#if ENC_CIN > 0
+    // enc1: mrg_w packs fp16 + tiles + e4m3 via U8 (qv_bytes straight after the values)
 #define MRG8_W E4View(uint64_t(pc.mrg_w) + uint64_t(2u * (ENC_CO * 4u * ENC_C + ENC_C * 4u * ENC_CIN))).v
+#else
+    // enc2+: mrg_w packs via UT8(with_tiles(...)); the e4m3 tail sits at tiled.size() * 2 = 16 * Co * C bytes
+#define MRG8_W E4View(uint64_t(pc.mrg_w) + uint64_t(16u * ENC_CO * ENC_C)).v
+#endif
     {
         // output tiles n0 .. n0 + Co / 32 - 1
         uint n0 = (ENC_CO / 32u) * w;

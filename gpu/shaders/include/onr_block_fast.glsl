@@ -1794,7 +1794,13 @@ void main() {
 #define MRG_W8 E4View(uint64_t(pc.mrg_w) + uint64_t(16u * ENC_CO * ENC_C)).v
     for (uint nt = s; nt < ENC_CO / 16u; nt += NSG) {
         QC8 m_ = QC8(bias_acc_t(pc.mrg_b, nt * 16u));
+#ifdef MRG8_UNROLL
+        // C = 160: the 4q x 5cb full unroll fills the registers with QA8 tiles (VGPR 192 -> 256);
+        // keep the quarter loop rolled to hold the <= 192 residency step
+        [[dont_unroll]] for (uint q = 0u; q < 4u; ++q) {
+#else
         [[unroll]] for (uint q = 0u; q < 4u; ++q) {
+#endif
             // lane column n = pooled row r = ln & 15; its token of quarter q (2 ky + kx = q)
             uint t_ = (2u * ((ln & 15u) >> 2) + (q >> 1)) * 8u + 2u * ((ln & 15u) & 3u) + (q & 1u);
             [[unroll]] for (uint cb = 0u; cb < ENC_C / 32u; ++cb) {

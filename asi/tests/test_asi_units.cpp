@@ -751,6 +751,73 @@ static int test_d3d12_gpu_and_engine() {
             k_lite.load_lite(d3d, spv_dir, flow_names);
             onr::Engine eng;
             eng.init(d3d, k_fast, w);
+                auto resolve = [&](const onr::Buffer& sub, std::vector<uint8_t>& host, const uint8_t*& base) -> bool {
+                    for (const onr::Buffer& fb : onr::EngineTestAccess::fixed(eng)) {
+                        if (fb.size && sub.addr >= fb.addr && sub.addr + sub.size <= fb.addr + fb.size) {
+                            host.resize(size_t(fb.size));
+                            d3d.download(fb, host.data(), host.size());
+                            base = host.data() + size_t(sub.addr - fb.addr);
+                            return true;
+                        }
+                    }
+                    return false;
+                };
+            // WP-D1: the encoders' mrg_w e4m3 tail offsets. enc1 (CIN > 0) packs fp16 + tiles via U8
+            // (qv_bytes right after the values: 2 * (Co*4C + C*4*Cin) bytes); enc2+ (CIN == 0) pack via
+            // UT8 (tail at 16 * Co * C bytes, after the fp16 + tiles). Both tails must carry the exact
+            // e4m3 codes of the original weights and leave the fp16 prefix byte-identical (MRG8_W).
+            // The stage buffers are address-only sub-slices of the packed fixed_ blob: resolve the
+            // owner once and compare at addr - owner.addr.
+            {
+                uint32_t mrg_checked = 0, mrg_ut8 = 0, mrg_u8 = 0;
+                for (auto& [mrg_name, mrg_buf] : onr::EngineTestAccess::stage_mrg(eng)) {
+                    const int idx = mrg_name[3] - '0';
+                    if (idx < 1 || idx > 4) continue;   // enc0: the embed MLP lives in mrg_w; enc5 has no output merge
+                    const onr::StageWeights& s = w.enc[idx];
+                    const size_t C = size_t(s.b.C), Co = size_t(s.Co);
+                    if (!Co || s.mrg_w.empty()) { std::fprintf(stderr, "FAIL: %s mrg_w tail: Co=%d size=%zu\n", mrg_name.c_str(), s.Co, s.mrg_w.size()); return 1; }
+                    const bool ut8 = s.mrg_w.size() == Co * 4 * C;
+                    const size_t Cin = ut8 ? 0 : (s.mrg_w.size() - Co * 4 * C) / (4 * C);
+                    const size_t off = ut8 ? 16 * Co * C : 2 * (Co * 4 * C + C * 4 * Cin);
+                    const auto codes = onr::qv_bytes(s.mrg_w.data(), s.mrg_w.size());
+                    if (mrg_buf.size < off + codes.size() / 3) { std::fprintf(stderr, "FAIL: %s mrg_w buffer %llu < tail %llu\n", mrg_name.c_str(), (unsigned long long)mrg_buf.size, (unsigned long long)(off + codes.size() / 3)); return 1; }
+                    std::vector<uint8_t> blob_;
+                    const uint8_t* got = nullptr;
+                    if (!resolve(mrg_buf, blob_, got)) { std::fprintf(stderr, "FAIL: %s mrg_w not inside the packed blob\n", mrg_name.c_str()); return 1; }
+                    if (std::memcmp(got, s.mrg_w.data(), s.mrg_w.size() * 2) != 0) { std::fprintf(stderr, "FAIL: %s mrg_w fp16 prefix changed\n", mrg_name.c_str()); return 1; }
+                    // e4m3_rne maps -0.0 to the +0 code while qv_bytes keeps the sign bit; both decode to zero
+                    auto zeq = [](uint8_t a, uint8_t b) { return a == b || ((a & 0x7f) == 0 && (b & 0x7f) == 0); };
+                    for (size_t i = 0; i < s.mrg_w.size(); ++i)
+                        if (!zeq(got[off + i], codes.data()[s.mrg_w.size() * 2 + i])) { std::fprintf(stderr, "FAIL: %s mrg_w e4m3 tail at off=%llu (%s) byte %zu: %02x vs %02x\n", mrg_name.c_str(), (unsigned long long)off, ut8 ? "UT8 16*Co*C" : "U8 2*(Co*4C+C*4*Cin)", i, got[off + i], codes.data()[s.mrg_w.size() * 2 + i]); return 1; }
+                    ++mrg_checked; ut8 ? ++mrg_ut8 : ++mrg_u8;
+                }
+                if (mrg_checked != 4 || mrg_ut8 != 3 || mrg_u8 != 1) { std::fprintf(stderr, "FAIL: mrg_w tail check covered %u stages (UT8 %u, U8 %u), expected enc1..enc4 = 1 U8 + 3 UT8\n", mrg_checked, mrg_ut8, mrg_u8); return 1; }
+                std::printf("[PASS] WP-D1 mrg_w e4m3 tails (%u stages: %u UT8 @16*Co*C, %u U8 @2*(Co*4C+C*4*Cin), fp16 prefix byte-identical)\n",
+                            mrg_checked, mrg_ut8, mrg_u8);
+            }
+            // WP-D5: every stage's out buffer keeps fp16 + tiles byte-identical and carries the exact
+            // e4m3 codes of the ORIGINAL out matrix at 4 * C * X bytes (UT8 tail; W_out FP8 products)
+            {
+                uint32_t out_checked = 0;
+                for (auto& [out_name, out_buf] : onr::EngineTestAccess::stage_out(eng)) {
+                    int idx = std::atoi(out_name.c_str() + (out_name[0] == 'e' ? 3 : 4));
+                    const onr::StageWeights& s = out_name[0] == 'e' ? w.enc[idx]
+                                                : (out_name[3] == '0' ? w.dec0[idx] : w.dec1[idx]);
+                    if (s.b.out.empty() || !s.b.C || !s.b.X) { std::fprintf(stderr, "FAIL: %s out stage empty\n", out_name.c_str()); return 1; }
+                    const size_t off = 4 * size_t(s.b.C) * size_t(s.b.X);
+                    if (out_buf.size < off + s.b.out.size()) { std::fprintf(stderr, "FAIL: %s out buffer %llu < tail %llu\n", out_name.c_str(), (unsigned long long)out_buf.size, (unsigned long long)(off + s.b.out.size())); return 1; }
+                    std::vector<uint8_t> oblob_;
+                    const uint8_t* got = nullptr;
+                    if (!resolve(out_buf, oblob_, got)) { std::fprintf(stderr, "FAIL: %s out not inside the packed blob\n", out_name.c_str()); return 1; }
+                    const auto tiled = onr::with_tiles(s.b.out, s.b.X);
+                    if (std::memcmp(got, tiled.data(), tiled.size() * 2) != 0) { std::fprintf(stderr, "FAIL: %s out fp16 + tiles prefix changed\n", out_name.c_str()); return 1; }
+                    for (size_t i = 0; i < s.b.out.size(); ++i)
+                        if (got[off + i] != onr::e4m3_rne(s.b.out[i]) && !((got[off + i] & 0x7f) == 0 && (onr::e4m3_rne(s.b.out[i]) & 0x7f) == 0)) { std::fprintf(stderr, "FAIL: %s out e4m3 tail at off=%llu byte %zu\n", out_name.c_str(), (unsigned long long)off, i); return 1; }
+                    ++out_checked;
+                }
+                if (out_checked < 16) { std::fprintf(stderr, "FAIL: out tail check covered %u stages, expected all 16\n", out_checked); return 1; }
+                std::printf("[PASS] WP-D5 out e4m3 tails (%u stages @4*C*X, fp16 + tiles prefix byte-identical)\n", out_checked);
+            }
             eng.set_fast(true);
             eng.set_lite(&k_lite);
             eng.set_lite_on(true);

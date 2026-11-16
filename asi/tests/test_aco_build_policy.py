@@ -40,7 +40,7 @@ class BuildPolicyTests(unittest.TestCase):
         env = kwargs['env']
         self.calls.append((Path(args[1]).stem, env.get('ONR_ACO_CMAT_ADDRESS'),
                            env.get('ONR_ACO_CU_MODE'), env.get('ONR_ACO_WGP_MODE'),
-                           env.get('ONR_ACO_SAMPLE_WAIT_ZERO')))
+                           env.get('ONR_ACO_SAMPLE_WAIT_ZERO'), env.get('ONR_ACO_SHARED_CMAT')))
         prefix = Path(env['ONR_ACO_CAPTURE'])
         info = dict(inline=[], rsrc1=0, rsrc2=0, rsrc3=0, exec_bytes=4, workgroup_size=32,
             shared_bytes=0, push_bytes=0, user_sgprs=0, set0=-1, push=-1, grid=-1,
@@ -50,11 +50,14 @@ class BuildPolicyTests(unittest.TestCase):
         prefix.with_suffix('.layouts').write_bytes(b'layout')
         return subprocess.CompletedProcess(args, 0, 'ONR_M0 subst=0 writes=0 constdata=0 pc_relative=0\n', '')
 
-    def build(self, selected=('selected',), cu=(), wgp=(), swz=()):
+    def build(self, selected=('selected',), cu=(), wgp=(), swz=(), shared_cmat_shaders=(), shared_cmat_mode='load'):
         args = ['records', str(self.inputs), '--out', str(self.out), '--toolchain', str(self.cfg),
             '--capture', str(self.capture), '--capture-dir', str(self.raw),
             '--precision', 'global', '--matrix-loads', 'vector8', '--cmat-address-shaders', *selected,
-            '--cu-mode-shaders', *cu, '--wgp-mode-shaders', *wgp, '--sample-wait-zero-shaders', *swz]
+            '--cu-mode-shaders', *cu, '--wgp-mode-shaders', *wgp, '--sample-wait-zero-shaders', *swz,
+            '--shared-cmat', shared_cmat_mode if (shared_cmat_shaders or shared_cmat_mode != 'load') else 'off']
+        if shared_cmat_shaders:
+            args += ['--shared-cmat-shaders', *shared_cmat_shaders]
         with patch.object(sys, 'argv', args), patch.object(producer.subprocess, 'run', self.fake_capture), \
              patch.dict(os.environ, {'ONR_ACO_CMAT_ADDRESS': '1', 'ONR_ACO_CU_MODE': '1',
                                      'ONR_ACO_WGP_MODE': '1', 'ONR_ACO_SAMPLE_WAIT_ZERO': '1'}), \
@@ -65,7 +68,7 @@ class BuildPolicyTests(unittest.TestCase):
 
     def test_exact_selection_and_cache(self):
         m = self.build()
-        self.assertEqual(sorted(self.calls), [('ordinary',None,None,None,None)]*2+[('selected','1',None,None,None)]*2)
+        self.assertEqual(sorted(self.calls), [('ordinary',None,None,None,None,None)]*2+[('selected','1',None,None,None,None)]*2)
         self.assertEqual(m['compile_options']['cmat_address_shaders'], ['selected'])
         self.calls.clear()
         self.build()
@@ -78,7 +81,7 @@ class BuildPolicyTests(unittest.TestCase):
         b = self.build(())
         self.assertNotEqual(a['fingerprint'], b['fingerprint'])
         self.assertEqual(len(self.calls), 4)
-        self.assertTrue(all(t[1:] == (None,)*4 for t in self.calls))
+        self.assertTrue(all(t[1:] == (None,)*5 for t in self.calls))
         cfg = json.loads(self.cfg.read_text())
         cfg['cmat_address_patch_sha256'] = 'patch-b'
         self.cfg.write_text(json.dumps(cfg))
@@ -112,7 +115,7 @@ class BuildPolicyTests(unittest.TestCase):
     def test_cu_wgp_and_sample_wait_selection_and_isolation(self):
         m = self.build((), cu=('selected',), wgp=('ordinary',), swz=('ordinary',))
         self.assertEqual(sorted(self.calls),
-                         [('ordinary', None, None, '1', '1')] * 2 + [('selected', None, '1', None, None)] * 2)
+                         [('ordinary', None, None, '1', '1', None)] * 2 + [('selected', None, '1', None, None, None)] * 2)
         self.assertEqual(m['compile_options']['cu_mode_shaders'], ['selected'])
         self.assertEqual(m['compile_options']['wgp_mode_shaders'], ['ordinary'])
         self.assertEqual(m['compile_options']['sample_wait_zero_shaders'], ['ordinary'])
@@ -123,6 +126,31 @@ class BuildPolicyTests(unittest.TestCase):
         self.assertEqual(len(self.calls), 4)
         for k in ('cu_mode_shaders', 'wgp_mode_shaders', 'sample_wait_zero_shaders'):
             self.assertNotIn(k, n['compile_options'])
+
+    def test_shared_cmat_shader_selection_and_isolation(self):
+        # per-shader scope: the env var reaches only the listed stem, the manifest records
+        # the scope (fingerprint isolation), and a bare global mode keeps the old behavior
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            self.build((), shared_cmat_shaders=('selected',), shared_cmat_mode='off')   # mode off -> rejected
+        m = self.build((), shared_cmat_shaders=('selected',))
+        self.assertEqual(sorted(self.calls),
+                         [('ordinary', None, None, None, None, None)] * 2
+                          + [('selected', None, None, None, None, 'load')] * 2)
+        self.assertEqual(m['compile_options']['shared_cmat'], 'load')
+        self.assertEqual(m['compile_options']['shared_cmat_shaders'], ['selected'])
+        rec = {r['spv']: r for r in m['records'].values()}
+        self.assertEqual(rec['selected.spv']['shared_cmat'], 'load')
+        self.assertEqual(rec['ordinary.spv']['shared_cmat'], 'off')
+        self.calls.clear()
+        self.build((), shared_cmat_shaders=('selected',))
+        self.assertEqual(self.calls, [])   # same fingerprint: full cache hit
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            self.build((), shared_cmat_shaders=('absent',))
+        g = self.build((), shared_cmat_mode='loadstore')
+        self.assertEqual(sorted(self.calls),
+                         [('ordinary', None, None, None, None, 'loadstore')] * 2
+                          + [('selected', None, None, None, None, 'loadstore')] * 2)
+        self.assertNotIn('shared_cmat_shaders', g['compile_options'])
 
     def test_cu_wgp_overlap_or_missing_rejected(self):
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):

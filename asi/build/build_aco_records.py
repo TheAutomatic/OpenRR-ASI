@@ -111,6 +111,8 @@ def main():
                     help='Compute kernels coalescing GFX12 sampler waits to s_wait_samplecnt 0x0')
     ap.add_argument('--shared-cmat', choices=('off', 'load', 'loadstore'), default='off',
                     help='Vectorize same-lane contiguous shared-memory coopmat runs: loads only (load) or loads+stores (loadstore)')
+    ap.add_argument('--shared-cmat-shaders', nargs='*', default=[],
+                    help='Restrict --shared-cmat to these exact stems (empty: every shader, like before)')
     ns = ap.parse_args()
     cfg = json.loads(ns.toolchain.read_text())
     root = ns.out / 'gfx1201' / LAYOUT
@@ -121,7 +123,7 @@ def main():
     manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
     files = sorted({p.resolve() for arg in ns.inputs for p in (arg.rglob('*.spv') if arg.is_dir() else [arg])})
     stems = {p.stem for p in files}
-    for label, selected in (('cmat address', ns.cmat_address_shaders), ('cu-mode', ns.cu_mode_shaders),
+    for label, selected in (('shared-cmat', ns.shared_cmat_shaders), ('cmat address', ns.cmat_address_shaders), ('cu-mode', ns.cu_mode_shaders),
                             ('wgp-mode', ns.wgp_mode_shaders), ('sample-wait-zero', ns.sample_wait_zero_shaders)):
         missing = set(selected) - stems
         if missing:
@@ -131,6 +133,8 @@ def main():
         ap.error('shaders cannot request both cu-mode and wgp-mode: ' + ', '.join(sorted(overlap)))
     if ns.cmat_address_shaders and not cfg.get('cmat_address_patch_sha256'):
         ap.error('selected toolchain does not declare the bounded cmat address patch')
+    if ns.shared_cmat_shaders and ns.shared_cmat == 'off':
+        ap.error('--shared-cmat-shaders needs --shared-cmat load or loadstore')
     # Records are addressed by SPIR-V hash, so identical input bytes cannot
     # safely request conflicting per-stem policies. Reject instead of choosing
     # whichever path happens to be visited last.
@@ -168,6 +172,8 @@ def main():
         policy['precision_split'] = dict(sorted(precision_by_stem.items()))
     if ns.shared_cmat != 'off':
         policy['shared_cmat'] = ns.shared_cmat
+        if ns.shared_cmat_shaders:
+            policy['shared_cmat_shaders'] = sorted(set(ns.shared_cmat_shaders))
     if ns.cmat_address_shaders:
         policy['cmat_address_shaders'] = sorted(set(ns.cmat_address_shaders))
     if ns.cu_mode_shaders:
@@ -201,7 +207,8 @@ def main():
                 if spv.stem in flag_set:
                     env[env_k] = '1'
             if ns.matrix_loads == 'vector8': env['ONR_ACO_VECTOR_LOADS'] = '1'
-            if ns.shared_cmat != 'off': env['ONR_ACO_SHARED_CMAT'] = ns.shared_cmat
+            if ns.shared_cmat != 'off' and (not ns.shared_cmat_shaders or spv.stem in ns.shared_cmat_shaders):
+                env['ONR_ACO_SHARED_CMAT'] = ns.shared_cmat
             captures=[]
             for suffix,sentinel in (('a', '0x13579bdf'), ('b', '0x2468ace1')):
                 pair_prefix=raw/(key+'-'+suffix)
@@ -230,6 +237,7 @@ def main():
                                 cu_mode=spv.stem in ns.cu_mode_shaders,
                                 wgp_mode=spv.stem in ns.wgp_mode_shaders,
                                 sample_wait_zero=spv.stem in ns.sample_wait_zero_shaders,
+                                shared_cmat=ns.shared_cmat if (ns.shared_cmat != 'off' and (not ns.shared_cmat_shaders or spv.stem in ns.shared_cmat_shaders)) else 'off',
                                 record_sha256=hashlib.sha256(record_data).hexdigest(),
                                 address_report=address_report, record=key+'.nrp',
                                 precision=precision_by_stem.get(spv.stem, ns.precision))

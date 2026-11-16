@@ -271,14 +271,43 @@ void main() {
 #endif
     XIN1(x00, x01, tp0, 0u) XIN1(x10, x11, tp1, 16u) XIN1(x20, x21, tp2, 32u) XIN1(x30, x31, tp3, 48u)
     // x^T tile names: x<token tile><channel tile>; out accumulators c<token tile><channel tile>
-    ACC c00 = bias_acc_t(pc.out_b, 0u), c01 = bias_acc_t(pc.out_b, 16u);
-    ACC c10 = c00, c11 = c01, c20 = c00, c21 = c01, c30 = c00, c31 = c01;
+#ifndef LT_W1A8
+     ACC c00 = bias_acc_t(pc.out_b, 0u), c01 = bias_acc_t(pc.out_b, 16u);
+     ACC c10 = c00, c11 = c01, c20 = c00, c21 = c01, c30 = c00, c31 = c01;
+#else
+    // WP-D5 (LT_W1A8): the attention runs on exact e4m3 weights with f32 accumulators (QC8), so the
+    // c tiles become the cross-head oc accumulators; in_a / in_b carry their e4m3 codes contiguously
+    // at 2 * X * C bytes (Engine::upload_stage qv_bytes) and the out matrix at 4 * C * X (UT8 tail)
+#if !defined(LT_MLP8)
+#error "LT_W1A8 needs LT_MLP8 (the attention output accumulators are QC8)"
+#endif
+#define W1_QA8 E4View(uint64_t(pc.in_a) + uint64_t(2u * ENC_X * ENC_C)).v
+#define W1_VB8 E4View(uint64_t(pc.in_b) + uint64_t(2u * ENC_X * ENC_C)).v
+#define W1_WOUT8 E4View(uint64_t(pc.wout) + uint64_t(4u * ENC_C * ENC_X)).v
+    // quantize an accumulator / fragment tile into a B fragment (dims preserved; f32 pairs in)
+#define W1A_Q8(b8, q) { [[unroll]] for (int i_ = 0; i_ < 16; i_ += 2) { fe4m3vec2 w1q_ = qe4_pair32(vec2(q[i_], q[i_ + 1])); b8[i_] = w1q_.x, b8[i_ + 1] = w1q_.y; } }
+    // register transpose: a B fragment's components copied into an A fragment (and back)
+#define W1A_TA(a8, b8) { [[unroll]] for (int i_ = 0; i_ < 16; ++i_) a8[i_] = b8[i_]; }
+    // x^T quantized once for both heads (8 QB8 = 16 VGPR); dead tiles quantize garbage nobody reads
+    QB8 xq00, xq01, xq10, xq11, xq20, xq21, xq30, xq31;
+    W1A_Q8(xq00, x00) W1A_Q8(xq01, x01) W1A_Q8(xq10, x10) W1A_Q8(xq11, x11)
+    W1A_Q8(xq20, x20) W1A_Q8(xq21, x21) W1A_Q8(xq30, x30) W1A_Q8(xq31, x31)
+    // the attention's out accumulators, across heads (8 QC8 = 64 VGPR)
+    QC8 oc00 = QC8(bias_acc_t(pc.out_b, 0u)), oc01 = QC8(bias_acc_t(pc.out_b, 16u));
+    QC8 oc10 = oc00, oc11 = oc01, oc20 = oc00, oc21 = oc01, oc30 = oc00, oc31 = oc01;
+#endif
 #ifdef LT_SYM
     // the identity as a B operand (lane: column l % 16, rows 8 h .. 8 h + 7)
 #if FRAG_ROWS
     MB idb; { float16_t t_[8]; for (int i_ = 0; i_ < 8; ++i_) t_[i_] = 8u * hh + uint(i_) == (ln & 15u) ? 1.0hf : 0.0hf; PUTB(idb, t_) }
 #else
     MB idb; for (int i_ = 0; i_ < idb.length(); ++i_) idb[i_] = 8u * hh + uint(i_) == (ln & 15u) ? 1.0hf : 0.0hf;
+#endif
+#ifdef LT_W1A8
+    // LT_W1A8: the identity as an e4m3 B fragment (1.0 is an exact code, 0.0 the zero code)
+    QB8 id8; { [[unroll]] for (int i_ = 0; i_ < 16; i_ += 2) { \
+        vec2 v_ = vec2(8u * hh + uint(i_) == (ln & 15u) ? 1.0 : 0.0, 8u * hh + uint(i_ + 1) == (ln & 15u) ? 1.0 : 0.0); \
+        fe4m3vec2 e_ = qe4_pair32(v_); id8[i_] = e_.x, id8[i_ + 1] = e_.y; } }
 #endif
 #endif
 #ifdef LT_FAR1
@@ -296,8 +325,13 @@ void main() {
     // x1 = fma(O out^T + b, ls1, x)
 #define RESID1(cn, xn, l) { RES_IN(a16, cn) for (int i = 0; i < a16.length(); i += 2) { \
         precise f16vec2 v = fma(f16vec2(a16[i], a16[i + 1]), f16vec2(l), f16vec2(xn[i], xn[i + 1])); xn[i] = v.x, xn[i + 1] = v.y; } }
+#ifdef LT_W1A8
+    RESID1(oc00, x00, ls1) RESID1(oc01, x01, ls1) RESID1(oc10, x10, ls1) RESID1(oc11, x11, ls1)
+    RESID1(oc20, x20, ls1) RESID1(oc21, x21, ls1) RESID1(oc30, x30, ls1) RESID1(oc31, x31, ls1)
+#else
     RESID1(c00, x00, ls1) RESID1(c01, x01, ls1) RESID1(c10, x10, ls1) RESID1(c11, x11, ls1)
     RESID1(c20, x20, ls1) RESID1(c21, x21, ls1) RESID1(c30, x30, ls1) RESID1(c31, x31, ls1)
+#endif
 #ifdef LT_MLP8
     // Native-FP8 MLP, W1 C=32 shape (decoder levels and enc0 since WP5): active token tiles
     // quantize once and stream each fc1/fc2 hidden slice across all active tiles so weights
