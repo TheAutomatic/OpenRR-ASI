@@ -152,16 +152,6 @@ class BuildPolicyTests(unittest.TestCase):
                           + [('selected', None, None, None, None, 'loadstore')] * 2)
         self.assertNotIn('shared_cmat_shaders', g['compile_options'])
 
-    def test_cu_wgp_overlap_or_missing_rejected(self):
-        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
-            self.build((), cu=('selected',), wgp=('selected',))
-        for kw in (dict(cu=('absent',)), dict(wgp=('absent',)), dict(swz=('absent',))):
-            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
-                self.build((), **kw)
-
-if __name__ == '__main__':
-    unittest.main()
-
     def test_shared_cmat_env_not_leaked_and_policy_conflict_rejected(self):
         # a parent-env ONR_ACO_SHARED_CMAT must never reach any capture without the flag
         with patch.dict(os.environ, {'ONR_ACO_SHARED_CMAT': 'loadstore'}):
@@ -173,3 +163,13 @@ if __name__ == '__main__':
             self.build(('selected',))                                  # cmat-address on one stem only
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             self.build(('selected',), shared_cmat_shaders=('selected',))   # shared-cmat on one stem only
+
+    def test_cu_wgp_overlap_or_missing_rejected(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            self.build((), cu=('selected',), wgp=('selected',))
+        for kw in (dict(cu=('absent',)), dict(wgp=('absent',)), dict(swz=('absent',))):
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                self.build((), **kw)
+
+if __name__ == '__main__':
+    unittest.main()

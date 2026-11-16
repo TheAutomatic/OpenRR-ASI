@@ -142,7 +142,8 @@ def main():
     for spv in files:
         key = f'{fnv(spv.read_bytes()):016x}'
         stem_pol = (spv.stem in ns.cmat_address_shaders, spv.stem in ns.cu_mode_shaders,
-                    spv.stem in ns.wgp_mode_shaders, spv.stem in ns.sample_wait_zero_shaders)
+                    spv.stem in ns.wgp_mode_shaders, spv.stem in ns.sample_wait_zero_shaders,
+                    spv.stem in ns.shared_cmat_shaders)
         if key in input_policies and input_policies[key] != stem_pol:
             ap.error('identical SPIR-V requests conflicting per-stem policies: ' + spv.name)
         input_policies[key] = stem_pol
@@ -207,6 +208,7 @@ def main():
                 if spv.stem in flag_set:
                     env[env_k] = '1'
             if ns.matrix_loads == 'vector8': env['ONR_ACO_VECTOR_LOADS'] = '1'
+            env.pop('ONR_ACO_SHARED_CMAT', None)   # never leak a parent-env global into non-listed shaders
             if ns.shared_cmat != 'off' and (not ns.shared_cmat_shaders or spv.stem in ns.shared_cmat_shaders):
                 env['ONR_ACO_SHARED_CMAT'] = ns.shared_cmat
             captures=[]
