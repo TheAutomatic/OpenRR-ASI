@@ -44,6 +44,7 @@ grep -q ONR_ACO_SHARED_CMAT "$cmat_src" || { echo "FATAL: ONR_ACO_SHARED_CMAT mi
 grep -q elem_bytes "$cmat_src" || { echo "FATAL: elem_bytes missing after patching" >&2; exit 1; }
 grep -q ONR_ACO_CU_MODE "$source/src/amd/vulkan/radv_shader.c" || { echo "FATAL: ONR_ACO_CU_MODE missing after patching" >&2; exit 1; }
 grep -q ONR_ACO_WGP_MODE "$source/src/amd/vulkan/radv_shader.c" || { echo "FATAL: ONR_ACO_WGP_MODE missing after patching" >&2; exit 1; }
+grep -q nir_float_muladd_support_fuse "$source/src/amd/vulkan/radv_shader.c" || { echo "FATAL: nir_float_muladd_support_fuse missing after patching" >&2; exit 1; }
 grep -q ONR_ACO_SAMPLE_WAIT_ZERO "$source/src/amd/compiler/aco_insert_waitcnt.cpp" || { echo "FATAL: ONR_ACO_SAMPLE_WAIT_ZERO missing after patching" >&2; exit 1; }
 
 # drirc: suppress the compute-queue custom-border-color state SGPR.

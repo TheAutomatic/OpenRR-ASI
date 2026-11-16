@@ -53,9 +53,17 @@ changes = []
 p = ROOT / "src/amd/vulkan/radv_shader.c"
 old = p.read_text()
 assert "onr_capture" not in old, "capture patch already applied"
+anchor_opts = "   ac_nir_set_options(compiler_info->ac, compiler_info->key.use_llvm, options);\n"
+assert old.count(anchor_opts) == 1
+new = old.replace(anchor_opts, anchor_opts + '''   const char *onr_prec_opt = getenv("ONR_ACO_PRECISION");
+   if (onr_prec_opt && !strcmp(onr_prec_opt, "native") &&
+       (options->float_mul_add16 & nir_float_muladd_support_has_ffma)) {
+      options->float_mul_add16 |= nir_float_muladd_support_fuse;
+   }
+''')
 anchor = "struct radv_shader_binary *\nradv_shader_nir_to_asm"
-assert old.count(anchor) == 1
-new = old.replace(anchor, EXPORT + anchor)
+assert new.count(anchor) == 1
+new = new.replace(anchor, EXPORT + anchor)
 anchor = '      nir_validate_shader(nir, "after spirv_to_nir");'
 assert new.count(anchor) == 1
 new = new.replace(anchor, '''      /* OpenRR relies on explicit FMA and the rounding of f32->f16->f32.
@@ -72,9 +80,10 @@ new = new.replace(anchor, '''      /* OpenRR relies on explicit FMA and the roun
                nir_alu_instr *alu = nir_instr_as_alu(instr);
                if (onr_global_exact)
                   alu->fp_math_ctrl |= nir_op_valid_fp_math_ctrl(alu->op, nir_fp_exact);
-               if (!onr_native && alu->op == nir_op_ffma_weak) {
+               if (alu->op == nir_op_ffma_weak && (!onr_native || alu->def.bit_size == 16)) {
                   alu->op = nir_op_ffma;
-                  alu->fp_math_ctrl |= nir_fp_exact;
+                  if (!onr_native)
+                     alu->fp_math_ctrl |= nir_fp_exact;
                } else if (!onr_native && (alu->op == nir_op_f2f16 || alu->op == nir_op_f2f32 || alu->op == nir_op_f2f64)) {
                   alu->fp_math_ctrl |= nir_fp_exact;
                }

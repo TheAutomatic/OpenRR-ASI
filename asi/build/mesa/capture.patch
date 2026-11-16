@@ -1,6 +1,18 @@
 --- a/src/amd/vulkan/radv_shader.c
 +++ b/src/amd/vulkan/radv_shader.c
-@@ -555,6 +555,29 @@
+@@ -59,6 +59,11 @@
+    const bool split_fma = (stage <= MESA_SHADER_GEOMETRY || stage == MESA_SHADER_MESH) && compiler_info->key.split_fma;
+ 
+    ac_nir_set_options(compiler_info->ac, compiler_info->key.use_llvm, options);
++   const char *onr_prec_opt = getenv("ONR_ACO_PRECISION");
++   if (onr_prec_opt && !strcmp(onr_prec_opt, "native") &&
++       (options->float_mul_add16 & nir_float_muladd_support_has_ffma)) {
++      options->float_mul_add16 |= nir_float_muladd_support_fuse;
++   }
+ 
+    if (split_fma) {
+       if (options->float_mul_add16 & nir_float_muladd_support_has_ffma)
+@@ -555,6 +560,30 @@
           nir->info.name = ralloc_strdup(nir, nir->info.name);
        }
  
@@ -18,9 +30,10 @@
 +               nir_alu_instr *alu = nir_instr_as_alu(instr);
 +               if (onr_global_exact)
 +                  alu->fp_math_ctrl |= nir_op_valid_fp_math_ctrl(alu->op, nir_fp_exact);
-+               if (!onr_native && alu->op == nir_op_ffma_weak) {
++               if (alu->op == nir_op_ffma_weak && (!onr_native || alu->def.bit_size == 16)) {
 +                  alu->op = nir_op_ffma;
-+                  alu->fp_math_ctrl |= nir_fp_exact;
++                  if (!onr_native)
++                     alu->fp_math_ctrl |= nir_fp_exact;
 +               } else if (!onr_native && (alu->op == nir_op_f2f16 || alu->op == nir_op_f2f32 || alu->op == nir_op_f2f64)) {
 +                  alu->fp_math_ctrl |= nir_fp_exact;
 +               }
@@ -30,7 +43,7 @@
        nir_validate_shader(nir, "after spirv_to_nir");
  
        vtn_free_specialization(spec);
-@@ -1640,6 +1663,14 @@
+@@ -1640,6 +1669,14 @@
  {
     if (gfx_level < GFX10)
        return false;
@@ -45,7 +58,7 @@
  
     /* Disable the WGP mode on gfx10.3 because it can hang. (it
      * happened on VanGogh) Let's disable it on all chips that
-@@ -3517,6 +3548,46 @@
+@@ -3517,6 +3554,46 @@
        key->vertex_robustness1 = 1u;
  }
  
@@ -92,7 +105,7 @@
  struct radv_shader_binary *
  radv_shader_nir_to_asm(const struct radv_compiler_info *compiler_info, struct radv_shader_stage *pl_stage,
                         struct nir_shader *const *shaders, int shader_count,
-@@ -3570,6 +3641,7 @@
+@@ -3570,6 +3647,7 @@
        return NULL;
     }
  
