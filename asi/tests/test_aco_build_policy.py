@@ -161,3 +161,15 @@ class BuildPolicyTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+    def test_shared_cmat_env_not_leaked_and_policy_conflict_rejected(self):
+        # a parent-env ONR_ACO_SHARED_CMAT must never reach any capture without the flag
+        with patch.dict(os.environ, {'ONR_ACO_SHARED_CMAT': 'loadstore'}):
+            self.build(())
+        self.assertTrue(all(t[5] is None for t in self.calls))
+        # identical SPIR-V bytes may not request differing per-stem policies (incl. shared-cmat)
+        (self.inputs/'ordinary.spv').write_bytes((self.inputs/'selected.spv').read_bytes())
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            self.build(('selected',))                                  # cmat-address on one stem only
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            self.build(('selected',), shared_cmat_shaders=('selected',))   # shared-cmat on one stem only
