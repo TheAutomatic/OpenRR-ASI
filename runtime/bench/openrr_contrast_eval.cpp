@@ -574,16 +574,16 @@ static std::string ExtractBinaryLtDeepDefault(const std::vector<uint8_t>& bin)
     return {};
 }
 
-struct DeepRuntimeInfo
+struct DeepConfigInfo
 {
     std::string effective = "off";
     bool active = false;
     std::string source;
 };
 
-static DeepRuntimeInfo ResolveEffectiveDeep(const Config& cfg, const std::string& binDefault)
+static DeepConfigInfo ResolveConfiguredDeep(const Config& cfg, const std::string& binDefault)
 {
-    DeepRuntimeInfo r {};
+    DeepConfigInfo r {};
     const char* envDeep = std::getenv("ONR_RR_DEEP");
     if (cfg.fastMode < 2)
     {
@@ -1140,8 +1140,9 @@ int RunMain(const Args& args)
     const std::string asiSha = asiAbs.empty() ? std::string() : Sha256FileHex(asiAbs);
     const std::string manSha = acoRoot.empty() ? std::string() : Sha256FileHex(acoRoot / "manifest.json");
     const std::string binDeep = asiAbs.empty() ? std::string() : ExtractBinaryLtDeepDefault(ReadFileBytes(asiAbs));
-    const DeepRuntimeInfo deepInfo = ResolveEffectiveDeep(cfg, binDeep);
+    const DeepConfigInfo deepInfo = ResolveConfiguredDeep(cfg, binDeep);
     const int effectiveFlow = ParseLogEffectiveFlow(firstGpuLogPath);
+    const bool gpuExecuted = !args.noGpu && !firstGpuLogPath.empty();
 
     std::ostringstream summary;
     summary << "{\n  \"suite\": \"" << rr_ref::FixtureVersionForSuite(suite) << "\",\n  \"config\": \"" << cfg.name << "\",\n"
@@ -1152,14 +1153,15 @@ int RunMain(const Args& args)
             << "    \"ONR_RR_DEEP_PART\": " << JsonStrOrNull(std::getenv("ONR_RR_DEEP_PART")) << ",\n"
             << "    \"ONR_RR_NO_SAMPLER\": " << JsonStrOrNull(std::getenv("ONR_RR_NO_SAMPLER")) << "\n  },\n"
             << "  \"runtime\": {\n"
+            << "    \"gpu_executed\": " << (gpuExecuted ? "true" : "false") << ",\n"
             << "    \"asi_path\": " << JsonStrOrNull(asiPathStr.empty() ? nullptr : asiPathStr.c_str()) << ",\n"
             << "    \"asi_sha256\": " << JsonStrOrNull(asiSha.empty() ? nullptr : asiSha.c_str()) << ",\n"
             << "    \"data_dir\": " << JsonStrOrNull(dataDirStr.empty() ? nullptr : dataDirStr.c_str()) << ",\n"
             << "    \"aco_manifest_sha256\": " << JsonStrOrNull(manSha.empty() ? nullptr : manSha.c_str()) << ",\n"
             << "    \"binary_lt_deep_default\": " << JsonStrOrNull(binDeep.empty() ? nullptr : binDeep.c_str()) << ",\n"
-            << "    \"effective_deep\": " << JsonStrOrNull(deepInfo.effective.c_str()) << ",\n"
-            << "    \"effective_deep_active\": " << (deepInfo.active ? "true" : "false") << ",\n"
-            << "    \"effective_deep_source\": " << JsonStrOrNull(deepInfo.source.c_str()) << ",\n"
+            << "    \"configured_deep\": " << JsonStrOrNull(deepInfo.effective.c_str()) << ",\n"
+            << "    \"configured_deep_enabled\": " << (deepInfo.active ? "true" : "false") << ",\n"
+            << "    \"configured_deep_source\": " << JsonStrOrNull(deepInfo.source.c_str()) << ",\n"
             << "    \"effective_flow\": " << (effectiveFlow >= 0 ? std::to_string(effectiveFlow) : std::string("null")) << "\n  },\n"
             << "  \"cases\": [\n" << casesStream.str() << "\n  ],\n"
             << "  \"total_ref_frames\": " << totalRefFrames << ",\n"

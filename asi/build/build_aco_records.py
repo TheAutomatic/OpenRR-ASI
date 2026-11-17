@@ -88,17 +88,123 @@ def msgpack(value):
         return b'\xdf' + struct.pack('>I', len(value)) + b''.join(msgpack(k)+msgpack(v) for k,v in value.items())
     raise TypeError(type(value))
 
+def _unpack_msgpack(data: bytes):
+    mv = memoryview(data)
+    def read(pos: int, n: int):
+        if pos + n > len(mv):
+            raise ValueError('truncated msgpack')
+        return bytes(mv[pos:pos + n]), pos + n
+    def decode(pos: int):
+        if pos >= len(mv):
+            raise ValueError('unexpected EOF in msgpack')
+        b = mv[pos]
+        pos += 1
+        if b <= 0x7f:
+            return b, pos
+        if b >= 0xe0:
+            return b - 256, pos
+        if 0x80 <= b <= 0x8f:
+            n = b & 0x0f
+            out = {}
+            for _ in range(n):
+                k, pos = decode(pos)
+                v, pos = decode(pos)
+                out[k] = v
+            return out, pos
+        if 0x90 <= b <= 0x9f:
+            n = b & 0x0f
+            out = []
+            for _ in range(n):
+                v, pos = decode(pos)
+                out.append(v)
+            return out, pos
+        if 0xa0 <= b <= 0xbf:
+            raw, pos = read(pos, b & 0x1f)
+            return raw.decode('utf-8'), pos
+        if b == 0xc0:
+            return None, pos
+        if b == 0xc2:
+            return False, pos
+        if b == 0xc3:
+            return True, pos
+        if b in (0xcc, 0xcd, 0xce, 0xcf, 0xd0, 0xd1, 0xd2, 0xd3):
+            fmts = {0xcc: '>B', 0xcd: '>H', 0xce: '>I', 0xcf: '>Q',
+                    0xd0: '>b', 0xd1: '>h', 0xd2: '>i', 0xd3: '>q'}
+            fmt = fmts[b]
+            raw, pos = read(pos, struct.calcsize(fmt))
+            return struct.unpack(fmt, raw)[0], pos
+        if b in (0xd9, 0xda, 0xdb):
+            fmts = {0xd9: '>B', 0xda: '>H', 0xdb: '>I'}
+            fmt = fmts[b]
+            raw_len, pos = read(pos, struct.calcsize(fmt))
+            n = struct.unpack(fmt, raw_len)[0]
+            raw, pos = read(pos, n)
+            return raw.decode('utf-8'), pos
+        if b in (0xdc, 0xdd):
+            fmts = {0xdc: '>H', 0xdd: '>I'}
+            fmt = fmts[b]
+            raw_len, pos = read(pos, struct.calcsize(fmt))
+            n = struct.unpack(fmt, raw_len)[0]
+            out = []
+            for _ in range(n):
+                v, pos = decode(pos)
+                out.append(v)
+            return out, pos
+        if b in (0xde, 0xdf):
+            fmts = {0xde: '>H', 0xdf: '>I'}
+            fmt = fmts[b]
+            raw_len, pos = read(pos, struct.calcsize(fmt))
+            n = struct.unpack(fmt, raw_len)[0]
+            out = {}
+            for _ in range(n):
+                k, pos = decode(pos)
+                v, pos = decode(pos)
+                out[k] = v
+            return out, pos
+        raise ValueError(f'unsupported msgpack tag: 0x{b:02x}')
+    val, end = decode(0)
+    if end != len(mv):
+        raise ValueError('trailing bytes in msgpack')
+    return val
+
+def _expected_index(m: dict, manifest_bytes: bytes) -> dict:
+    recs = m['records']
+    index = {k: m[k] for k in ('schema', 'target', 'layout_version', 'wave_size', 'layout_push_bytes', 'mesa_commit', 'patch_version')}
+    index['manifest_hash'] = fnv(manifest_bytes)
+    index['records'] = {k: {f: r[f] for f in ('spv_hash', 'code_hash', 'workgroup', 'layout', 'record')}
+                        for k, r in recs.items()}
+    return index
+
 def _is_consistent_package(pkg_dir: Path) -> bool:
     manifest_path = pkg_dir / 'manifest.json'
     msgpack_path = pkg_dir / 'manifest.msgpack'
     if not manifest_path.is_file() or not msgpack_path.is_file():
         return False
     try:
-        if msgpack_path.stat().st_size == 0:
+        manifest_bytes = manifest_path.read_bytes()
+        msgpack_bytes = msgpack_path.read_bytes()
+        if not manifest_bytes or not msgpack_bytes:
             return False
-        m = json.loads(manifest_path.read_text())
+        m = json.loads(manifest_bytes.decode('utf-8'))
         recs = m.get('records')
         if not isinstance(recs, dict) or not recs or m.get('failures') != []:
+            return False
+        if (m.get('schema') != 1 or m.get('target') != 'gfx1201' or m.get('layout_version') != LAYOUT
+                or m.get('wave_size') != 32 or m.get('layout_push_bytes') != 256
+                or m.get('patch_version') not in (3, 4)
+                or not isinstance(m.get('mesa_commit'), str) or not m['mesa_commit']):
+            return False
+        for k, r in recs.items():
+            if not isinstance(r, dict):
+                return False
+            wg = r.get('workgroup')
+            if (r.get('spv_hash') != k or r.get('record') != f'{k}.nrp'
+                    or not isinstance(r.get('code_hash'), str) or not r['code_hash']
+                    or r.get('layout') not in ('views', 'sampled')
+                    or not isinstance(wg, list) or len(wg) != 3
+                    or not all(isinstance(x, int) and not isinstance(x, bool) and 0 < x <= 1024 for x in wg)):
+                return False
+        if _unpack_msgpack(msgpack_bytes) != _expected_index(m, manifest_bytes):
             return False
         disk_nrps = {p.name: p for p in pkg_dir.glob('*.nrp')}
         expected_nrps = {r['record'] for r in recs.values()}
@@ -108,7 +214,7 @@ def _is_consistent_package(pkg_dir: Path) -> bool:
             if hashlib.sha256(disk_nrps[r['record']].read_bytes()).hexdigest() != r['record_sha256']:
                 return False
         return True
-    except (OSError, ValueError, KeyError, TypeError):
+    except (OSError, ValueError, KeyError, TypeError, UnicodeDecodeError):
         return False
 
 def main():
@@ -307,11 +413,7 @@ def main():
         stage_manifest = stage_root / 'manifest.json'
         stage_manifest.write_text(json.dumps(output, indent=2)+'\n')
         # Runtime index uses the existing PAL MessagePack codec; bind it to the reviewable JSON.
-        index = {k: output[k] for k in ('schema', 'target', 'layout_version', 'wave_size', 'layout_push_bytes', 'mesa_commit', 'patch_version')}
-        index['manifest_hash'] = fnv(stage_manifest.read_bytes())
-        index['records'] = {k: {f: r[f] for f in ('spv_hash', 'code_hash', 'workgroup', 'layout', 'record')}
-                            for k, r in records.items()}
-        (stage_root / 'manifest.msgpack').write_bytes(msgpack(index))
+        (stage_root / 'manifest.msgpack').write_bytes(msgpack(_expected_index(output, stage_manifest.read_bytes())))
         if not _is_consistent_package(stage_root):
             raise ValueError('staged package failed consistency check')
         had_root_before_swap = root.exists()

@@ -339,6 +339,47 @@ class BuildPolicyTests(unittest.TestCase):
         self.assertEqual(self.manifest_path.read_bytes(), orig_manifest)
         self.assertEqual(list(root.parent.glob('.openrr-d3d12-v1.*')), [])
 
+    def test_mismatched_msgpack_preserves_backup_and_recovers(self):
+        m = self.build()
+        root = self.manifest_path.parent
+        backup_root = root.parent / f'.{producer.LAYOUT}.backup'
+        orig_manifest_bytes = self.manifest_path.read_bytes()
+        orig_msgpack = (root / 'manifest.msgpack').read_bytes()
+
+        def failing_capture(args, **kwargs):
+            return subprocess.CompletedProcess(args, 1, '', 'boom')
+
+        fail_args = ['records', str(self.inputs), '--out', str(self.out), '--toolchain', str(self.cfg),
+                     '--capture', str(self.capture), '--capture-dir', str(self.raw),
+                     '--precision', 'global', '--matrix-loads', 'vector8', '--refresh']
+
+        # Sub-case A: valid msgpack binding wrong manifest_hash
+        shutil.copytree(root, backup_root)
+        bad_hash_idx = producer._expected_index(m, orig_manifest_bytes)
+        bad_hash_idx['manifest_hash'] ^= 1
+        (root / 'manifest.msgpack').write_bytes(producer.msgpack(bad_hash_idx))
+        with patch.object(sys, 'argv', fail_args), patch.object(producer.subprocess, 'run', failing_capture), \
+             contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()), \
+             self.assertRaises(SystemExit):
+            producer.main()
+        self.assertFalse(backup_root.exists())
+        self.assertEqual((root / 'manifest.msgpack').read_bytes(), orig_msgpack)
+        self.assertTrue(producer._is_consistent_package(root))
+
+        # Sub-case B: valid msgpack keeping real manifest_hash but mismatched record metadata
+        shutil.copytree(root, backup_root)
+        bad_rec_idx = producer._expected_index(m, orig_manifest_bytes)
+        first_key = next(iter(bad_rec_idx['records']))
+        bad_rec_idx['records'][first_key]['code_hash'] = '0000000000000000'
+        (root / 'manifest.msgpack').write_bytes(producer.msgpack(bad_rec_idx))
+        with patch.object(sys, 'argv', fail_args), patch.object(producer.subprocess, 'run', failing_capture), \
+             contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()), \
+             self.assertRaises(SystemExit):
+            producer.main()
+        self.assertFalse(backup_root.exists())
+        self.assertEqual((root / 'manifest.msgpack').read_bytes(), orig_msgpack)
+        self.assertTrue(producer._is_consistent_package(root))
+
     def test_gfx11_shader_strip_policy(self):
         bs_spec = importlib.util.spec_from_file_location('build_shaders', Path(__file__).parents[1]/'build/build_shaders.py')
         bs_mod = importlib.util.module_from_spec(bs_spec)
