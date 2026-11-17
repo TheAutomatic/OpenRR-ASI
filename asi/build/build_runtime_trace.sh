@@ -6,7 +6,7 @@ base=${OPENRR_TRACE_BASE:-build/asi}
 out=${OPENRR_TRACE_OUT:-build/aco-runtime-trace}
 mkdir -p "$out"
 cxx=x86_64-w64-mingw32-g++
-flags=(-std=c++20 -mf16c -O2 -fno-strict-aliasing -DNDEBUG -DONR_RR_STATIC -DONR_RR_BUILDING -DOPENRR_EXPERIMENTAL_OPTIFG_HOST
+flags=(-std=c++20 -mf16c -O2 -fno-strict-aliasing -DNDEBUG -DONR_RR_STATIC -DONR_RR_BUILDING -DOPENRR_EXPERIMENTAL_OPTIFG_HOST -DONR_LT_DEEP="\"2,4,2,4\""
   -Iasi/third_party/vulkan/include -Igpu/include -Igpu/src -Iruntime/include -Iruntime/src
   -Iasi/src -Iasi/third_party/minhook/include -I"$base")
 # A D3dDevice member was added, so rebuild every object which instantiates it.

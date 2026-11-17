@@ -533,6 +533,106 @@ static std::string JsonStrOrNull(const char* v)
     return out;
 }
 
+static std::vector<uint8_t> ReadFileBytes(const fs::path& p)
+{
+    std::ifstream f(p, std::ios::binary);
+    if (!f) return {};
+    return std::vector<uint8_t>(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+}
+
+static std::string Sha256FileHex(const fs::path& p)
+{
+    const auto bytes = ReadFileBytes(p);
+    if (bytes.empty()) return {};
+    return rr_ref::Sha256BytesHex(bytes.data(), bytes.size());
+}
+
+static std::string ExtractBinaryLtDeepDefault(const std::vector<uint8_t>& bin)
+{
+    static constexpr char kNeedle[] = "ONR_RR_DEEP";
+    for (size_t i = 0; i + sizeof(kNeedle) <= bin.size(); ++i)
+    {
+        if (std::memcmp(bin.data() + i, kNeedle, sizeof(kNeedle)) != 0) continue;
+        const size_t lo = i > 192 ? i - 192 : 0;
+        const size_t hi = std::min(bin.size(), i + 192);
+        for (size_t pos = lo; pos < hi; ++pos)
+        {
+            if (pos > 0 && bin[pos - 1] != 0) continue;
+            const size_t rem = hi - pos;
+            const char* s = reinterpret_cast<const char*>(bin.data() + pos);
+            const size_t len = ::strnlen(s, rem);
+            if (len < 7 || len >= 32 || len == rem) continue;
+            int m = -1, l = -1, p = -1, g = -1;
+            char tail = 0;
+            if (std::sscanf(s, "%d,%d,%d,%d%c", &m, &l, &p, &g, &tail) != 4) continue;
+            if (m < 0 || m > 3 || l < 3 || l > 5 || p < 1 || g < 0) continue;
+            char norm[32];
+            std::snprintf(norm, sizeof(norm), "%d,%d,%d,%d", m, l, p, g);
+            if (std::strcmp(s, norm) == 0) return std::string(norm);
+        }
+    }
+    return {};
+}
+
+struct DeepRuntimeInfo
+{
+    std::string effective = "off";
+    bool active = false;
+    std::string source;
+};
+
+static DeepRuntimeInfo ResolveEffectiveDeep(const Config& cfg, const std::string& binDefault)
+{
+    DeepRuntimeInfo r {};
+    const char* envDeep = std::getenv("ONR_RR_DEEP");
+    if (cfg.fastMode < 2)
+    {
+        r.source = "mode_off";
+        return r;
+    }
+    const std::string spec = envDeep ? std::string(envDeep) : binDefault;
+    if (spec.empty())
+    {
+        r.source = envDeep ? "env:ONR_RR_DEEP_off" : "binary_none";
+        return r;
+    }
+    int m = 0, l = 4, p = 2, g = 0;
+    const int parsed = std::sscanf(spec.c_str(), "%d,%d,%d,%d", &m, &l, &p, &g);
+    if (parsed >= 1 && m >= 1 && m <= 3 && l >= 3 && l <= 5 && p >= 1)
+    {
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "%d,%d,%d,%d", m, l, p, g);
+        r.effective = buf;
+        r.active = true;
+        r.source = envDeep ? "env:ONR_RR_DEEP" : "binary_default";
+    }
+    else
+    {
+        r.source = envDeep ? "env:ONR_RR_DEEP_off" : "binary_off";
+    }
+    return r;
+}
+
+static int ParseLogEffectiveFlow(const fs::path& logPath)
+{
+    if (logPath.empty()) return -1;
+    std::ifstream f(logPath);
+    if (!f) return -1;
+    int flow = -1;
+    std::string line;
+    while (std::getline(f, line))
+    {
+        if (line.find("runtime paths:") == std::string::npos) continue;
+        const size_t pos = line.find("flow=");
+        if (pos != std::string::npos && pos + 5 < line.size())
+        {
+            if (line[pos + 5] == '0') flow = 0;
+            else if (line[pos + 5] == '1') flow = 1;
+        }
+    }
+    return flow;
+}
+
 int RunMain(const Args& args)
 {
     const rr_ref::FixtureSuite suite = args.suite == "v2_motion" ? rr_ref::FixtureSuite::V2_Motion : rr_ref::FixtureSuite::V1;
@@ -588,15 +688,8 @@ int RunMain(const Args& args)
         cmpCsv << "case_id,frame,phase,rw,rh,reset,non_finite_other,non_finite_cur,diff_halfs,max_ulp,exact_half_pct,psnr01_db,psnr_reinhard_db,rgb_rmse,max_abs,mean_abs\n";
     }
     if (!args.dumpFramesDir.empty()) fs::create_directories(args.dumpFramesDir / args.suite);
-    std::ostringstream summary;
-    summary << "{\n  \"suite\": \"" << rr_ref::FixtureVersionForSuite(suite) << "\",\n  \"config\": \"" << cfg.name << "\",\n"
-            << "  \"env\": {\n"
-            << "    \"ONR_RR_FLOW\": " << JsonStrOrNull(std::getenv("ONR_RR_FLOW")) << ",\n"
-            << "    \"ONR_RR_DEEP\": " << JsonStrOrNull(std::getenv("ONR_RR_DEEP")) << ",\n"
-            << "    \"ONR_RR_DEEP_SERIAL\": " << JsonStrOrNull(std::getenv("ONR_RR_DEEP_SERIAL")) << ",\n"
-            << "    \"ONR_RR_DEEP_PART\": " << JsonStrOrNull(std::getenv("ONR_RR_DEEP_PART")) << ",\n"
-            << "    \"ONR_RR_NO_SAMPLER\": " << JsonStrOrNull(std::getenv("ONR_RR_NO_SAMPLER")) << "\n  },\n"
-            << "  \"cases\": [\n";
+    std::ostringstream casesStream;
+    fs::path firstGpuLogPath;
 
     Dev dev;
     if (!args.noGpu) dev.Init();
@@ -699,7 +792,9 @@ int RunMain(const Args& args)
             const std::wstring dlssdW = fs::absolute(args.dlssd).wstring();
             const std::wstring dataW = fs::absolute(args.dataDir).wstring();
             const std::wstring cacheW = fs::absolute(args.outDir / "cache").wstring();
-            const std::wstring logW = fs::absolute(args.outDir / ("openrr_" + c.id + ".log")).wstring();
+            const fs::path logPath = fs::absolute(args.outDir / ("openrr_" + c.id + ".log"));
+            if (firstGpuLogPath.empty()) firstGpuLogPath = logPath;
+            const std::wstring logW = logPath.wstring();
             ci.dlssd_path = dlssdW.c_str();
             ci.data_dir = dataW.c_str();
             ci.cache_dir = cacheW.c_str();
@@ -969,7 +1064,7 @@ int RunMain(const Args& args)
         }
 
         // Summary row
-        summary << (written++ ? ",\n" : "") << "    {\n"
+        casesStream << (written++ ? ",\n" : "") << "    {\n"
                 << "      \"id\": \"" << c.id << "\",\n"
                 << "      \"status\": \"" << status << "\",\n"
                 << "      \"ref_frames\": " << caseRefFrames << ",\n"
@@ -980,7 +1075,7 @@ int RunMain(const Args& args)
             double worst = 999.0, worstRmse = 0.0;
             for (auto& [f, m] : frameMetrics) { worst = std::min(worst, m.psnr01_db); worstRmse = std::max(worstRmse, m.rgb_rmse); }
             auto at = [&](uint32_t f) { auto it = frameMetrics.find(f); return it == frameMetrics.end() ? -1.0 : it->second.psnr01_db; };
-            summary << "      \"min_psnr01_db\": " << worst << ",\n"
+            casesStream << "      \"min_psnr01_db\": " << worst << ",\n"
                     << "      \"worst_rgb_rmse\": " << worstRmse << ",\n"
                     << "      \"f000_psnr01_db\": " << at(0) << ",\n"
                     << "      \"f063_psnr01_db\": " << at(63) << ",\n"
@@ -989,16 +1084,16 @@ int RunMain(const Args& args)
         }
         else
         {
-            summary << "      \"min_psnr01_db\": null,\n";
+            casesStream << "      \"min_psnr01_db\": null,\n";
         }
         if (haveF015Vs5090)
         {
-            summary << "      \"f015_vs_5090_psnr01_db\": " << f015Vs5090.psnr01_db << ",\n"
+            casesStream << "      \"f015_vs_5090_psnr01_db\": " << f015Vs5090.psnr01_db << ",\n"
                     << "      \"f015_vs_5090_max_ulp\": " << f015Vs5090.max_ulp << ",\n"
                     << "      \"f015_vs_5090_rgb_rmse\": " << f015Vs5090.rgb_rmse << ",\n"
                     << "      \"f015_vs_5090_diff_halfs\": " << f015Vs5090.diff_halfs << ",\n";
         }
-        summary << "      \"hash_gates\": " << c.expected_input_sha256.size() << "\n    }";
+        casesStream << "      \"hash_gates\": " << c.expected_input_sha256.size() << "\n    }";
     }
 
     // Probe self columns (second pass over saved pixels). Pair mapping aligned with
@@ -1036,7 +1131,37 @@ int RunMain(const Args& args)
         }
     }
 
-    summary << "\n  ],\n"
+    const fs::path asiAbs = args.asi.empty() ? fs::path() : fs::weakly_canonical(args.asi);
+    const fs::path dataAbs = args.dataDir.empty() ? fs::path() : fs::weakly_canonical(args.dataDir);
+    fs::path acoRoot = dataAbs.empty() ? fs::path() : (dataAbs / "aco" / "gfx1201" / "openrr-d3d12-v1");
+    if (const char* envAco = std::getenv("ONR_ACO_DIR"); envAco && *envAco) acoRoot = fs::weakly_canonical(envAco);
+    const std::string asiPathStr = asiAbs.empty() ? std::string() : asiAbs.generic_string();
+    const std::string dataDirStr = dataAbs.empty() ? std::string() : dataAbs.generic_string();
+    const std::string asiSha = asiAbs.empty() ? std::string() : Sha256FileHex(asiAbs);
+    const std::string manSha = acoRoot.empty() ? std::string() : Sha256FileHex(acoRoot / "manifest.json");
+    const std::string binDeep = asiAbs.empty() ? std::string() : ExtractBinaryLtDeepDefault(ReadFileBytes(asiAbs));
+    const DeepRuntimeInfo deepInfo = ResolveEffectiveDeep(cfg, binDeep);
+    const int effectiveFlow = ParseLogEffectiveFlow(firstGpuLogPath);
+
+    std::ostringstream summary;
+    summary << "{\n  \"suite\": \"" << rr_ref::FixtureVersionForSuite(suite) << "\",\n  \"config\": \"" << cfg.name << "\",\n"
+            << "  \"env\": {\n"
+            << "    \"ONR_RR_FLOW\": " << JsonStrOrNull(std::getenv("ONR_RR_FLOW")) << ",\n"
+            << "    \"ONR_RR_DEEP\": " << JsonStrOrNull(std::getenv("ONR_RR_DEEP")) << ",\n"
+            << "    \"ONR_RR_DEEP_SERIAL\": " << JsonStrOrNull(std::getenv("ONR_RR_DEEP_SERIAL")) << ",\n"
+            << "    \"ONR_RR_DEEP_PART\": " << JsonStrOrNull(std::getenv("ONR_RR_DEEP_PART")) << ",\n"
+            << "    \"ONR_RR_NO_SAMPLER\": " << JsonStrOrNull(std::getenv("ONR_RR_NO_SAMPLER")) << "\n  },\n"
+            << "  \"runtime\": {\n"
+            << "    \"asi_path\": " << JsonStrOrNull(asiPathStr.empty() ? nullptr : asiPathStr.c_str()) << ",\n"
+            << "    \"asi_sha256\": " << JsonStrOrNull(asiSha.empty() ? nullptr : asiSha.c_str()) << ",\n"
+            << "    \"data_dir\": " << JsonStrOrNull(dataDirStr.empty() ? nullptr : dataDirStr.c_str()) << ",\n"
+            << "    \"aco_manifest_sha256\": " << JsonStrOrNull(manSha.empty() ? nullptr : manSha.c_str()) << ",\n"
+            << "    \"binary_lt_deep_default\": " << JsonStrOrNull(binDeep.empty() ? nullptr : binDeep.c_str()) << ",\n"
+            << "    \"effective_deep\": " << JsonStrOrNull(deepInfo.effective.c_str()) << ",\n"
+            << "    \"effective_deep_active\": " << (deepInfo.active ? "true" : "false") << ",\n"
+            << "    \"effective_deep_source\": " << JsonStrOrNull(deepInfo.source.c_str()) << ",\n"
+            << "    \"effective_flow\": " << (effectiveFlow >= 0 ? std::to_string(effectiveFlow) : std::string("null")) << "\n  },\n"
+            << "  \"cases\": [\n" << casesStream.str() << "\n  ],\n"
             << "  \"total_ref_frames\": " << totalRefFrames << ",\n"
             << "  \"total_missing_ref_frames\": " << totalMissingRefFrames << ",\n"
             << "  \"total_non_finite\": " << totalNonFinite << "\n}\n";

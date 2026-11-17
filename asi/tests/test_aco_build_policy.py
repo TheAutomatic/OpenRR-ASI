@@ -184,25 +184,58 @@ class BuildPolicyTests(unittest.TestCase):
                          sorted(r['record'] for r in m['records'].values()))
 
     def test_failed_capture_does_not_publish_partial_manifest(self):
-        self.build()
-        msgpack_path = self.manifest_path.parent / 'manifest.msgpack'
-        self.assertTrue(self.manifest_path.exists() and msgpack_path.exists())
+        msgpack_path = self.out / 'gfx1201/openrr-d3d12-v1/manifest.msgpack'
+        manifest_path = self.out / 'gfx1201/openrr-d3d12-v1/manifest.json'
+        root = manifest_path.parent
         def fail_selected(args, **kwargs):
             if Path(args[1]).stem == 'selected':
                 return subprocess.CompletedProcess(args, 1, '', 'simulated capture crash')
             return self.fake_capture(args, **kwargs)
         args = ['records', str(self.inputs), '--out', str(self.out), '--toolchain', str(self.cfg),
                 '--capture', str(self.capture), '--capture-dir', str(self.raw),
-                '--precision', 'native', '--matrix-loads', 'vector8', '--refresh']
+                '--precision', 'native', '--matrix-loads', 'vector8']
         with patch.object(sys, 'argv', args), patch.object(producer.subprocess, 'run', fail_selected), \
              contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()), \
              self.assertRaises(SystemExit):
             producer.main()
-        self.assertFalse(self.manifest_path.exists())
+        self.assertFalse(manifest_path.exists())
         self.assertFalse(msgpack_path.exists())
+        self.assertEqual(list(root.glob('*.nrp')) if root.exists() else [], [])
         failures = json.loads((self.raw / 'failures.json').read_text())
         self.assertEqual(len(failures['failures']), 1)
         self.assertIn('selected.spv', failures['failures'][0]['spv'])
+
+    def test_failed_capture_preserves_consistent_previous_package(self):
+        m = self.build()
+        root = self.manifest_path.parent
+        orig_manifest = self.manifest_path.read_bytes()
+        orig_msgpack = (root / 'manifest.msgpack').read_bytes()
+        orig_nrps = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in root.glob('*.nrp')}
+        def fail_selected_mutating_ordinary(args, **kwargs):
+            if Path(args[1]).stem == 'selected':
+                return subprocess.CompletedProcess(args, 1, '', 'simulated capture crash')
+            env = kwargs['env']
+            prefix = Path(env['ONR_ACO_CAPTURE'])
+            info = dict(inline=[], rsrc1=0, rsrc2=0, rsrc3=0, exec_bytes=4, workgroup_size=32,
+                shared_bytes=0, push_bytes=0, user_sgprs=0, set0=-1, push=-1, grid=-1,
+                scratch_bytes=0, wave_size=32, vgprs=8)
+            prefix.with_suffix('.json').write_text(json.dumps(info))
+            prefix.with_suffix('.code').write_bytes(struct.pack('<I', 0xbf800000))
+            prefix.with_suffix('.layouts').write_bytes(b'layout')
+            return subprocess.CompletedProcess(args, 0, 'ONR_M0 subst=0 writes=0 constdata=0 pc_relative=0\n', '')
+        args = ['records', str(self.inputs), '--out', str(self.out), '--toolchain', str(self.cfg),
+                '--capture', str(self.capture), '--capture-dir', str(self.raw),
+                '--precision', 'native', '--matrix-loads', 'vector8', '--refresh']
+        with patch.object(sys, 'argv', args), patch.object(producer.subprocess, 'run', fail_selected_mutating_ordinary), \
+             contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()), \
+             self.assertRaises(SystemExit):
+            producer.main()
+        self.assertEqual(self.manifest_path.read_bytes(), orig_manifest)
+        self.assertEqual((root / 'manifest.msgpack').read_bytes(), orig_msgpack)
+        self.assertEqual({p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in root.glob('*.nrp')}, orig_nrps)
+        for rec in m['records'].values():
+            self.assertEqual(hashlib.sha256((root / rec['record']).read_bytes()).hexdigest(), rec['record_sha256'])
+        self.assertTrue((self.raw / 'failures.json').is_file())
 
     def test_interrupted_capture_preserves_consistent_previous_package(self):
         m = self.build()
@@ -235,6 +268,75 @@ class BuildPolicyTests(unittest.TestCase):
         self.assertEqual({p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in root.glob('*.nrp')}, orig_nrps)
         for rec in m['records'].values():
             self.assertEqual(hashlib.sha256((root / rec['record']).read_bytes()).hexdigest(), rec['record_sha256'])
+        self.assertEqual(list(root.parent.glob('.openrr-d3d12-v1.*')), [])
+
+    def test_interrupt_between_backup_and_publish_rolls_back_previous_package(self):
+        m = self.build()
+        root = self.manifest_path.parent
+        orig_manifest = self.manifest_path.read_bytes()
+        orig_msgpack = (root / 'manifest.msgpack').read_bytes()
+        orig_nrps = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in root.glob('*.nrp')}
+        real_replace = os.replace
+        calls = []
+        def faulty_replace(src, dst):
+            calls.append((Path(src), Path(dst)))
+            if len(calls) == 2:
+                raise KeyboardInterrupt('simulated interrupt between backup and publish')
+            return real_replace(src, dst)
+        args = ['records', str(self.inputs), '--out', str(self.out), '--toolchain', str(self.cfg),
+                '--capture', str(self.capture), '--capture-dir', str(self.raw),
+                '--precision', 'global', '--matrix-loads', 'vector8', '--refresh']
+        with patch.object(sys, 'argv', args), patch.object(producer.subprocess, 'run', self.fake_capture), \
+             patch.object(producer.os, 'replace', faulty_replace), \
+             contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()), \
+             self.assertRaises(KeyboardInterrupt):
+            producer.main()
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(self.manifest_path.read_bytes(), orig_manifest)
+        self.assertEqual((root / 'manifest.msgpack').read_bytes(), orig_msgpack)
+        self.assertEqual({p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in root.glob('*.nrp')}, orig_nrps)
+        for rec in m['records'].values():
+            self.assertEqual(hashlib.sha256((root / rec['record']).read_bytes()).hexdigest(), rec['record_sha256'])
+        self.assertEqual(list(root.parent.glob('.openrr-d3d12-v1.*')), [])
+
+    def test_publish_and_rollback_double_failure_preserves_backup_and_recovers(self):
+        m = self.build()
+        root = self.manifest_path.parent
+        backup_root = root.parent / f'.{producer.LAYOUT}.backup'
+        orig_manifest = self.manifest_path.read_bytes()
+        orig_msgpack = (root / 'manifest.msgpack').read_bytes()
+        orig_nrps = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in root.glob('*.nrp')}
+        real_replace = os.replace
+        calls = []
+        def double_fault_replace(src, dst):
+            calls.append((Path(src), Path(dst)))
+            if len(calls) == 2:
+                raise OSError('simulated publish failure')
+            if len(calls) == 3:
+                raise OSError('simulated rollback failure')
+            return real_replace(src, dst)
+        args = ['records', str(self.inputs), '--out', str(self.out), '--toolchain', str(self.cfg),
+                '--capture', str(self.capture), '--capture-dir', str(self.raw),
+                '--precision', 'global', '--matrix-loads', 'vector8', '--refresh']
+        with patch.object(sys, 'argv', args), patch.object(producer.subprocess, 'run', self.fake_capture), \
+             patch.object(producer.os, 'replace', double_fault_replace), \
+             contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()), \
+             self.assertRaises(OSError):
+            producer.main()
+        self.assertEqual(len(calls), 3)
+        self.assertFalse(root.exists())
+        self.assertTrue(backup_root.exists())
+        self.assertEqual((backup_root / 'manifest.json').read_bytes(), orig_manifest)
+        self.assertEqual((backup_root / 'manifest.msgpack').read_bytes(), orig_msgpack)
+        self.assertEqual({p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in backup_root.glob('*.nrp')}, orig_nrps)
+        for rec in m['records'].values():
+            self.assertEqual(hashlib.sha256((backup_root / rec['record']).read_bytes()).hexdigest(), rec['record_sha256'])
+        # Next run automatically recovers the backup package instead of wiping it.
+        self.calls.clear()
+        self.build()
+        self.assertEqual(self.calls, [])
+        self.assertTrue(root.exists())
+        self.assertEqual(self.manifest_path.read_bytes(), orig_manifest)
         self.assertEqual(list(root.parent.glob('.openrr-d3d12-v1.*')), [])
 
     def test_gfx11_shader_strip_policy(self):

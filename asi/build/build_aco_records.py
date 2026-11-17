@@ -88,6 +88,29 @@ def msgpack(value):
         return b'\xdf' + struct.pack('>I', len(value)) + b''.join(msgpack(k)+msgpack(v) for k,v in value.items())
     raise TypeError(type(value))
 
+def _is_consistent_package(pkg_dir: Path) -> bool:
+    manifest_path = pkg_dir / 'manifest.json'
+    msgpack_path = pkg_dir / 'manifest.msgpack'
+    if not manifest_path.is_file() or not msgpack_path.is_file():
+        return False
+    try:
+        if msgpack_path.stat().st_size == 0:
+            return False
+        m = json.loads(manifest_path.read_text())
+        recs = m.get('records')
+        if not isinstance(recs, dict) or not recs or m.get('failures') != []:
+            return False
+        disk_nrps = {p.name: p for p in pkg_dir.glob('*.nrp')}
+        expected_nrps = {r['record'] for r in recs.values()}
+        if set(disk_nrps) != expected_nrps:
+            return False
+        for r in recs.values():
+            if hashlib.sha256(disk_nrps[r['record']].read_bytes()).hexdigest() != r['record_sha256']:
+                return False
+        return True
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('inputs', nargs='+', type=Path)
@@ -117,11 +140,22 @@ def main():
     ns = ap.parse_args()
     cfg = json.loads(ns.toolchain.read_text())
     root = ns.out / 'gfx1201' / LAYOUT
-    root.mkdir(parents=True, exist_ok=True)
-    raw = ns.capture_dir if ns.capture_dir else root / 'capture'
-    raw.mkdir(parents=True, exist_ok=True)
-    manifest_path = root/'manifest.json'
-    manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
+    backup_root = root.parent / f'.{LAYOUT}.backup'
+    root.parent.mkdir(parents=True, exist_ok=True)
+    if not _is_consistent_package(root) and _is_consistent_package(backup_root):
+        if root.exists():
+            shutil.rmtree(root)
+        os.replace(backup_root, root)
+    elif _is_consistent_package(root) and backup_root.exists():
+        shutil.rmtree(backup_root, ignore_errors=True)
+    had_consistent_root = _is_consistent_package(root)
+    manifest_path = root / 'manifest.json'
+    try:
+        manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
+    except (OSError, ValueError):
+        manifest = {}
+    if not isinstance(manifest, dict) or manifest.get('failures') != []:
+        manifest = {}
     files = sorted({p.resolve() for arg in ns.inputs for p in (arg.rglob('*.spv') if arg.is_dir() else [arg])})
     stems = {p.stem for p in files}
     for label, selected in (('shared-cmat', ns.shared_cmat_shaders), ('cmat address', ns.cmat_address_shaders), ('cu-mode', ns.cu_mode_shaders),
@@ -188,6 +222,8 @@ def main():
     stage_root = root.parent / f'.{LAYOUT}.staging.{os.getpid()}'
     shutil.rmtree(stage_root, ignore_errors=True)
     stage_root.mkdir(parents=True, exist_ok=True)
+    raw = ns.capture_dir if ns.capture_dir else (stage_root / 'capture')
+    raw.mkdir(parents=True, exist_ok=True)
     try:
         for spv in files:
             data = spv.read_bytes()
@@ -258,13 +294,14 @@ def main():
                       mesa_commit=cfg['mesa_commit'], patch_version=cfg['patch_version'], fingerprint=fingerprint,
                       compile_options=dict(subgroup=32, require_full_subgroups=True, features='gpu/src/vk.cpp Device::init', **policy),
                       records=records, failures=failures)
-        failure_report = raw / 'failures.json'
+        failure_report = (ns.capture_dir if ns.capture_dir else (root / 'capture')) / 'failures.json'
         msgpack_path = root / 'manifest.msgpack'
         if failures:
             failure_report.parent.mkdir(parents=True, exist_ok=True)
             failure_report.write_text(json.dumps(output, indent=2) + '\n')
-            manifest_path.unlink(missing_ok=True)
-            msgpack_path.unlink(missing_ok=True)
+            if not had_consistent_root:
+                manifest_path.unlink(missing_ok=True)
+                msgpack_path.unlink(missing_ok=True)
             raise SystemExit(f'{len(failures)} capture(s) failed; see {failure_report}')
         failure_report.unlink(missing_ok=True)
         stage_manifest = stage_root / 'manifest.json'
@@ -275,27 +312,25 @@ def main():
         index['records'] = {k: {f: r[f] for f in ('spv_hash', 'code_hash', 'workgroup', 'layout', 'record')}
                             for k, r in records.items()}
         (stage_root / 'manifest.msgpack').write_bytes(msgpack(index))
-        staged_nrps = {p.name: p for p in stage_root.glob('*.nrp')}
-        expected_nrps = {r['record'] for r in records.values()}
-        if set(staged_nrps) != expected_nrps:
-            raise ValueError('staged .nrp set mismatch')
-        for k, r in records.items():
-            if hashlib.sha256(staged_nrps[r['record']].read_bytes()).hexdigest() != r['record_sha256']:
-                raise ValueError(f'staged .nrp digest mismatch for {r["record"]}')
-        if not ns.capture_dir and raw.exists() and raw.parent == root:
-            os.replace(raw, stage_root / 'capture')
-        backup_root = root.parent / f'.{LAYOUT}.backup.{os.getpid()}'
-        shutil.rmtree(backup_root, ignore_errors=True)
-        had_root = root.exists()
-        if had_root:
-            os.replace(root, backup_root)
+        if not _is_consistent_package(stage_root):
+            raise ValueError('staged package failed consistency check')
+        had_root_before_swap = root.exists()
+        if had_root_before_swap and backup_root.exists():
+            if _is_consistent_package(root):
+                shutil.rmtree(backup_root)
+            else:
+                raise RuntimeError(f'refusing to overwrite backup {backup_root} while {root} is inconsistent')
+        published = False
         try:
+            if had_root_before_swap:
+                os.replace(root, backup_root)
             os.replace(stage_root, root)
+            published = True
         except BaseException:
-            if had_root and backup_root.exists() and not root.exists():
+            if had_root_before_swap and backup_root.exists() and not root.exists():
                 os.replace(backup_root, root)
             raise
-        finally:
+        if published and _is_consistent_package(root) and backup_root.exists():
             shutil.rmtree(backup_root, ignore_errors=True)
     finally:
         shutil.rmtree(stage_root, ignore_errors=True)
