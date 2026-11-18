@@ -8,4 +8,8 @@
 #define ENC_K8 1
 #define DEC_UP 1
 #define ENC_CP 64
+// FP8 MLP only: Mesa full unroll of the per-token-tile slice chain costs +50% exec; keep it rolled
+#if defined(LT_MLP8)
+#define MLP_SLICE_LOOP [[dont_unroll]]
+#endif
 #include "onr_block.glsl"

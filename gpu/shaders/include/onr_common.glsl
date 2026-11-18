@@ -68,3 +68,32 @@ uint pack1010102(vec3 v) {
 
 // 10-bit code -> c/1023 correctly rounded (double division, then one rounding to fp32).
 float unorm10_value(uint c) { return float(double(c) / 1023.0lf); }
+
+#ifdef LT_E8RAW
+// LT_E8RAW: the tensor-plane bytes are OCP e4m3fn codes end to end (writers and readers together -
+// both codec families in onr_block.glsl and onr_block_fast.glsl dispatch here). The sm_86 legacy
+// reads every exponent-0 code as (1 + m/8) 2^-7 (0x00 is +2^-7, never +-0) and its writer clamps
+// at 2^-7; OCP reads m 2^-9 (0x00 = +-0) and saturates at 448. Item OCP (units) pins all 256
+// codes of both schemes; normals share the bit layout. The NaN codes never occur (sat at 448).
+float16_t ocp_e4m3_in(uint b) {
+    uint s = (b & 0x80u) << 8, e = (b >> 3) & 15u, m = b & 7u;
+    if (e != 0u) return uint16BitsToFloat16(uint16_t(s | ((e + 8u) << 10) | (m << 7u)));
+    if (m == 0u) return uint16BitsToFloat16(uint16_t(s));
+    const uint p = m >= 4u ? 2u : m >= 2u ? 1u : 0u;
+    return uint16BitsToFloat16(uint16_t(s | ((6u + p) << 10) | ((m - (1u << p)) << (10u - p))));
+}
+uint ocp_e4m3_out(float16_t x) {
+    // the sm_86 writer's round-half-away (the weight of mantissa bit 6), with the 2^-7 floor gone:
+    // magnitudes below 2^-6 become OCP subnormals m 2^-9 (round to nearest even on the steps), 0 or 448 at the ends
+    const uint b = uint(float16BitsToUint16(x));
+    precise float16_t r = x + uint16BitsToFloat16(uint16_t(b & 0xfc40u));
+    r = r - uint16BitsToFloat16(uint16_t(b & 0xfc00u));
+    float16_t m = min(abs(r), 448.0hf);
+    const uint mm = uint(float16BitsToUint16(m));
+    if (mm < 0x2400u) {   // |x| rounded below 2^-6: subnormal code = round(|x| 2^9)
+        const float v = clamp(abs(float(x)), 0.0f, 0.015625f);
+        return (b & 0x8000u) >> 8 | min(uint(roundEven(v * 512.0f)), 7u);
+    }
+    return (b & 0x8000u) >> 8 | (((mm >> 7) - 0x40u) & 0x7fu);
+}
+#endif

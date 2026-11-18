@@ -1,0 +1,225 @@
+# OpenRR: the menu's texts in 한국어. Copy it into openrr-amd\lang in the game's folder and set
+# [OpenRR] Language=ko in openrr-amd.ini (or pick it in the menu).
+#
+# The letters: msgid "@font" names a font file beside this file (fonts\NotoSansCJKsc-Regular.ttf of the
+# OpenRR language pack, SIL Open Font License 1.1); without it the Windows CJK fonts are used, and if
+# none has the letters the menu stays English.
+
+msgid "@language"
+msgstr "한국어"
+
+msgid "@font"
+msgstr "fonts/NotoSansCJKsc-Regular.ttf"
+
+msgid "Enable OpenRR (Ray Reconstruction)"
+msgstr "OpenRR 활성화 (레이 리컨스트럭션)"
+
+msgid "(Menu key: %s)"
+msgstr "(메뉴 키: %s)"
+
+msgid "Status"
+msgstr "상태"
+
+msgid "Idle: waiting for the game to create a DLSS Ray Reconstruction feature."
+msgstr "유휴 상태: 게임이 DLSS 레이 리컨스트럭션 기능을 생성할 때까지 대기 중입니다."
+
+msgid "Note: %s"
+msgstr "참고: %s"
+
+msgid "Ready"
+msgstr "준비 완료"
+
+msgid "Building network..."
+msgstr "네트워크 빌드 중..."
+
+msgid "Failed"
+msgstr "실패"
+
+msgid "Unknown"
+msgstr "알 수 없음"
+
+msgid "D3D12 Direct ELF"
+msgstr "D3D12 직접 ELF"
+
+msgid "Vulkan Host (RecordVk)"
+msgstr "Vulkan 호스트 (RecordVk)"
+
+msgid "Vulkan Interop Bridge"
+msgstr "Vulkan 상호 운용 브리지"
+
+msgid "State: %s%s%s%s"
+msgstr "상태: %s%s%s%s"
+
+msgid "Backend: %s"
+msgstr "백엔드: %s"
+
+msgid "Backend note: %s"
+msgstr "백엔드 참고: %s"
+
+msgid "Resolution: %ux%u -> %ux%u"
+msgstr "해상도: %ux%u -> %ux%u"
+
+msgid "GPU time (raw): %.2f ms (p50 %.2f ms, p95 %.2f ms)  |  Frames: %u"
+msgstr "GPU 시간 (원시): %.2f ms (p50 %.2f ms, p95 %.2f ms)  |  프레임: %u"
+
+msgid "Est. w/o async preemption: %.2f ms (avg %.2f ms)"
+msgstr "비동기 선점 제외 추정: %.2f ms (평균 %.2f ms)"
+
+msgid "Weights: %s"
+msgstr "가중치: %s"
+
+msgid "Coexistence: dlssnr-amd.asi detected (Direct path active)"
+msgstr "공존: dlssnr-amd.asi 감지됨 (직접 경로 활성)"
+
+msgid "Execution & Backend"
+msgstr "실행과 백엔드"
+
+msgid "D3D12 Backend"
+msgstr "D3D12 백엔드"
+
+msgid "Auto (D3D12 Direct preferred)"
+msgstr "자동 (D3D12 직접 우선)"
+
+msgid "Network Mode"
+msgstr "네트워크 모드"
+
+msgid "Legacy"
+msgstr "레거시 (Legacy)"
+
+msgid "New (recommended)"
+msgstr "표준 고속 (New, 권장)"
+
+msgid "Fast (experimental)"
+msgstr "최고속 (Fast, 실험적)"
+
+msgid "New"
+msgstr "표준 고속 (New)"
+
+msgid "Building fast kernels"
+msgstr "고속 커널 빌드 중"
+
+msgid "Fast kernels unavailable"
+msgstr "고속 커널 사용 불가"
+
+msgid "Runtime: %s"
+msgstr "런타임: %s"
+
+msgid "Coexist Split"
+msgstr "공존 분할 설정"
+
+msgid "Auto (disable split when dlssnr-amd is present)"
+msgstr "자동 (dlssnr-amd 감지 시 분할 비활성화)"
+
+msgid "Off (never split command lists)"
+msgstr "끄기 (명령 목록 분할 안 함)"
+
+msgid "Depth Type"
+msgstr "깊이 유형"
+
+msgid "Auto"
+msgstr "자동"
+
+msgid "Hardware Depth (NDC)"
+msgstr "하드웨어 깊이 (NDC)"
+
+msgid "Linear Depth"
+msgstr "선형 깊이"
+
+msgid "Vulkan Input Layout"
+msgstr "Vulkan 입력 레이아웃"
+
+msgid "Shader Read Optimal"
+msgstr "셰이더 읽기 최적 (Shader Read Optimal)"
+
+msgid "General"
+msgstr "일반 (General)"
+
+msgid "OptiFG Host Bridge (experimental)"
+msgstr "OptiFG 호스트 브리지 (실험적)"
+
+msgid "Restart required. Set OptiScaler's [Libraries] NvngxPath to load openrr-ngx-host.dll."
+msgstr "재시작이 필요합니다. openrr-ngx-host.dll을 로드하려면 OptiScaler의 [Libraries] NvngxPath를 설정하세요."
+
+msgid "Guides"
+msgstr "가이드"
+
+msgid "Use Disocclusion Mask"
+msgstr "디소클루전 마스크 사용"
+
+msgid "Invert Disocclusion Mask"
+msgstr "디소클루전 마스크 반전"
+
+msgid "Clamp Disocclusion Mask (0..1)"
+msgstr "디소클루전 마스크 클램프 (0..1)"
+
+msgid "Disocclusion Mask Scale"
+msgstr "디소클루전 마스크 배율"
+
+msgid "Use SSS Guide (ColorBeforeFog)"
+msgstr "SSS 가이드 사용 (ColorBeforeFog)"
+
+msgid "Use Responsivity Mask"
+msgstr "응답도 마스크 사용"
+
+msgid "Use Color Before Transparency"
+msgstr "반투명 이전 색상 사용"
+
+msgid "Use Depth of Field Guide"
+msgstr "피사계 심도 (DoF) 가이드 사용"
+
+msgid "Use Reflection Motion Vectors"
+msgstr "반사 모션 벡터 사용"
+
+msgid "Use Transparency Layer Opacity & Motion"
+msgstr "반투명 레이어 불투명도 및 모션 사용"
+
+msgid "Menu & Hotkeys"
+msgstr "메뉴와 핫키"
+
+msgid "Menu Key"
+msgstr "메뉴 키"
+
+msgid "Enter a key such as F7 or Ctrl+F7, then press Enter."
+msgstr "F7 또는 Ctrl+F7 같은 키를 입력한 뒤 Enter를 누르세요."
+
+msgid "Use OptiScaler Shortcut"
+msgstr "OptiScaler 단축키 사용"
+
+msgid "Pass OptiScaler Key (Insert) while open"
+msgstr "열려 있는 동안 OptiScaler 키(Insert) 전달"
+
+msgid "Menu Size"
+msgstr "메뉴 크기"
+
+msgid "Text Size"
+msgstr "글자 크기"
+
+msgid "Theme"
+msgstr "테마"
+
+msgid "Blue"
+msgstr "파랑"
+
+msgid "Teal"
+msgstr "청록"
+
+msgid "Violet"
+msgstr "보라"
+
+msgid "Amber"
+msgstr "호박색"
+
+msgid "Crimson"
+msgstr "진홍"
+
+msgid "Graphite"
+msgstr "흑연"
+
+msgid "Language"
+msgstr "언어"
+
+msgid "openrr-amd\\lang\\<name>.txt; the file reloads when it changes."
+msgstr "openrr-amd\\lang\\<name>.txt 파일을 읽으며, 변경 시 자동으로 다시 로드됩니다."
+
+msgid "Close"
+msgstr "닫기"

@@ -8,4 +8,11 @@
 #define ENC_K8 1
 #define ENC_STAGE 1
 #define ENC_CO 128
+// The measured Fast flow/lite path uses one token tile per wave. On ACO
+// this reduces VGPRs 256 -> 240 and removes scratch; other variants keep W2.
+#if defined(ENC_F32) && ENC_F32 && defined(FLOW) && FLOW && defined(LT_EXP) && LT_EXP && defined(LT_RCP) && LT_RCP && defined(LT_HM) && LT_HM
+#define W2 0
+// W2's DFN uses SIG_RCP under LT_HM. Preserve that policy in this body too.
+#define ENC_DFN_SIG_RCP 1
+#endif
 #include "onr_block.glsl"

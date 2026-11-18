@@ -7,8 +7,11 @@ cd -- "$(dirname -- "$0")/../.."
 
 out=$(realpath -m -- "${1:-build/asi}")
 stage="$out/stage"
-rm -rf -- "$out"/bench-* "$out/occ_ab"
-mkdir -p -- "$out" "$stage/plugins" "$stage/openrr-amd/shaders"
+if [[ "${OPENRR_CLEAN_STAGE:-0}" == "1" ]]; then
+    rm -rf -- "$stage"
+fi
+rm -rf -- "$stage/plugins/"*.log "$stage/"*.log "$out"/bench-* "$out/occ_ab" "$out/occ_nopad" "$out/occ_pad16k" "$out/b2_base" "$out/b2_post_exp" "$out/b2_post_log" "$out/b2_attr_rcp" "$out/b2_attr_same" "$out/b2_c64_far3"
+mkdir -p -- "$out" "$stage/plugins" "$stage/openrr-amd/shaders" "$stage/openrr-amd/shaders-gfx11"
 
 cxx=${OPENRR_MINGW:-x86_64-w64-mingw32-g++}
 cc=${OPENRR_MINGW_CC:-x86_64-w64-mingw32-gcc}
@@ -33,6 +36,7 @@ python3 asi/build/embed_font.py "$font" "$out/rr_menu_font.hpp" kMenuFont
 
 common_cxx=(-std=c++20 -mf16c -O2 -fno-strict-aliasing -DNDEBUG
             -DOPENRR_BUILD_STAMP="\"$stamp\""
+            -DONR_LT_DEEP="\"2,4,2,4\""
             -DONR_RR_BUILDING -DONR_RR_STATIC -DOPENRR_EXPERIMENTAL_OPTIFG_HOST
             -I"$vk_inc" -Igpu/include -Igpu/src -Iruntime/include -Iruntime/src
             -Iasi/src -I"$minhook/include" -I"$imgui" -I"$out")
@@ -47,6 +51,12 @@ for unit in runtime vk_host; do
     "$cxx" "${common_cxx[@]}" -c "runtime/src/$unit.cpp" -o "$out/rt_$unit.o" &
     pids+=($!)
 done
+for unit in vk d3d12; do
+    "$cxx" "${common_cxx[@]}" -DOPENRR_TEST_HOOKS=1 -c "gpu/src/$unit.cpp" -o "$out/gpu_${unit}_test.o" &
+    pids+=($!)
+done
+"$cxx" "${common_cxx[@]}" -DOPENRR_TEST_HOOKS=1 -c "runtime/src/runtime.cpp" -o "$out/rt_runtime_test.o" &
+pids+=($!)
 
 echo "[2/4] Compiling ASI shell, ImGui & MinHook..."
 for unit in rr_pe_log rr_pe_crash rr_pe_d3d12split rr_pe_vkdevice rr_pe_config rr_pe_control rr_pe_menu rr_asi_main; do
@@ -84,11 +94,20 @@ EXPORTS
     OnrRrGetApi
     OnrRrSetFastMode
     OnrRrGetFastMode
+    OnrRrSetFp8
+    OnrRrGetFp8
     OnrRrNotifyD3d12ListReset
     OnrRrNotifyD3d12ListReleased
     OnrRrNotifyD3d12AllocatorReset
     OnrRrNotifyD3d12AllocatorReleased
+    OnrRrNotifyVkCommandBuffersAllocated
+    OnrRrNotifyVkCommandBufferReset
+    OnrRrNotifyVkCommandBuffersFreed
+    OnrRrNotifyVkCommandPoolReset
+    OnrRrNotifyVkCommandPoolDestroyed
+    OnrRrNotifyVkDeviceDestroyed
     rr_vk_load
+    rr_vk_use_loader
 EOF
 
 echo "[3/4] Generating Vulkan lazy loader & linking openrr-amd.asi..."
@@ -104,43 +123,45 @@ rm -f "$out/openrr-amd.debug"
 
 echo "[4/4] Building runtime SPIR-V shaders & staging package..."
 python3 asi/build/build_shaders.py "$glslang" gpu "$stage/openrr-amd/shaders"
+python3 asi/build/build_shaders.py "$glslang" gpu "$stage/openrr-amd/shaders-gfx11" --gfx11
 cp asi/openrr-amd.ini "$stage/openrr-amd.ini"
 "$cxx" -std=c++17 -O2 -shared -static -Iasi/src asi/src/optifg_ngx_proxy.cpp -o "$stage/openrr-ngx-host.dll"
-mkdir -p -- "$out/occ_nopad" "$out/occ_pad16k"
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_FAR=2 -DLT_FAR1=2 -DLT_Q16=1 -DLT_VO=1 -DLT_SYM=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -Igpu/shaders/include gpu/shaders/enc0_stage_32_64.comp -o "$out/occ_nopad/enc0_stage_32_64_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_POST_PAIR=1 -DLT_POST_HW=1 -DLT_POST_LDS=1 -DLT_POST_EXPO=1 -Igpu/shaders/include gpu/shaders/post.comp -o "$out/occ_nopad/post_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_FAR=3 -DLT_FAR1=3 -DLT_Q16=1 -DLT_VO=1 -DLT_SYM=1 -DLT_UP8=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -Igpu/shaders/include gpu/shaders/dec_up_32_64_64.comp -o "$out/occ_nopad/dec_up_32_64_64_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_FAR=3 -DLT_FAR1=3 -DLT_Q16=1 -DLT_VO=1 -DLT_SYM=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -Igpu/shaders/include gpu/shaders/dec_head_32_64.comp -o "$out/occ_nopad/dec_head_32_64_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_MI8=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -Igpu/shaders/include gpu/shaders/enc_stage_64_64_96.comp -o "$out/occ_nopad/enc_stage_64_64_96_f_lt.spv" > /dev/null
-
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_FAR=2 -DLT_FAR1=2 -DLT_Q16=1 -DLT_VO=1 -DLT_SYM=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -DLDS_OCC_PAD=8192 -Igpu/shaders/include gpu/shaders/enc0_stage_32_64.comp -o "$out/occ_pad16k/enc0_stage_32_64_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_POST_PAIR=1 -DLT_POST_HW=1 -DLT_POST_LDS=1 -DLT_POST_EXPO=1 -DPOST_OCC_PAD=4096 -Igpu/shaders/include gpu/shaders/post.comp -o "$out/occ_pad16k/post_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_FAR=3 -DLT_FAR1=3 -DLT_Q16=1 -DLT_VO=1 -DLT_SYM=1 -DLT_UP8=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -DLDS_OCC_PAD=8192 -Igpu/shaders/include gpu/shaders/dec_up_32_64_64.comp -o "$out/occ_pad16k/dec_up_32_64_64_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_FAR=3 -DLT_FAR1=3 -DLT_Q16=1 -DLT_VO=1 -DLT_SYM=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -DLDS_OCC_PAD=8192 -Igpu/shaders/include gpu/shaders/dec_head_32_64.comp -o "$out/occ_pad16k/dec_head_32_64_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_MI8=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -DLDS_OCC_PAD=8192 -Igpu/shaders/include gpu/shaders/enc_stage_64_64_96.comp -o "$out/occ_pad16k/enc_stage_64_64_96_f_lt.spv" > /dev/null
-
-mkdir -p -- "$out/b2_base" "$out/b2_post_exp" "$out/b2_post_log" "$out/b2_attr_rcp" "$out/b2_attr_same" "$out/b2_c64_far3"
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_POST_PAIR=1 -Igpu/shaders/include gpu/shaders/post.comp -o "$out/b2_base/post_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_ATTR_TAB=1 -Igpu/shaders/include gpu/shaders/enc0_attr.comp -o "$out/b2_base/enc0_attr_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_MI8=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -Igpu/shaders/include gpu/shaders/enc_stage_64_64_96.comp -o "$out/b2_base/enc_stage_64_64_96_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_UP8=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -Igpu/shaders/include gpu/shaders/dec_up_64_64_96.comp -o "$out/b2_base/dec_up_64_64_96_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -Igpu/shaders/include gpu/shaders/dec_dfn_64_64.comp -o "$out/b2_base/dec_dfn_64_64_f_lt.spv" > /dev/null
-
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_POST_PAIR=1 -DLT_POST_EXP=1 -DLT_POST_NOCORNER=1 -DLT_POST_NETH=1 -Igpu/shaders/include gpu/shaders/post.comp -o "$out/b2_post_exp/post_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_POST_PAIR=1 -DLT_POST_EXP=1 -DLT_POST_NOCORNER=1 -DLT_POST_NETH=1 -DLT_POST_LOG=1 -Igpu/shaders/include gpu/shaders/post.comp -o "$out/b2_post_log/post_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_ATTR_TAB=1 -DLT_ATTR_RCP=1 -DLT_ATTR_DEPTH=1 -Igpu/shaders/include gpu/shaders/enc0_attr.comp -o "$out/b2_attr_rcp/enc0_attr_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DD3D_GUIDES=1 -DENC_F32=1 -DLT_ATTR_TAB=1 -DLT_ATTR_RCP=1 -DLT_ATTR_DEPTH=1 -Igpu/shaders/include gpu/shaders/enc0_attr.comp -o "$out/b2_attr_rcp/d3d_enc0_attr_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_ATTR_TAB=1 -DLT_ATTR_RCP=1 -DLT_ATTR_DEPTH=1 -DLT_ATTR_SAME=1 -DLT_ATTR_CL=1 -Igpu/shaders/include gpu/shaders/enc0_attr.comp -o "$out/b2_attr_same/enc0_attr_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_FAR=3 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -Igpu/shaders/include gpu/shaders/enc_stage_64_64_96.comp -o "$out/b2_c64_far3/enc_stage_64_64_96_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_FAR=3 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -Igpu/shaders/include gpu/shaders/dec_up_64_64_96.comp -o "$out/b2_c64_far3/dec_up_64_64_96_f_lt.spv" > /dev/null
-"$glslang" -V --target-env vulkan1.3 -DENC_F32=1 -DLT_FAR=3 -DLT_EXP=1 -DLT_RCP=1 -DLT_HM=1 -Igpu/shaders/include gpu/shaders/dec_dfn_64_64.comp -o "$out/b2_c64_far3/dec_dfn_64_64_f_lt.spv" > /dev/null
-"$cxx" "${common_cxx[@]}" asi/tests/test_asi_units.cpp \
+mkdir -p -- "$stage/openrr-amd/lang/fonts"
+python3 asi/build/make_lang.py "$stage/openrr-amd/lang/English.txt" asi/src/rr_pe_menu.cpp
+cp -- asi/lang/zh-CN.txt asi/lang/ja.txt asi/lang/ko.txt "$stage/openrr-amd/lang/"
+cp -- asi/lang/fonts/README.txt asi/lang/fonts/Noto-CJK-LICENSE.txt "$stage/openrr-amd/lang/fonts/"
+cjk_font="${OPENRR_CJK_FONT_DIR:-/mnt/c/Users/Kenny/Downloads/DLSSNR-AMD-lang-CJK-0.0.9/lang/fonts}/NotoSansCJKsc-Regular.ttf"
+if [[ -f "asi/lang/fonts/NotoSansCJKsc-Regular.ttf" ]]; then
+    cp -- "asi/lang/fonts/NotoSansCJKsc-Regular.ttf" "$stage/openrr-amd/lang/fonts/"
+elif [[ -f "$cjk_font" ]]; then
+    cp -- "$cjk_font" "$stage/openrr-amd/lang/fonts/"
+fi
+cp LICENSE THIRD_PARTY.md "$stage/"
+"$cxx" "${common_cxx[@]}" -DOPENRR_TEST_HOOKS=1 asi/tests/test_asi_units.cpp \
     "$out/rr_pe_config.o" "$out/rr_pe_d3d12split.o" "$out/rr_pe_vkdevice.o" "$out/rr_pe_log.o" "$out/rr_pe_crash.o" \
-    "$out/rt_runtime.o" "$out/rt_vk_host.o" "$out/gpu_vk.o" "$out/gpu_d3d12.o" "$out/gpu_kernels.o" \
+    "$out/rt_runtime_test.o" "$out/rt_vk_host.o" "$out/gpu_vk_test.o" "$out/gpu_d3d12_test.o" "$out/gpu_kernels.o" \
     "$out/gpu_weights.o" "$out/gpu_engine.o" "$out/vulkan_lazy_s.o" "$out/vulkan_lazy_c.o" \
     "$out"/mh_*.o "${ldflags[@]}" -o "$out/test_asi_units.exe"
 "$cxx" -std=c++20 -O2 -DNDEBUG -Iruntime/include runtime/bench/openrr_bench.cpp \
     -ld3d12 -ldxgi -lole32 -lshell32 -static -static-libgcc -static-libstdc++ -o "$out/openrr_bench.exe"
 
+# Offline ACO packaging. Native Mesa stays outside the Windows package.
+if [[ "${OPENRR_BUILD_ACO:-1}" == "1" ]]; then
+    bash asi/build/mesa/build_capture_263.sh
+    tools=build/mesa-comparison/mesa-263-drirc-toolchain
+    aco_common_args=(
+        --toolchain "$tools/toolchain.json" --capture "$tools/aco_capture"
+        --out "$stage/openrr-amd/aco"
+        --precision "${OPENRR_ACO_PRECISION:-global}" --precision-split --precision-native-only post_f_lt d3d_enc0_attr_f_lt d3d_enc0_attr_f_w_lt enc0_attr_f_lt enc0_attr_f_w_lt post_dlt_f_lt dec_head_32_64_f_lt dec_head_32_64_f_lx enc0_stage_32_64_f_lt enc0_stage_32_64_f_lx enc0_stage_32_64_f_w_lt enc0_stage_32_64_f_w_lx dec_up_32_64_64_f_lt dec_up_32_64_64_f_lx enc_stage_64_64_96_f_lt dec_up_64_64_96_f_lt dec_dfn_64_64_f_lt enc_stage_96_128_128_f_lt enc_stage_96_128_128_fl_lt dec_up_96_128_128_f_lt dec_up_96_128_128_fl_lt dec_dfn_96_128_f_lt dec_dfn_96_128_fl_lt enc_stage_128_128_160_f_lt enc_stage_128_128_160_fl_lt dec_up_128_128_160_fl_lt dec_up_128_128_160_f_lt dec_dfn_128_128_f_lt dec_dfn_128_128_fl_lt dec_dfn_160_256_fl_lt dec_dfn_160_256_f_lt enc_stage_160_256_0_fl_lt enc_stage_160_256_0_f_lt enc_stage_160_256_160_fl_lt enc_stage_160_256_160_f_lt dec_up_160_256_160_f_lt dec_up_160_256_160_fl_lt --matrix-loads "${OPENRR_ACO_MATRIX_LOADS:-vector8}" --shared-cmat "${OPENRR_ACO_SHARED_CMAT:-off}"
+        "$stage/openrr-amd/shaders"
+        --cmat-address-shaders dec_dfn_128_128_f dec_dfn_128_128_f_lt dec_dfn_128_128_fl dec_dfn_128_128_fl_lt dec_dfn_160_256_f dec_dfn_160_256_f_lt dec_dfn_160_256_fl dec_dfn_160_256_fl_lt dec_dfn_64_64_f_lt dec_dfn_96_128_f dec_dfn_96_128_f_lt dec_dfn_96_128_fl dec_dfn_96_128_fl_lt dec_head_32_64_f dec_head_32_64_f_lt dec_head_32_64_f_lx dec_up_128_128_160_f dec_up_128_128_160_f_lt dec_up_128_128_160_fl dec_up_128_128_160_fl_lt dec_up_160_256_160_f dec_up_160_256_160_f_lt dec_up_160_256_160_fl dec_up_160_256_160_fl_lt dec_up_32_64_64_f dec_up_32_64_64_f_lt dec_up_32_64_64_f_lx dec_up_64_64_96_f_lt dec_up_96_128_128_f dec_up_96_128_128_f_lt dec_up_96_128_128_fl dec_up_96_128_128_fl_lt enc0_stage_32_64_f enc0_stage_32_64_f_lt enc0_stage_32_64_f_lx enc0_stage_32_64_f_w enc0_stage_32_64_f_w_lt enc0_stage_32_64_f_w_lx enc_stage_128_128_160_f enc_stage_128_128_160_f_lt enc_stage_128_128_160_fl enc_stage_128_128_160_fl_lt enc_stage_160_256_0_f enc_stage_160_256_0_f_lt enc_stage_160_256_0_fl enc_stage_160_256_0_fl_lt enc_stage_160_256_160_f enc_stage_160_256_160_f_lt enc_stage_160_256_160_fl enc_stage_160_256_160_fl_lt enc_stage_64_64_96_f enc_stage_64_64_96_f_lt enc_stage_96_128_128_f enc_stage_96_128_128_f_lt enc_stage_96_128_128_fl enc_stage_96_128_128_fl_lt
+    )
+    for aco_target in gfx1201 gfx1200; do
+        DRIRC_CONFIGDIR="$PWD/build/mesa-comparison/mesa-263-drirc/drirc" \
+        python3 asi/build/build_aco_records.py \
+            --target "$aco_target" --capture-dir "$out/aco-capture-$aco_target" \
+            "${aco_common_args[@]}"
+    done
+fi
 echo "Built $stage/plugins/openrr-amd.asi ($(stat -c %s "$stage/plugins/openrr-amd.asi") bytes, $count Vulkan entry points resolved lazily)"
 echo "Exports: $("$objdump" -p "$stage/plugins/openrr-amd.asi" | grep -c 'InitializeASI')  Imports: $("$objdump" -p "$stage/plugins/openrr-amd.asi" | grep 'DLL Name' | awk '{print $3}' | tr '\n' ' ')"

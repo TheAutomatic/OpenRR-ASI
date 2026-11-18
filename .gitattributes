@@ -1,0 +1,6 @@
+*.sh text eol=lf
+# Preserve generated patch context and verbatim compiler/test evidence.
+asi/build/mesa/capture.patch text eol=lf -whitespace
+docs/test-evidence/**/*.log -whitespace
+docs/test-evidence/**/aco-ir/*.txt -whitespace
+docs/test-evidence/**/llpc-ir/*.txt -whitespace

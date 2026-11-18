@@ -1,0 +1,61 @@
+// SPDX-License-Identifier: MIT
+// Arithmetic diagnostic for runtime Engine frame 6, pixel (203,378), attribute 9.
+// Same FP32 blend / history decode / log / FP16 dither expressions as enc0_attr.
+// No network kernel is replaced. See the runtime diagnostic evidence report.
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#include "onr_common.glsl"
+layout(local_size_x=64) in;
+layout(push_constant,scalar) uniform P {
+    U32Buf dst;
+    uvec4 taps; // packed R10G10B10A2, red used here
+    uvec2 k;
+    float expo, previous, scale;
+    uint noise;
+} pc;
+void main() {
+    vec4 t = vec4(pc.taps & uvec4(1023u)) * (1.0 / 1023.0);
+    vec2 f = vec2(pc.k) * (1.0 / 256.0);
+    // Keep the source expression's contraction permissions, as in ENC_F32 BLEND4.
+    float h = (t.x * (1.0-f.x) + t.y*f.x) * (1.0-f.y)
+            + (t.z * (1.0-f.x) + t.w*f.x) * f.y;
+    precise float rexp = 1.0 / pc.previous; // LT_ATTR_RCP
+    precise float ht = h * 2.45;
+    float clamp_t = clamp(ht, 9.99999974737875163555e-05, 3.0);
+    precise float a = clamp_t * 2.7777776718139648438;
+    precise float b = a * 3.3219280242919921875;
+    precise float e = exp2(b);
+    precise float r = ((e - 1.0) * 0.0099999997764825820923) * rexp;
+    float color = pc.expo * r;
+    precise float log_arg = max(fma(color,100.0,1.0),9.9999997473787516356e-05);
+    float lg = log2(log_arg);
+    precise float encoded = (lg * 0.30103000998497009277) * 0.36000001430511474609;
+    precise float value = encoded * pc.scale;
+    float16_t hh = float16_t(min(value,1024.0));
+    uint raw = uint(float16BitsToUint16(hh));
+    uint mask = raw & 0xfc00u;
+    precise float16_t tt = hh + hbits(mask | pc.noise);
+    precise float16_t rr = tt - hbits(mask);
+    uint base = gl_GlobalInvocationID.x * 24u;
+    pc.dst.v[base+0u]=floatBitsToUint(h);
+    pc.dst.v[base+1u]=floatBitsToUint(rexp);
+    pc.dst.v[base+2u]=floatBitsToUint(ht);
+    pc.dst.v[base+3u]=floatBitsToUint(a);
+    pc.dst.v[base+4u]=floatBitsToUint(b);
+    pc.dst.v[base+5u]=floatBitsToUint(e);
+    pc.dst.v[base+6u]=floatBitsToUint(r);
+    pc.dst.v[base+7u]=floatBitsToUint(color);
+    pc.dst.v[base+8u]=floatBitsToUint(log_arg);
+    pc.dst.v[base+9u]=floatBitsToUint(lg);
+    pc.dst.v[base+10u]=floatBitsToUint(encoded);
+    pc.dst.v[base+11u]=floatBitsToUint(value);
+    pc.dst.v[base+12u]=raw;
+    pc.dst.v[base+13u]=uint(float16BitsToUint16(tt));
+    pc.dst.v[base+14u]=uint(float16BitsToUint16(rr));
+    pc.dst.v[base+15u]=uint(float16BitsToUint16(rr)) & 0xff80u;
+    for(uint c=0u;c<4u;++c)pc.dst.v[base+16u+c]=floatBitsToUint(t[c]);
+    pc.dst.v[base+20u]=floatBitsToUint(f.x);
+    pc.dst.v[base+21u]=floatBitsToUint(f.y);
+    pc.dst.v[base+22u]=floatBitsToUint(pc.scale);
+    pc.dst.v[base+23u]=pc.noise;
+}

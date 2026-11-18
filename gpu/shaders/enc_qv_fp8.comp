@@ -32,7 +32,8 @@ layout(push_constant, scalar) uniform P {
 
 shared floate4m3_t x8[64 * ENC_C];
 
-int reflect_i(int i, int n) { i = abs(i); return min(i, 2 * n - 2 - i); }
+// mirror index without repeating the edge; branchless double fold keeps tiny levels inside [0, n)
+int reflect_i(int i, int n) { int m = max(2 * n - 2, 0); i = abs(i); i = abs(min(i, m - i)); return max(min(i, m - i), 0); }
 
 uint ocp_code(uint b) {
     if ((b & 0x78u) != 0u) return b;

@@ -1,14 +1,11 @@
 // SPDX-License-Identifier: MIT
 // One subgroup per window (W1: C = 32, fast variant), included by onr_block_fast.glsl in place of its main. The
 // subgroup holds all 64 tokens: x^T as 4 token tiles x 2 channel tiles in registers. Per head, Q^T [32 dims][64 tokens]
-// stays in registers: it is the B operand of the own rows and, copied element by element, the A operand of the keys
-// (probe_wmma: an accumulator is the A operand of its transpose). V is computed untransposed (x in_b^T, x as the A copy
+// stays in registers: it is the B operand of the own rows and, moved in registers (CPA, onr_frag.glsl), the A operand of
+// the keys (an accumulator is the A operand of its transpose). V is computed untransposed (x in_b^T, x as the A copy
 // of x^T), so its accumulator copied is the A operand of V^T for P V. Every weight fragment serves the 4 token tiles.
 // No LDS, no barrier. Same products, same K order, same roundings as the transposed body.
 
-// accumulator -> A operand of its transpose / B operand of itself
-#define CPA(a, h) { for (int i_ = 0; i_ < h.length(); ++i_) a[i_] = h[i_]; }
-#define CPB(b, h) { for (int i_ = 0; i_ < h.length(); ++i_) b[i_] = h[i_]; }
 #define MMA(acc, a, b) acc = coopMatMulAdd(a, b, acc);
 #if defined(LT_GELU) && (!defined(LT_GELU_PART) || LT_GELU_PART == 2)
 #define GELU_EMB(x) gelu_lin2(x)
@@ -115,8 +112,9 @@ void main() {
     float16_t ls2 = uint16BitsToFloat16(uint16_t(pc.ls >> 16));
     // lane l: token 16 t + l % 16 of token tile t, GPU channels 8 h .. 8 h + 7 of each channel tile
     // token tiles with no written token (rows outside the grid, or from out_h on in dec0_1) are only keys: no S, P V,
-    // out or MLP (dec0_0 measured slower with the test)
-#if DEC_UP
+    // out or MLP (dec0_0 measured slower with the test). RX 7000 sets (XRB): no test, every tile runs the whole block, so
+    // the compiler shares each operand move between the own tiles; a tile with no written token makes values nobody stores
+#if DEC_UP || XRB
     const bool lv0 = true, lv1 = true, lv2 = true, lv3 = true;
 #else
     bool lv0 = tile_live(0, win), lv1 = tile_live(1, win), lv2 = tile_live(2, win), lv3 = tile_live(3, win);
@@ -124,10 +122,6 @@ void main() {
     bool town0, town1, town2, town3;
     ivec2 tp0 = token_pixel(int(ln & 15u), win, town0), tp1 = token_pixel(int(16u + (ln & 15u)), win, town1);
     ivec2 tp2 = token_pixel(int(32u + (ln & 15u)), win, town2), tp3 = token_pixel(int(48u + (ln & 15u)), win, town3);
-    // 16 record bytes of a 32-channel plane -> the lane's elements of its two channel tiles (as XIN)
-#define REC2(xa, xb, w) [[unroll]] for (int k_ = 0; k_ < 4; ++k_) { \
-            f16vec2 a_ = unpackFloat2x16(e4m3_lo(w[k_])), b_ = unpackFloat2x16(e4m3_hi(w[k_])); \
-            xa[2 * k_] = a_.x, xa[2 * k_ + 1] = a_.y, xb[2 * k_] = b_.x, xb[2 * k_ + 1] = b_.y; }
 #if DEC_UP
     // U^T [channels][16 low-res pixels] per PixelShuffle position = up_pos A^T + b, with A^T (lane: pixel l % 16) as
     // the B operand straight from the planes below; U goes through a wave-private LDS [4][16][C] for the per-token
@@ -138,25 +132,22 @@ void main() {
         U32x4View lo = U32x4View(uint64_t(pc.xlo));
         uvec4 w0 = lo.v[plane_index_sz(q, int(hh) * 16, pc.lo_size) >> 4], w1 = lo.v[plane_index_sz(q, 32 + int(hh) * 16, pc.lo_size) >> 4];
 #ifdef LT_UP8
-        // the same 16 record bytes as e4m3 B tiles (OCP codes); the weights' codes follow their fp16 values in up_w
-#define REC2Y(ya, yb, w) [[unroll]] for (int k_ = 0; k_ < 4; ++k_) { uint o_ = OCP4(w[k_]); \
-            ya[2 * k_] = uintBitsToFloate4m3EXT(uint8_t(o_ & 0xffu)), ya[2 * k_ + 1] = uintBitsToFloate4m3EXT(uint8_t((o_ >> 8) & 0xffu)); \
-            yb[2 * k_] = uintBitsToFloate4m3EXT(uint8_t((o_ >> 16) & 0xffu)), yb[2 * k_ + 1] = uintBitsToFloate4m3EXT(uint8_t(o_ >> 24)); }
+        // REC2Y comes from onr_block_fast.glsl (shared with the TR body); the weights' codes follow their fp16 values in up_w
 #define UP8_W E4View(uint64_t(pc.up_w) + uint64_t(8u * ENC_C * ENC_CP)).v
         QB8 a0, a1, a2, a3;
         REC2Y(a0, a1, w0) REC2Y(a2, a3, w1)
 #define UP_T(p, n) { QC8 u = QC8(bias_acc_t(pc.up_b, (p) * ENC_C + (n) * 16u)); QA8 w_; uint o_ = ((p) * ENC_C + (n) * 16u) * ENC_CP; \
             coopMatLoad(w_, UP8_W, o_, ENC_CP, ROW); MMA(u, w_, a0) coopMatLoad(w_, UP8_W, o_ + 16u, ENC_CP, ROW); MMA(u, w_, a1) \
             coopMatLoad(w_, UP8_W, o_ + 32u, ENC_CP, ROW); MMA(u, w_, a2) coopMatLoad(w_, UP8_W, o_ + 48u, ENC_CP, ROW); MMA(u, w_, a3) \
-            MH h_ = MH(u); lds4[(((p) * 16u + (ln & 15u)) * ENC_C + (n) * 16u + 8u * hh) >> 3] = uvec4(packFloat2x16(f16vec2(h_[0], h_[1])), \
+            ROWS8(h_, MH(u)) lds4[(((p) * 16u + (ln & 15u)) * ENC_C + (n) * 16u + 8u * hh) >> 3] = uvec4(packFloat2x16(f16vec2(h_[0], h_[1])), \
                 packFloat2x16(f16vec2(h_[2], h_[3])), packFloat2x16(f16vec2(h_[4], h_[5])), packFloat2x16(f16vec2(h_[6], h_[7]))); }
 #else
         MB a0, a1, a2, a3;
-        REC2(a0, a1, w0) REC2(a2, a3, w1)
+        REC2B(a0, a1, w0) REC2B(a2, a3, w1)
 #define UP_T(p, n) { ACC u = bias_acc_t(pc.up_b, (p) * ENC_C + (n) * 16u); MA w_; uint o_ = ((p) * ENC_C + (n) * 16u) * ENC_CP; \
             coopMatLoad(w_, pc.up_w.v, o_, ENC_CP, ROW); MMA(u, w_, a0) coopMatLoad(w_, pc.up_w.v, o_ + 16u, ENC_CP, ROW); MMA(u, w_, a1) \
             coopMatLoad(w_, pc.up_w.v, o_ + 32u, ENC_CP, ROW); MMA(u, w_, a2) coopMatLoad(w_, pc.up_w.v, o_ + 48u, ENC_CP, ROW); MMA(u, w_, a3) \
-            MH h_ = MH(u); lds4[(((p) * 16u + (ln & 15u)) * ENC_C + (n) * 16u + 8u * hh) >> 3] = uvec4(packFloat2x16(f16vec2(h_[0], h_[1])), \
+            ROWS8(h_, MH(u)) lds4[(((p) * 16u + (ln & 15u)) * ENC_C + (n) * 16u + 8u * hh) >> 3] = uvec4(packFloat2x16(f16vec2(h_[0], h_[1])), \
                 packFloat2x16(f16vec2(h_[2], h_[3])), packFloat2x16(f16vec2(h_[4], h_[5])), packFloat2x16(f16vec2(h_[6], h_[7]))); }
 #endif
         UP_T(0u, 0u) UP_T(0u, 1u) UP_T(1u, 0u) UP_T(1u, 1u) UP_T(2u, 0u) UP_T(2u, 1u) UP_T(3u, 0u) UP_T(3u, 1u)
@@ -164,17 +155,35 @@ void main() {
     SG_SYNC();
     // x^T = fma(skip, s, U) per lane: the skip's record bytes as in XIN, U of the token (position, low-res pixel)
     float16_t sc = uint16BitsToFloat16(uint16_t(pc.s_skip));
-#define XIN1(xa, xb, tp, t0) MH xa, xb; { uvec4 w_ = U32x4View(uint64_t(pc.x)).v[plane_index(tp, int(hh) * 16) >> 4]; \
+#define XIN1(xa, xb, tp, t0) XT xa, xb; { ROWV(xa) ROWV(xb) uvec4 w_ = U32x4View(uint64_t(pc.x)).v[plane_index(tp, int(hh) * 16) >> 4]; \
         uint t_ = (t0) + (ln & 15u), ua_ = (((((t_ >> 3) & 1u) << 1) + (t_ & 1u)) * 16u * ENC_C + (((t_ >> 4) << 2) + ((t_ & 7u) >> 1)) * ENC_C + 8u * hh) >> 1; \
         [[unroll]] for (int k_ = 0; k_ < 4; ++k_) { \
             f16vec2 a_ = unpackFloat2x16(e4m3_lo(w_[k_])), b_ = unpackFloat2x16(e4m3_hi(w_[k_])); \
             f16vec2 ua = unpackFloat2x16(lds1[ua_ + uint(k_)]), ubv = unpackFloat2x16(lds1[ua_ + 8u + uint(k_)]); \
             precise f16vec2 za = fma(a_, f16vec2(sc), ua), zb = fma(b_, f16vec2(sc), ubv); \
-            xa[2 * k_] = za.x, xa[2 * k_ + 1] = za.y, xb[2 * k_] = zb.x, xb[2 * k_ + 1] = zb.y; } }
+            RT(xa)[2 * k_] = za.x, RT(xa)[2 * k_ + 1] = za.y, RT(xb)[2 * k_] = zb.x, RT(xb)[2 * k_ + 1] = zb.y; } XROWSET(xa) XROWSET(xb) }
 #elif ENC_EMBED
     // rr2_enc0 embed, transposed: the dithered attributes of a token tile are the B operands straight from memory (lane:
     // token l % 16, attributes 16 kt + 8 h .. + 7); h^T = gelu(fc1 A^T + b), x^T = fc2 h^T + b. K = 48: attributes
     // 43..47 are +0
+#ifdef LT_EMB8
+    // EMB8: the embed MLP on e4m3 x e4m3 -> fp32. The weight A tiles load from the e4m3 tail
+    // after the embed buffer's fp16 values (engine: offset 12,288 B); one rounding to fp16 per
+    // output instead of one per 16 K.
+#define EMB_W8 E4View(uint64_t(pc.mrg_w) + uint64_t(12288u)).v
+    QA8 ew00, ew01, ew02, ew10, ew11, ew12, ew20, ew21, ew22, ew30, ew31, ew32;   // fc1 [neuron tile][K tile]
+    coopMatLoad(ew00, EMB_W8, 0u, 64u, ROW); coopMatLoad(ew01, EMB_W8, 16u, 64u, ROW); coopMatLoad(ew02, EMB_W8, 32u, 64u, ROW);
+    coopMatLoad(ew10, EMB_W8, 1024u, 64u, ROW); coopMatLoad(ew11, EMB_W8, 1040u, 64u, ROW); coopMatLoad(ew12, EMB_W8, 1056u, 64u, ROW);
+    coopMatLoad(ew20, EMB_W8, 2048u, 64u, ROW); coopMatLoad(ew21, EMB_W8, 2064u, 64u, ROW); coopMatLoad(ew22, EMB_W8, 2080u, 64u, ROW);
+    coopMatLoad(ew30, EMB_W8, 3072u, 64u, ROW); coopMatLoad(ew31, EMB_W8, 3088u, 64u, ROW); coopMatLoad(ew32, EMB_W8, 3104u, 64u, ROW);
+    QA8 fw00, fw01, fw02, fw03, fw10, fw11, fw12, fw13;   // fc2 [channel tile][neuron tile]
+    coopMatLoad(fw00, EMB_W8, 4096u, 64u, ROW); coopMatLoad(fw01, EMB_W8, 4112u, 64u, ROW);
+    coopMatLoad(fw02, EMB_W8, 4128u, 64u, ROW); coopMatLoad(fw03, EMB_W8, 4144u, 64u, ROW);
+    coopMatLoad(fw10, EMB_W8, 5120u, 64u, ROW); coopMatLoad(fw11, EMB_W8, 5136u, 64u, ROW);
+    coopMatLoad(fw12, EMB_W8, 5152u, 64u, ROW); coopMatLoad(fw13, EMB_W8, 5168u, 64u, ROW);
+    QC8 eb0 = QC8(bias_acc_t(pc.mrg_b, 0u)), eb1 = QC8(bias_acc_t(pc.mrg_b, 16u)), eb2 = QC8(bias_acc_t(pc.mrg_b, 32u)), eb3 = QC8(bias_acc_t(pc.mrg_b, 48u));
+    QC8 fb0 = QC8(bias_acc_t(pc.mrg_b, 64u)), fb1 = QC8(bias_acc_t(pc.mrg_b, 80u));
+#else
     MA ew00, ew01, ew02, ew10, ew11, ew12, ew20, ew21, ew22, ew30, ew31, ew32;   // fc1 [neuron tile][K tile]
     coopMatLoad(ew00, pc.mrg_w.v, 0u, 64u, ROW); coopMatLoad(ew01, pc.mrg_w.v, 16u, 64u, ROW); coopMatLoad(ew02, pc.mrg_w.v, 32u, 64u, ROW);
     coopMatLoad(ew10, pc.mrg_w.v, 1024u, 64u, ROW); coopMatLoad(ew11, pc.mrg_w.v, 1040u, 64u, ROW); coopMatLoad(ew12, pc.mrg_w.v, 1056u, 64u, ROW);
@@ -187,15 +196,28 @@ void main() {
     coopMatLoad(fw12, pc.mrg_w.v, 5152u, 64u, ROW); coopMatLoad(fw13, pc.mrg_w.v, 5168u, 64u, ROW);
     ACC eb0 = bias_acc_t(pc.mrg_b, 0u), eb1 = bias_acc_t(pc.mrg_b, 16u), eb2 = bias_acc_t(pc.mrg_b, 32u), eb3 = bias_acc_t(pc.mrg_b, 48u);
     ACC fb0 = bias_acc_t(pc.mrg_b, 64u), fb1 = bias_acc_t(pc.mrg_b, 80u);
+#endif
     U32x4View av = U32x4View(uint64_t(pc.attr));
     // the attributes come dithered from enc0_attr_f (ATTR64): the token's 48-byte record, the lane half's 16 bytes and the shared 16;
     // per pair of block j the two high bytes and their bit 7 from the plane dword
+#ifdef LT_EMB8
+    // B side: the dithered attribute fp16 quantizes once per tile through the mode-4 pair
+    // converter (never the raw record bytes - they are e5m3-truncated fp16 high bytes, not
+    // e4m3); the GELU output comes straight from f32 like the shipped stage-MLP GELU8.
+#define UNREC(b, d0, d1, pl, j) [[unroll]] for (int k_ = 0; k_ < 4; ++k_) { \
+            uint d_ = k_ < 2 ? d0 : d1; \
+            uint w_ = ((k_ & 1) == 0 ? ((d_ << 8) & 0x0000ff00u) | ((d_ << 16) & 0xff000000u) : ((d_ >> 8) & 0x0000ff00u) | (d_ & 0xff000000u)) \
+                | (((pl) >> uint(4 * (j) + k_) << 7) & 0x00800080u); \
+            f16vec2 e_ = unpackFloat2x16(w_); fe4m3vec2 q_ = qe4_pair32(vec2(e_)); b[2 * k_] = q_.x, b[2 * k_ + 1] = q_.y; }
+#define GELUB(e, g) QB8 g; { for (int i = 0; i < e.length(); i += 2) { fe4m3vec2 q_ = qe4_pair32(vec2(gelu_f32(e[i]), gelu_f32(e[i + 1]))); g[i] = q_.x, g[i + 1] = q_.y; } }
+#else
 #define UNREC(b, d0, d1, pl, j) [[unroll]] for (int k_ = 0; k_ < 4; ++k_) { \
             uint d_ = k_ < 2 ? d0 : d1; \
             uint w_ = ((k_ & 1) == 0 ? ((d_ << 8) & 0x0000ff00u) | ((d_ << 16) & 0xff000000u) : ((d_ >> 8) & 0x0000ff00u) | (d_ & 0xff000000u)) \
                 | (((pl) >> uint(4 * (j) + k_) << 7) & 0x00800080u); \
             f16vec2 e_ = unpackFloat2x16(w_); b[2 * k_] = e_.x, b[2 * k_ + 1] = e_.y; }
 #define GELUB(e, g) MB g; { MH h_ = MH(e); for (int i = 0; i < h_.length(); i += 2) { f16vec2 q = GELU_EMB(f16vec2(h_[i], h_[i + 1])); h_[i] = q.x, h_[i + 1] = q.y; } CPB(g, h_) }
+#endif
 #ifdef ATTR_WIDE
 // the 64-byte record (enc0_attr_f_w: attributes 32 and 33 in use), the lane half's 32 bytes
 #define EMB_REC(tp) \
@@ -209,10 +231,29 @@ void main() {
         uint d4_ = hh == 0u ? s_.x & 0xffff0000u : s_.w & 0x00ffffffu, d5_ = hh == 0u ? s_.y : 0u; \
         uint pl_ = hh == 0u ? s_.z : (s_.x & 0xfffu) | ((s_.w >> 8) & 0xff0000u) | ((s_.x & 0x1000u) << 12);
 #endif
+#ifdef LT_EMB8
 #define EMB_TOK(xa, xb, tp) MH xa, xb; { \
         EMB_REC(tp) \
-        MB b0_, b1_, b2_; \
+        QB8 b0_, b1_, b2_; \
         UNREC(b0_, r0_.x, r0_.y, pl_, 0) UNREC(b1_, r0_.z, r0_.w, pl_, 1) UNREC(b2_, d4_, d5_, pl_, 2) \
+        QC8 e0 = eb0, e1 = eb1, e2 = eb2, e3 = eb3; \
+        MMA(e0, ew00, b0_) MMA(e1, ew10, b0_) MMA(e2, ew20, b0_) MMA(e3, ew30, b0_) \
+        MMA(e0, ew01, b1_) MMA(e1, ew11, b1_) MMA(e2, ew21, b1_) MMA(e3, ew31, b1_) \
+        MMA(e0, ew02, b2_) MMA(e1, ew12, b2_) MMA(e2, ew22, b2_) MMA(e3, ew32, b2_) \
+        GELUB(e0, g0_) GELUB(e1, g1_) GELUB(e2, g2_) GELUB(e3, g3_) \
+        QC8 f0 = fb0, f1 = fb1; \
+        MMA(f0, fw00, g0_) MMA(f1, fw10, g0_) MMA(f0, fw01, g1_) MMA(f1, fw11, g1_) \
+        MMA(f0, fw02, g2_) MMA(f1, fw12, g2_) MMA(f0, fw03, g3_) MMA(f1, fw13, g3_) \
+        xa = MH(f0), xb = MH(f1); }
+#else
+#if FRAG_ROWS
+#define EMB_B(b, d0, d1, j) MB b; { float16_t t_[8]; UNREC(t_, d0, d1, pl_, j) PUTB(b, t_) }
+#else
+#define EMB_B(b, d0, d1, j) MB b; UNREC(b, d0, d1, pl_, j)
+#endif
+#define EMB_TOK(xa, xb, tp) XT xa, xb; { \
+        EMB_REC(tp) \
+        EMB_B(b0_, r0_.x, r0_.y, 0) EMB_B(b1_, r0_.z, r0_.w, 1) EMB_B(b2_, d4_, d5_, 2) \
         ACC e0 = eb0, e1 = eb1, e2 = eb2, e3 = eb3; \
         MMA(e0, ew00, b0_) MMA(e1, ew10, b0_) MMA(e2, ew20, b0_) MMA(e3, ew30, b0_) \
         MMA(e0, ew01, b1_) MMA(e1, ew11, b1_) MMA(e2, ew21, b1_) MMA(e3, ew31, b1_) \
@@ -221,19 +262,49 @@ void main() {
         ACC f0 = fb0, f1 = fb1; \
         MMA(f0, fw00, g0_) MMA(f1, fw10, g0_) MMA(f0, fw01, g1_) MMA(f1, fw11, g1_) \
         MMA(f0, fw02, g2_) MMA(f1, fw12, g2_) MMA(f0, fw03, g3_) MMA(f1, fw13, g3_) \
-        xa = MH(f0), xb = MH(f1); }
+        EMB_X(xa, xb, f0, f1) }
+#endif
     EMB_TOK(x00, x01, tp0) EMB_TOK(x10, x11, tp1) EMB_TOK(x20, x21, tp2) EMB_TOK(x30, x31, tp3)
 #define XIN1(xa, xb, tp, t0)
 #else
-#define XIN1(xa, xb, tp, t0) MH xa, xb; { uvec4 w_ = U32x4View(uint64_t(pc.x)).v[plane_index(tp, int(hh) * 16) >> 4]; REC2(xa, xb, w_) }
+#define XIN1(xa, xb, tp, t0) XT xa, xb; { uvec4 w_ = U32x4View(uint64_t(pc.x)).v[plane_index(tp, int(hh) * 16) >> 4]; XREC2(xa, xb, w_) }
 #endif
     XIN1(x00, x01, tp0, 0u) XIN1(x10, x11, tp1, 16u) XIN1(x20, x21, tp2, 32u) XIN1(x30, x31, tp3, 48u)
     // x^T tile names: x<token tile><channel tile>; out accumulators c<token tile><channel tile>
-    ACC c00 = bias_acc_t(pc.out_b, 0u), c01 = bias_acc_t(pc.out_b, 16u);
-    ACC c10 = c00, c11 = c01, c20 = c00, c21 = c01, c30 = c00, c31 = c01;
+#ifndef LT_W1A8
+     ACC c00 = bias_acc_t(pc.out_b, 0u), c01 = bias_acc_t(pc.out_b, 16u);
+     ACC c10 = c00, c11 = c01, c20 = c00, c21 = c01, c30 = c00, c31 = c01;
+#else
+    // WP-D5 (LT_W1A8): the attention runs on exact e4m3 weights with f32 accumulators (QC8), so the
+    // c tiles become the cross-head oc accumulators; in_a / in_b carry their e4m3 codes contiguously
+    // at 2 * X * C bytes (Engine::upload_stage qv_bytes) and the out matrix at 4 * C * X (UT8 tail)
+#if !defined(LT_MLP8)
+#error "LT_W1A8 needs LT_MLP8 (the attention output accumulators are QC8)"
+#endif
+#define W1_QA8 E4View(uint64_t(pc.in_a) + uint64_t(2u * ENC_X * ENC_C)).v
+#define W1_VB8 E4View(uint64_t(pc.in_b) + uint64_t(2u * ENC_X * ENC_C)).v
+#define W1_WOUT8 E4View(uint64_t(pc.wout) + uint64_t(4u * ENC_C * ENC_X)).v
+    // quantize an accumulator / fragment tile into a B fragment (dims preserved; f32 pairs in)
+#define W1A_Q8(b8, q) { [[unroll]] for (int i_ = 0; i_ < 8; i_ += 2) { fe4m3vec2 w1q_ = qe4_pair32(vec2(q[i_], q[i_ + 1])); b8[i_] = w1q_.x, b8[i_ + 1] = w1q_.y; } }
+    // quantize straight into an A fragment: same lane element order, transposed meaning (V -> V^T)
+#define W1A_Q8A(a8, q) { [[unroll]] for (int i_ = 0; i_ < 8; i_ += 2) { fe4m3vec2 w1q_ = qe4_pair32(vec2(q[i_], q[i_ + 1])); a8[i_] = w1q_.x, a8[i_ + 1] = w1q_.y; } }
+    // register transpose: a B fragment's components copied into an A fragment (and back)
+#define W1A_TA(a8, b8) { [[unroll]] for (int i_ = 0; i_ < 8; ++i_) a8[i_] = b8[i_]; }
+    // x^T quantized once for both heads (8 QB8 = 16 VGPR); dead tiles quantize garbage nobody reads
+    QB8 xq00, xq01, xq10, xq11, xq20, xq21, xq30, xq31;
+    W1A_Q8(xq00, x00) W1A_Q8(xq01, x01) W1A_Q8(xq10, x10) W1A_Q8(xq11, x11)
+    W1A_Q8(xq20, x20) W1A_Q8(xq21, x21) W1A_Q8(xq30, x30) W1A_Q8(xq31, x31)
+    // the attention's out accumulators, across heads (8 QC8 = 64 VGPR)
+    QC8 oc00 = QC8(bias_acc_t(pc.out_b, 0u)), oc01 = QC8(bias_acc_t(pc.out_b, 16u));
+    QC8 oc10 = oc00, oc11 = oc01, oc20 = oc00, oc21 = oc01, oc30 = oc00, oc31 = oc01;
+#endif
 #ifdef LT_SYM
     // the identity as a B operand (lane: column l % 16, rows 8 h .. 8 h + 7)
+#if FRAG_ROWS
+    MB idb; { float16_t t_[8]; for (int i_ = 0; i_ < 8; ++i_) t_[i_] = 8u * hh + uint(i_) == (ln & 15u) ? 1.0hf : 0.0hf; PUTB(idb, t_) }
+#else
     MB idb; for (int i_ = 0; i_ < idb.length(); ++i_) idb[i_] = 8u * hh + uint(i_) == (ln & 15u) ? 1.0hf : 0.0hf;
+#endif
 #endif
 #ifdef LT_FAR1
     { const uint hd = 0u;
@@ -248,10 +319,70 @@ void main() {
     }
 #endif
     // x1 = fma(O out^T + b, ls1, x)
-#define RESID1(cn, xn, l) { MH a16 = MH(cn); for (int i = 0; i < a16.length(); i += 2) { \
+#define RESID1(cn, xn, l) { RES_IN(a16, cn) for (int i = 0; i < a16.length(); i += 2) { \
         precise f16vec2 v = fma(f16vec2(a16[i], a16[i + 1]), f16vec2(l), f16vec2(xn[i], xn[i + 1])); xn[i] = v.x, xn[i + 1] = v.y; } }
+#ifdef LT_W1A8
+    RESID1(oc00, x00, ls1) RESID1(oc01, x01, ls1) RESID1(oc10, x10, ls1) RESID1(oc11, x11, ls1)
+    RESID1(oc20, x20, ls1) RESID1(oc21, x21, ls1) RESID1(oc30, x30, ls1) RESID1(oc31, x31, ls1)
+#else
     RESID1(c00, x00, ls1) RESID1(c01, x01, ls1) RESID1(c10, x10, ls1) RESID1(c11, x11, ls1)
     RESID1(c20, x20, ls1) RESID1(c21, x21, ls1) RESID1(c30, x30, ls1) RESID1(c31, x31, ls1)
+#endif
+#ifdef LT_MLP8
+    // Native-FP8 MLP, W1 C=32 shape (decoder levels and enc0 since WP5): active token tiles
+    // quantize once and stream each fc1/fc2 hidden slice across all active tiles so weights
+    // load once instead of 4x redundantly, reusing one QC8 h_ across tiles per slice. enc0's
+    // fc1/fc2 weights are e4m3-exact by construction (q8 at load; survey: max|w| 6.0 / 3.5),
+    // so no 2^k compensation exists to apply - the B tiles are the once-quantized x1.
+#define W1_FC1_W8 E4View(uint64_t(pc.fc1) + uint64_t(4u * HID * ENC_C)).v
+#define W1_FC2_W8 E4View(uint64_t(pc.fc2) + uint64_t(4u * HID * ENC_C)).v
+#if defined(LT_GELU) && (!defined(LT_GELU_PART) || LT_GELU_PART == 1)
+// the linear gate straight in f32 (the fp16 fast path's gelu_lin2 semantics), 2 VALU less
+// per element than gelu_f32's polynomial, feeding the paired quantizer directly
+#define W1_GELU8(g8, h) { for (int i_ = 0; i_ < g8.length(); i_ += 2) { \
+        vec2 x_ = vec2(h[i_], h[i_ + 1]); \
+        vec2 g_ = min(max(fma(x_, vec2(float(LT_GELU)), vec2(0.5)), vec2(0.0)), vec2(1.0)); \
+        fe4m3vec2 q_ = qe4_pair32(x_ * g_); g8[i_] = q_.x, g8[i_ + 1] = q_.y; } }
+#else
+#define W1_GELU8(g8, h) { for (int i_ = 0; i_ < g8.length(); i_ += 2) { fe4m3vec2 q_ = qe4_pair32(vec2(gelu_f32(h[i_]), gelu_f32(h[i_ + 1]))); g8[i_] = q_.x, g8[i_ + 1] = q_.y; } }
+#endif
+#define W1_XQ8(n, xa, xb) QB8 x8a##n, x8b##n; \
+    if (lv##n) { [[unroll]] for (int i_ = 0; i_ < x8a##n.length(); i_ += 2) { \
+        fe4m3vec2 qa_ = qe4_pair32(vec2(xa[i_], xa[i_ + 1])), qb_ = qe4_pair32(vec2(xb[i_], xb[i_ + 1])); \
+        x8a##n[i_] = qa_.x, x8a##n[i_ + 1] = qa_.y, x8b##n[i_] = qb_.x, x8b##n[i_ + 1] = qb_.y; } }
+    W1_XQ8(0, x00, x01) W1_XQ8(1, x10, x11) W1_XQ8(2, x20, x21) W1_XQ8(3, x30, x31)
+    QC8 b20_ = QC8(bias_acc_t(pc.fc2_b, 0u)), b21_ = QC8(bias_acc_t(pc.fc2_b, 16u));
+    QC8 mc00 = b20_, mc01 = b20_, mc02 = b20_, mc03 = b20_;
+    QC8 mc10 = b21_, mc11 = b21_, mc12 = b21_, mc13 = b21_;
+#define W1_H1(n) if (lv##n) { QC8 h_ = b1_; \
+        h_ = coopMatMulAdd(f0_, x8a##n, h_); h_ = coopMatMulAdd(f1_, x8b##n, h_); \
+        W1_GELU8(gg##n, h_) }
+#define W1_F2(n) if (lv##n) { \
+        mc0##n = coopMatMulAdd(w0_, gg##n, mc0##n); \
+        mc1##n = coopMatMulAdd(w1_, gg##n, mc1##n); }
+#define W1_M8_STEP(jr) { \
+        uint jr_ = (jr); \
+        QA8 f0_, f1_; \
+        coopMatLoad(f0_, W1_FC1_W8, jr_ * ENC_C, ENC_C, ROW); \
+        coopMatLoad(f1_, W1_FC1_W8, jr_ * ENC_C + 16u, ENC_C, ROW); \
+        QC8 b1_ = QC8(bias_acc_t(pc.fc1_b, jr_)); \
+        QB8 gg0, gg1, gg2, gg3; \
+        W1_H1(0) W1_H1(1) W1_H1(2) W1_H1(3) \
+        QA8 w0_, w1_; \
+        coopMatLoad(w0_, W1_FC2_W8, jr_, HID, ROW); \
+        coopMatLoad(w1_, W1_FC2_W8, 16u * HID + jr_, HID, ROW); \
+        W1_F2(0) W1_F2(1) W1_F2(2) W1_F2(3) }
+    MLP_SLICE_LOOP for (uint j = 0u; j < LT_HID; j += 16u) {
+        W1_M8_STEP(j);
+    }
+#define W1_RES8(n, xa, xb) if (lv##n) { \
+        MH r0_ = MH(mc0##n), r1_ = MH(mc1##n); \
+        for (int i_ = 0; i_ < r0_.length(); i_ += 2) { \
+            precise f16vec2 va_ = fma(f16vec2(r0_[i_], r0_[i_ + 1]), f16vec2(ls2), f16vec2(xa[i_], xa[i_ + 1])); \
+            precise f16vec2 vb_ = fma(f16vec2(r1_[i_], r1_[i_ + 1]), f16vec2(ls2), f16vec2(xb[i_], xb[i_ + 1])); \
+            xa[i_] = va_.x, xa[i_ + 1] = va_.y, xb[i_] = vb_.x, xb[i_ + 1] = vb_.y; } }
+    W1_RES8(0, x00, x01) W1_RES8(1, x10, x11) W1_RES8(2, x20, x21) W1_RES8(3, x30, x31)
+#else
     c00 = bias_acc_t(pc.fc2_b, 0u), c01 = bias_acc_t(pc.fc2_b, 16u);
     c10 = c00, c11 = c01, c20 = c00, c21 = c01, c30 = c00, c31 = c01;
     // MLP in 64-neuron slices: h^T = gelu(fc1 x1^T + b), m^T += fc2 h^T (K order of the fc2 chain unchanged)
@@ -269,8 +400,8 @@ void main() {
         ACC hb0 = bias_acc_t(pc.fc1_b, j), hb1 = bias_acc_t(pc.fc1_b, j + 16u), hb2 = bias_acc_t(pc.fc1_b, j + 32u), hb3 = bias_acc_t(pc.fc1_b, j + 48u);
 #define GELU1(h) { MH g_ = MH(h); for (int i = 0; i < g_.length(); i += 2) { f16vec2 q = GELU_MLP(f16vec2(g_[i], g_[i + 1])); g_[i] = q.x, g_[i + 1] = q.y; } h = ACC(g_); }
 #define MLP_TOK(xa, xb, ca, cb) { ACC h0 = hb0, h1 = hb1, h2 = hb2, h3 = hb3; MB b_; \
-            CPB(b_, xa) MMA(h0, f00, b_) MMA(h1, f10, b_) MMA(h2, f20, b_) MMA(h3, f30, b_) \
-            CPB(b_, xb) MMA(h0, f01, b_) MMA(h1, f11, b_) MMA(h2, f21, b_) MMA(h3, f31, b_) \
+            XPB(b_, xa) MMA(h0, f00, b_) MMA(h1, f10, b_) MMA(h2, f20, b_) MMA(h3, f30, b_) \
+            XPB(b_, xb) MMA(h0, f01, b_) MMA(h1, f11, b_) MMA(h2, f21, b_) MMA(h3, f31, b_) \
             GELU1(h0) GELU1(h1) GELU1(h2) GELU1(h3) \
             CPB(b_, h0) MMA(ca, g00, b_) MMA(cb, g10, b_) \
             CPB(b_, h1) MMA(ca, g01, b_) MMA(cb, g11, b_) \
@@ -280,6 +411,7 @@ void main() {
     }
     RESID1(c00, x00, ls2) RESID1(c01, x01, ls2) RESID1(c10, x10, ls2) RESID1(c11, x11, ls2)
     RESID1(c20, x20, ls2) RESID1(c21, x21, ls2) RESID1(c30, x30, ls2) RESID1(c31, x31, ls2)
+#endif
 #if ENC_STAGE
     // DFN head: d^T = dfn x2^T + b per token tile (3 rows used); then two token tiles at once (lane half 0: tile a,
     // half 1: tile b, its d moved across the halves), gains and DFNOutput per lane, the 2x2 pooling by shuffles
@@ -288,11 +420,11 @@ void main() {
         coopMatLoad(dw0, pc.dfn_w.v, 0u, ENC_C, ROW);
         coopMatLoad(dw1, pc.dfn_w.v, 16u, ENC_C, ROW);
         ACC dbs = bias_acc_t(pc.dfn_b, 0u);
-#define W1_DFN(xa, xb, d) ACC d = dbs; { MB b_; CPB(b_, xa) MMA(d, dw0, b_) CPB(b_, xb) MMA(d, dw1, b_) }
+#define W1_DFN(xa, xb, d) ACC d = dbs; { MB b_; XPB(b_, xa) MMA(d, dw0, b_) XPB(b_, xb) MMA(d, dw1, b_) }
         W1_DFN(x00, x01, d0) W1_DFN(x10, x11, d1) W1_DFN(x20, x21, d2) W1_DFN(x30, x31, d3)
         float16_t sd = uint16BitsToFloat16(uint16_t(pc.s_dfn));
 #define DFN2(da, dbt, t0) { \
-            MH ha_ = MH(da), hb_ = MH(dbt); \
+            ROWS8(ha_, MH(da)) ROWS8(hb_, MH(dbt)) \
             f16vec2 r0_ = unpackFloat2x16(subgroupShuffleXor(packFloat2x16(f16vec2(hb_[0], hb_[1])), 16u)); \
             float16_t r1_ = unpackFloat2x16(subgroupShuffleXor(packFloat2x16(f16vec2(hb_[2], 0.0hf)), 16u)).x; \
             f16vec3 dv = hh != 0u ? f16vec3(r0_, r1_) : f16vec3(ha_[0], ha_[1], ha_[2]); \
@@ -338,15 +470,25 @@ void main() {
 #endif
 #if !DEC_HEAD
     // TensorOutput of the own tokens straight from the x^T tiles, one 16-byte store per lane
+#if FRAG_ROWS
+#define XOUT1(xa, xb, tp, own) { XROWS8(ta_, xa) XROWS8(tb_, xb) if (own) YST(plane_index(tp, int(hh) * 16), ta_, tb_) }
+#else
 #define XOUT1(xa, xb, tp, own) if (own) { uvec4 w_; [[unroll]] for (int k_ = 0; k_ < 4; ++k_) \
-        w_[k_] = e4m3x4(f16vec2(xa[2 * k_], xa[2 * k_ + 1]), f16vec2(xb[2 * k_], xb[2 * k_ + 1])); \
+        w_[k_] = XOUTQ(f16vec2(xa[2 * k_], xa[2 * k_ + 1]), f16vec2(xb[2 * k_], xb[2 * k_ + 1])); \
         U32x4View(uint64_t(pc.y)).v[plane_index(tp, int(hh) * 16) >> 4] = w_; }
+#endif
     XOUT1(x00, x01, tp0, town0) XOUT1(x10, x11, tp1, town1) XOUT1(x20, x21, tp2, town2) XOUT1(x30, x31, tp3, town3)
 #endif
 #if DEC_HEAD
     // head on two token tiles at once: lane half 0 takes tile a, half 1 tile b. A token's channels 0..7 and 16, 17
     // sit in the lane of its half 0, channels 8..15 in its half 1: one exchange of 5 words across the halves
-#define HEAD2(xa0, xa1, xb0, xb1, tpa, owna, tpb, ownb) { \
+#if FRAG_ROWS
+#define HEAD2(xa0, xa1, xb0, xb1, tpa, owna, tpb, ownb) { XROWS8(ra0_, xa0) XROWS8(ra1_, xa1) XROWS8(rb0_, xb0) XROWS8(rb1_, xb1) \
+        HEAD2R(ra0_, ra1_, rb0_, rb1_, tpa, owna, tpb, ownb) }
+#else
+#define HEAD2(xa0, xa1, xb0, xb1, tpa, owna, tpb, ownb) HEAD2R(xa0, xa1, xb0, xb1, tpa, owna, tpb, ownb)
+#endif
+#define HEAD2R(xa0, xa1, xb0, xb1, tpa, owna, tpb, ownb) { \
         bool hi_ = hh != 0u; \
         uvec4 sw_; \
         [[unroll]] for (int k_ = 0; k_ < 4; ++k_) \

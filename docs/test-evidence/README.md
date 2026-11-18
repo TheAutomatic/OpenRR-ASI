@@ -8,6 +8,17 @@
    - [`rx9070xt-d3d12-validation-2026-11-08.log`](rx9070xt-d3d12-validation-2026-11-08.log)：当前分支最新通过门禁的完整实机测试与 3 轮同进程 A/B 对照报告。
    - [`game-baseline-2026-11-09.md`](game-baseline-2026-11-09.md)：三款实机游戏（《赛博朋克 2077》、《影之刃零 PBZ》、《红色沙漠 Crimson Desert》）初始基线运行报告、显存占用与帧耗时表格（原始游戏日志本地归档于 `game-logs/2026-11-09-initial-baseline/`，通过 `.gitignore` 忽略不入库）。
 
+1b. **v0.1.5 测试证据与勘误总索引（2026-11-12 更新，按时间顺序）**：
+   - [`v015-anchor2-rtx5090-v1-results.md`](v015-anchor2-rtx5090-v1-results.md) / [`v015-anchor2-rtx5090-v2-results.md`](v015-anchor2-rtx5090-v2-results.md)：锚点 #2 OpenRR vs RTX 5090 `nvngx_dlssd.dll 310.9.1.0` 首轮对账（v1 全量 + v2_motion 全 21 用例）。**⚠ 数值已被相位对齐勘误整体更新**（蓝噪声 `frame_%8` 与窗口 `frame_&1` 错拍系统性压低 PSNR 0.5~2.0 dB），真值见 `anchor2-phase-aligned/`。
+   - [`anchor2-phase-aligned/`](anchor2-phase-aligned/)：**当前画质真值**。相位对齐后的 v1/v2 全量 per-frame CSV 与哈希门禁（legacy / fast-llpc / fast-aco 三档）。对齐后 fast-llpc 与 fast-aco 收敛至 ≤0.02 dB。
+   - [`v015-stage2-vgpr-xin8-results.md`](v015-stage2-vgpr-xin8-results.md) / [`v015-stage2-day-results.md`](v015-stage2-day-results.md) / [`v015-stage2-overnight-results.md`](v015-stage2-overnight-results.md)：Stage 2 VGPR/XIN8 占用率攻坚系列，结论收敛于 256-VGPR 钉死的物理根因（128 KiB/WGP LDS 上限，`floor(131072/lds)×(wg/32)/4`），occupancy 旋钮路线作废。
+   - [`v015-stage2-radv-cmat-results.md`](v015-stage2-radv-cmat-results.md)：Stage 2 首轮（`80fd0d7`）。**⚠ 勘误**：Mesa 补丁被 `build_capture_263.sh` 旧守卫静默跳过，II/III 档为空跑（I 档 fp16 路径数据有效）。
+   - [`v015-stage2-radv-cmat-v2-results.md`](v015-stage2-radv-cmat-v2-results.md)
+   - [`v015-integration-results.md`](v015-integration-results.md) / [`v015-interface-parity-results.md`](v015-interface-parity-results.md)：v0.1.5 集成与接口奇偶校验报告（补录索引）。
+   - [`v015-stage2-up8-mrg8-results.md`](v015-stage2-up8-mrg8-results.md)
+   - [`v015-stage3-mlp-fp8-and-hist-results.md`](v015-stage3-mlp-fp8-and-hist-results.md)：**Stage 3 当前真值**。构建除雷（runtime 宏+自动同步，`e6ca8fd`）；MLP 原生 FP8 交付（`50bc902`：fc1/fc2 双向 e4m3、零内层转换、锚点 #2 退化 ≤0.033 dB、4K 净 +0.30pp）；`hist_` RGB10A2 判负回退（`fast_`≠`_lt` 旗标陷阱 + 双 post 架构要求双格式同时在场的两个硬阻塞，重开条件已列）。：**第二层（`_lt` 专属）当前真值**。`XS_TRIM` 128 家族保留（累计 Fast vs LLPC 收至 +3.56/+4.38/+3.68%）；`LT_UP8` 深层 FP8 判负回退（净 −0.9pp、59.73 dB，含五变体完整取证链与 bias 朝向陷阱）；`LT_MRG8` 按证据跳过；units 越界修复（engine U8-all）。：**当前性能真值**。漏编修复（工具链 `radv_sha256 17cc90d8…`）+ 128 家族 `MLP_SLICE_LOOP [[dont_unroll]]` + Fast/Legacy 双模式 50 核 cmat-address 扩面。Fast 差距 +11.61→**+3.92%** @4K，Legacy ~+10→**+4.10%** @4K；shared 向量化（II'/III'）因 96 家族 +13KB 爆炸判死；相位对齐后 5090 画质全线上调 0.5~2.0 dB。
+   - [`v015-stage3-overnight-results.md`](v015-stage3-overnight-results.md)：**整夜棘轮总账**。冻结 bf57f97 + A/A 噪声地板（晋级线 −0.24/−0.40%）+ 锚点 #4 基线表；Commit 0（stage 锁步同步 + occ 宏自动派生，`be428c0`=GREEN_HEAD）；Phase A 六项（W1/TR 补漏/W2/SPLIT2/hist10 v2/EMB8/QV8）全部实测判负的完整证据链与七条收敛教训（含 4b 首个质量干净的 FP8 扩面、ATTR64=e5m3 非辨、`tail -1` 吞构建退出码的流程修复、MRG8 前提不成立留档）；Phase B 退化 A/A 全绿终验 + ACO/LLPC 长档 +3.61~4.78%。
+
 2. **`history/`（按演进顺序列出的独立历史快照，只增不改）**：
    - [`history/01-330f0b8-init-validation-suite.log`](history/01-330f0b8-init-validation-suite.log)：初始 D3D12 Direct / Split / 127 槽位 / Vulkan 桥接验证套件。
    - [`history/02-c8db22b-direct-release-and-matrix.log`](history/02-c8db22b-direct-release-and-matrix.log)：Direct Release 钩子与状态恢复验证。

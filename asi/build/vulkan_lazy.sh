@@ -44,13 +44,31 @@ static HMODULE rr_vk_from;
 const char* rr_vk_source = "none";      /* the DLL the entry points came from, for the log */
 int rr_vk_missing;                       /* entry points that DLL does not export (they return an error, or do nothing) */
 const char* rr_vk_first_missing = "";
-/* Safe to call again: it changes nothing once vulkan-1.dll's entry points are in. */
+static int rr_vk_prefer_wine = -1;       /* -1 auto (prefer winevulkan.dll when loaded & complete), 0 winevulkan, 1 vulkan-1 */
+static int rr_vk_complete(HMODULE m) {
+    for (unsigned i = 0; i < RR_VK_COUNT; ++i)
+        if (!GetProcAddress(m, rr_vk_names[i])) return 0;
+    return 1;
+}
+/* Safe to call again: resolves from winevulkan.dll under Wine/Proton when loaded & complete (avoiding native
+   vulkan-1 loader handle mismatches with vkd3d-proton), otherwise from vulkan-1.dll on Windows. */
 void rr_vk_load(void) {
-    HMODULE m = GetModuleHandleW(L"vulkan-1.dll");
-    if (!m) m = LoadLibraryW(L"vulkan-1.dll");
+    HMODULE m = 0;
+    int wine = 0;
+    if (rr_vk_prefer_wine != 1) {
+        HMODULE wm = GetModuleHandleW(L"winevulkan.dll");
+        if (wm && rr_vk_complete(wm)) {
+            m = wm;
+            wine = 1;
+        }
+    }
+    if (!m) {
+        m = GetModuleHandleW(L"vulkan-1.dll");
+        if (!m) m = LoadLibraryW(L"vulkan-1.dll");
+    }
     if (!m || m == rr_vk_from) return;
     rr_vk_from = m;
-    rr_vk_source = "vulkan-1.dll";
+    rr_vk_source = wine ? "winevulkan.dll" : "vulkan-1.dll";
     rr_vk_missing = 0;
     rr_vk_first_missing = "";
     for (unsigned i = 0; i < RR_VK_COUNT; ++i) {
@@ -62,8 +80,12 @@ void rr_vk_load(void) {
         *rr_vk_slots[i] = p;
     }
 }
-/* The Linux version's choice between Wine's driver and the loader; on Windows there is only the loader. */
-void rr_vk_use_loader(int yes) { (void)yes; }
+/* Choose between Wine's winevulkan.dll (yes=0) and the Vulkan loader vulkan-1.dll (yes=1). */
+void rr_vk_use_loader(int yes) {
+    rr_vk_prefer_wine = yes ? 1 : 0;
+    rr_vk_from = 0;
+    rr_vk_load();
+}
 /* ReShade's Vulkan layer drops a device from its table before it tells the add-ons the device is going (its
    vkDestroyDevice): a call of ours through the loader then lands in ReShade's hooks of that device and crashes there.
    While the add-on frees OpenRR's objects of that device, its device-level entry points are the driver's own: AMD's

@@ -8,7 +8,7 @@ For details about the OpenRR network reimplementation, RDNA4 shader architecture
 
 ---
 
-This fork integrates upstream **v0.1.4**, including Fast-mode memory reuse and preprojected weights, while retaining its ASI integration, menu, and GPU resource lifetime protections. Test figures for earlier versions are retained below as historical results.
+This fork integrates upstream **v0.1.7** (including fixed RDNA4 ACO routing, RX 7000 / RDNA3 `shaders-gfx11` support, and a unified Windows + Linux Wine / Proton Mesa RADV >= 26.3 release), while retaining its ASI integration, menu, and GPU resource lifetime protections. See [v017-stage10-audit.md](docs/test-evidence/v017-stage10-audit.md) for Stage 10 validation evidence; historical figures for earlier versions are retained below.
 
 ## What this fork adds
 
@@ -54,7 +54,10 @@ These fixes have separate commits to make upstream integration easier.
 
 ## Requirements
 
-- **GPU and driver**: AMD Radeon RX 9000 series (RDNA4), with support for `VK_KHR_cooperative_matrix`, `VK_EXT_shader_float8` (`shaderFloat8` and `shaderFloat8CooperativeMatrix`), and `VK_KHR_workgroup_memory_explicit_layout`. Windows D3D12 Direct also requires `IAmdExtD3DDevice5` from `amdxc64.dll`.
+- **GPU and driver**:
+  - **Windows RDNA4 (RX 9000 series, `gfx1201`/`gfx1200`)**: fixed strict **ACO** offline pipeline route; Vulkan requires `VK_KHR_cooperative_matrix`, `VK_EXT_shader_float8` (`shaderFloat8` and `shaderFloat8CooperativeMatrix`), `VK_KHR_workgroup_memory_explicit_layout`, `VK_KHR_pipeline_binary`, and `maintenance5`. Windows D3D12 Direct also requires `IAmdExtD3DDevice5` from `amdxc64.dll`.
+  - **Linux Wine / Proton (Mesa RADV >= 26.3)**: uses system Mesa RADV directly (no custom `libvulkan_radeon.so` or wrapper script needed); RDNA4 runs native RADV ACO with in-memory `SpvDecorationNoContraction` hardening on `shaders/` via `winevulkan.dll` and `vkd3d-proton` `RecordVk` interop.
+  - **RDNA3 / RDNA3.5 (RX 7000 series / 780M, `gfx11`)**: fixed separate `shaders-gfx11/` FP16 / LLPC path.
 - **Vulkan**: Vulkan 1.3 with `hostQueryReset` and `scalarBlockLayout`.
 - **Model weights**: `nvngx_dlssd.dll` version **310.9.1** is required.
 
@@ -66,15 +69,18 @@ These fixes have separate commits to make upstream integration easier.
 
 Use the **[dlss-5-amd-project](https://github.com/TheAutomatic/dlss-5-amd-project)** launcher for automatic deployment, configuration management, and installation alongside [`dlssnr-amd.asi`](https://gitlab.com/mochizuki0323/DLSSNR-AMD).
 
-### Option 2: Manual installation with official OptiScaler
+### Option 2: Manual installation with official OptiScaler (unified Windows / Linux package)
 
-Place the build artifacts in the game directory containing OptiScaler's `dxgi.dll` / `OptiScaler.ini`:
+Place the build artifacts (the 392-file unified `stage/` package) in the game directory containing OptiScaler's `dxgi.dll` / `OptiScaler.ini`:
 
 | File / directory | Destination relative to `OptiScaler.ini` |
 |---|---|
 | `openrr-amd.asi` | `plugins/openrr-amd.asi` |
 | `openrr-amd.ini` | `openrr-amd.ini` |
-| `openrr-amd/shaders/*.spv` | `openrr-amd/shaders/*.spv` (90 `.spv` files) |
+| `openrr-amd/shaders/*.spv` | `openrr-amd/shaders/*.spv` (`94` `.spv` files) |
+| `openrr-amd/shaders-gfx11/*.spv` | `openrr-amd/shaders-gfx11/*.spv` (`94` `.spv` files, required for RDNA3 / RDNA3.5) |
+| `openrr-amd/aco/gfx1201/openrr-d3d12-v1/`, `openrr-amd/aco/gfx1200/openrr-d3d12-v1/` | Keep directory structure; `94` `.nrp`, `manifest.json`, and `manifest.msgpack` per target (required on Windows RDNA4, ignored automatically on Linux Mesa RADV) |
+| `openrr-amd/lang/` | `openrr-amd/lang/` (`English.txt`, `ja.txt`, `ko.txt`, `zh-CN.txt`, and `fonts/`) |
 | `nvngx_dlssd.dll` (**310.9.1**) | Game directory or `openrr-amd/nvngx_dlssd.dll` |
 
 Enable ASI plugin loading in `OptiScaler.ini` (disabled by default in OptiScaler):
@@ -83,6 +89,12 @@ Enable ASI plugin loading in `OptiScaler.ini` (disabled by default in OptiScaler
 [Plugins]
 LoadAsiPlugins=true
 ```
+
+#### Linux (Wine / Proton + system Mesa RADV >= 26.3) notes
+
+- The exact same unified release package runs on Linux Wine / Proton as long as **system Mesa RADV >= 26.3** is installed — no custom `libvulkan_radeon.so`, `with_mesa263.sh` launcher, or `VK_ICD_FILENAMES` override is required.
+- OpenRR resolves Vulkan via `winevulkan.dll`, uses native `vkd3d-proton` `RecordVk` interop, applies in-memory `SpvDecorationNoContraction` hardening to `shaders/*.spv`, and skips Windows PAL `aco/*.nrp` binaries automatically.
+- Alongside OptiScaler (`dxgi.dll`, `OptiScaler.ini` with `LoadAsiPlugins=true`) and `nvngx_dlssd.dll` (**310.9.1**), copy `plugins/openrr-amd.asi`, `openrr-amd/` (`shaders/`, `shaders-gfx11/`, `lang/`), and `openrr-amd.ini` into the game directory (not a standalone `.asi`), and set Steam launch options to `WINEDLLOVERRIDES="dxgi=n,b" %command%`.
 
 > **Important:**
 > 1. **Do not rename the plugin to `*-loadlate.asi`.** OptiScaler loads `loadlate` plugins on a separate thread after `LateAsiPluginsDelay` (30 seconds by default). By then, the game has already queried NGX capabilities and called `vkCreateDevice`, so OpenRR cannot update RR capabilities or prepare the Vulkan device.

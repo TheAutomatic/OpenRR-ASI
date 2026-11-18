@@ -53,22 +53,31 @@ def parse_shader_lists(gpu_dir):
 
 def main():
     if len(sys.argv) < 4:
-        print("usage: build_shaders.py <glslangValidator> <gpu_dir> <out_shaders_dir>", file=sys.stderr)
+        print("usage: build_shaders.py <glslangValidator> <gpu_dir> <out_shaders_dir> [--gfx11]", file=sys.stderr)
         return 2
     glslang, gpu_dir, out_dir = sys.argv[1], sys.argv[2], sys.argv[3]
+    gfx11 = "--gfx11" in sys.argv[4:]
     os.makedirs(out_dir, exist_ok=True)
 
     shaders_dir = os.path.join(gpu_dir, "shaders")
     inc_dir = os.path.join(shaders_dir, "include")
     fm_defs = parse_fastmode(os.path.join(gpu_dir, "fastmode.cmake"))
-    lt_defs = {k[len("LT_DEFS_"):]: v for k, v in fm_defs.items() if k.startswith("LT_DEFS_")}
-    lx_defs = {k[len("LX_DEFS_"):]: v for k, v in fm_defs.items() if k.startswith("LX_DEFS_")}
+    lt_defs = {k[len("LT_DEFS_"):]: list(v) for k, v in fm_defs.items() if k.startswith("LT_DEFS_")}
+    lx_defs = {k[len("LX_DEFS_"):]: list(v) for k, v in fm_defs.items() if k.startswith("LX_DEFS_")}
+    glsl_extra = []
+    if gfx11:
+        glsl_extra = ["-DONR_GFX11=1", "-DFP8QV=0", "-DSPLIT_C=128"]
+        strip_defs = {"LT_UP8=1", "LT_MI8=1", "LT_MLP8=1", "LT_MRG8=1", "LT_EMB8=1",
+                      "LT_QV8=1", "LT_DFN8=1", "LT_E8RAW=1", "LT_VO8=1", "LT_W1A8=1", "LT_PV8=1", "FP8QV=1",
+                      "W2_96UP=1", "LT_ATTR_RCP=1", "LT_POST_EXPO=1"}
+        lt_defs = {k: [x for x in v if x not in strip_defs] for k, v in lt_defs.items()}
+        lx_defs = {k: [x for x in v if x not in strip_defs] for k, v in lx_defs.items()}
     plain_runtime, flow_kernels = parse_shader_lists(gpu_dir)
 
     jobs = []
     def add_spv(out_name, src, extra_args):
         out_path = os.path.join(out_dir, f"{out_name}.spv")
-        cmd = [glslang, "-V", "--target-env", "vulkan1.3"] + extra_args + [f"-I{inc_dir}", "-o", out_path, src]
+        cmd = [glslang, "-V", "--target-env", "vulkan1.3"] + glsl_extra + extra_args + [f"-I{inc_dir}", "-o", out_path, src]
         jobs.append((out_name, cmd))
 
     def lite_spv(out_name, src, extra_args):
@@ -109,7 +118,8 @@ def main():
 
         if re.match(r"^(enc_block_.*_k8|enc_stage_|enc0_stage_|dec_)", name):
             if not name.startswith("enc_block_"):
-                add_spv(f"{name}_f", src, ["-DENC_F32=1"])
+                fsym = ["-DLT_SYM=1"] if name in ("enc0_stage_32_64", "dec_up_32_64_64", "dec_head_32_64") else []
+                add_spv(f"{name}_f", src, ["-DENC_F32=1"] + fsym)
             if name in flow_kernels:
                 slot = flow_kernels.index(name)
                 fw = 1 if slot > 0 else 0
@@ -126,7 +136,8 @@ def main():
             add_spv(f"{name}_f", src, ["-DENC_F32=1"])
 
         if name in ("enc0_attr", "enc0_stage_32_64"):
-            add_spv(f"{name}_f_w", src, ["-DENC_F32=1", "-DATTR_WIDE=1"])
+            fsymw = ["-DLT_SYM=1"] if name == "enc0_stage_32_64" else []
+            add_spv(f"{name}_f_w", src, ["-DENC_F32=1", "-DATTR_WIDE=1"] + fsymw)
             if name == "enc0_attr":
                 add_spv("d3d_enc0_attr_f_w", src, ["-DD3D_GUIDES=1", "-DENC_F32=1", "-DATTR_WIDE=1"])
 
@@ -138,6 +149,11 @@ def main():
 
     with concurrent.futures.ThreadPoolExecutor() as ex:
         list(ex.map(run_job, jobs))
+
+    expected = {f"{name}.spv" for name, _ in jobs}
+    for spv in glob.glob(os.path.join(out_dir, "*.spv")):
+        if os.path.basename(spv) not in expected:
+            os.remove(spv)
 
     print(f"built {len(jobs)} runtime SPIR-V shaders in {out_dir}")
     return 0

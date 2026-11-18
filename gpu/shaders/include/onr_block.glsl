@@ -79,8 +79,11 @@
 // the runtime path (onr_block_fast.glsl): k8 with every product on WMMA
 #define ONR_FAST (ENC_K8 != 0 && ENC_PVX == 0 && ENC_EXACT == 0 && ENC_K8H == 0)
 // low-resolution levels (few windows): two subgroups per row tile, 256 lanes per window
+#ifndef SPLIT_C
+#define SPLIT_C 160
+#endif
 #ifndef SPLIT
-#if ONR_FAST && ENC_C >= 160
+#if ONR_FAST && ENC_C >= SPLIT_C
 #define SPLIT 2
 #else
 #define SPLIT 1
@@ -146,8 +149,10 @@ layout(local_size_x = 128 * SPLIT) in;
 // LT_VO (W1): the values through wout_h in_b_h, stored like LT_Q16's keys after in_b and its e4m3 codes
 #ifdef LT_VO
 #define VB_LR(x) (3u * ENC_X * ENC_C / 2u + (x))
+#define VB8_LR(x) (5u * ENC_X * ENC_C + (x))
 #else
 #define VB_LR(x) (x)
+#define VB8_LR(x) (x)
 #endif
 // LT_RCP: the softmax's reciprocal by the hardware's fp16 one
 #ifdef LT_RCP
@@ -166,6 +171,9 @@ layout(local_size_x = 128 * SPLIT) in;
 #define WT(off, K, n) ((n) + ((off) / (16u * (K))) * 16u * (K) + (((off) % (K)) / 16u) * 256u)
 #define WT_OUT(off) WT(off, ENC_X, ENC_C * ENC_X)
 #define WT_FC1(off) WT(off, ENC_C, HID * ENC_C)
+#if defined(FC1_ROW_TILE) && FC1_ROW_TILE
+#define FC1_TILE(row, tile) (HID * ENC_C + (row) * ENC_C + (tile) * 256u)
+#endif
 #define WT_FC2(off) WT(off, HID, ENC_C * HID)
 #define WS_OUT 16u
 #define WS_FC1 16u
@@ -182,12 +190,20 @@ layout(local_size_x = 128 * SPLIT) in;
 #else
 #define WT_OUT(off) (off)
 #define WT_FC1(off) (off)
+#if defined(FC1_ROW_TILE) && FC1_ROW_TILE
+#define FC1_TILE(row, tile) ((row) * ENC_C + (tile) * 16u)
+#endif
 #define WT_FC2(off) (off)
 #define WS_OUT ENC_X
 #define WS_FC1 ENC_C
 #define WS_FC2 HID
 #define WT_MRG(off) (off)
 #define WS_MRG (4u * ENC_C)
+#endif
+
+// Unselected variants expand to the original offset expression.
+#ifndef FC1_TILE
+#define FC1_TILE(row, tile) WT_FC1((row) * ENC_C + (tile) * 16u)
 #endif
 
 layout(push_constant, scalar) uniform P {
@@ -367,20 +383,44 @@ layout(push_constant, scalar) uniform P {
 #define LDS_BASE_N (OB + (SPLIT == 2 ? 2048u : 0u))
 #endif
 #ifdef LDS_OCC_PAD
-#define LDS_N max(uint(LDS_OCC_PAD), uint(LDS_BASE_N))
+#define LDS_N0 max(uint(LDS_OCC_PAD), uint(LDS_BASE_N))
 #else
-#define LDS_N LDS_BASE_N
+#define LDS_N0 LDS_BASE_N
+#endif
+#if defined(LT_MRG8) && !W1 && !W2
+// MRG8 (TR body, ENC_CO > 0): XOUT's e4m3 record bytes mirrored into LDS in the plane-record
+// layout - per 32-channel block [64 tokens][32 bytes] - as the merge's B-operand source (the
+// read side is bit-identical in construction to the W2 body's LT_MI8 plane reads). MIR is in
+// halves (the lds4 view indexes it via MIR >> 3); 32 * ENC_C halves = 64 tokens * C bytes.
+// W1/W2 keep their footprint: their MRG8 mirrors alias the dead merge-rows region instead.
+#define MIR ((LDS_N0 + 15u) & ~15u)
+#define LDS_N (MIR + 32u * ENC_C)
+#else
+#define LDS_N LDS_N0
 #endif
 // one LDS, four aliased views (shared blocks alias at offset 0): halves, u32 pairs, u32x2 quads, u32x4 octets
 #extension GL_EXT_shared_memory_block : require
 #ifndef PRS
 #define PRS (16u * SST)
 #endif
+// LDS_COPY: onr_frag.glsl's 16x16 tile per subgroup after the body's LDS
+#ifdef LDS_COPY
+#define FRAG_SCR LDS_N
+#if W1
+#define LDS_NF (LDS_N + 256u)
+#elif W2
+#define LDS_NF (LDS_N + 512u)
+#else
+#define LDS_NF (LDS_N + 1024u * SPLIT)
+#endif
+#else
+#define LDS_NF LDS_N
+#endif
 // LDS_MIN (halves): a larger block than the body needs, so fewer workgroups share a compute unit (measurements)
 #ifdef LDS_MIN
-#define LDS_A max(LDS_N, uint(LDS_MIN))
+#define LDS_A max(LDS_NF, uint(LDS_MIN))
 #else
-#define LDS_A LDS_N
+#define LDS_A LDS_NF
 #endif
 shared LdsH { float16_t lds[LDS_A]; };
 shared LdsW { uint lds1[LDS_A / 2u]; };
@@ -414,20 +454,34 @@ const float16_t GELU_A = 0.412109375hf;
 uint sg() { return gl_SubgroupID; }
 
 float16_t e4m3_in(uint b) {
+#ifdef LT_E8RAW
+    return ocp_e4m3_in(b);
+#else
     // sm_86 expansion: exponent field 0 is read as a normal, so 0x00 is 2^-7
     return uint16BitsToFloat16(uint16_t(((b & 0x80u) << 8) | ((((b >> 3) & 15u) + 8u) << 10) | ((b & 7u) << 7)));
+#endif
 }
 
 uint e4m3_out(float16_t x) {
+#ifdef LT_E8RAW
+    return ocp_e4m3_out(x);
+#else
     // sm_86 packing: add the weight of mantissa bit 6 (round half away), clamp to [2^-7 + ulp, 448]
     uint b = uint(float16BitsToUint16(x));
     precise float16_t r = x + uint16BitsToFloat16(uint16_t(b & 0xfc40u));
     r = r - uint16BitsToFloat16(uint16_t(b & 0xfc00u));
     float16_t m = min(max(abs(r), 0.00782012939453125hf), 448.0hf);
     return ((uint(float16BitsToUint16(m)) >> 7) - 0x40u) & 0x7fu | ((b >> 8) & 0x80u);
+#endif
 }
 
+// mirror index without repeating the edge: pad >= 32 keeps C < 128 levels (size >= 8, lo_size >= 4) within one fold
+// even at 1x1 render; deeper C >= 128 levels fold twice without control-flow branches so tiny levels stay in [0, n)
+#if ENC_C < 128
 int reflect_i(int i, int n) { i = abs(i); return min(i, 2 * n - 2 - i); }
+#else
+int reflect_i(int i, int n) { int m = max(2 * n - 2, 0); i = abs(i); i = abs(min(i, m - i)); return max(min(i, m - i), 0); }
+#endif
 
 float16_t exp_bits(float16_t s) {
     precise float16_t z = clamp(s * SCORE_SCALE, -CAP, CAP);

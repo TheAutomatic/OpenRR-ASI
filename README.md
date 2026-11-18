@@ -2,13 +2,13 @@
 
 简体中文 | [English](README.en.md)
 
-本仓库是基于上游 [OpenNeuralRendering/OpenRR](https://github.com/OpenNeuralRendering/OpenRR) 构建的**独立 OptiScaler `.asi` 插件分支**，用于在 AMD Radeon RX 9000 系列（RDNA4）显卡上运行 NVIDIA DLSS Ray Reconstruction（光线重建，`nvngx_dlssd.dll` 310.9.1）。
+本仓库是基于上游 [OpenNeuralRendering/OpenRR](https://github.com/OpenNeuralRendering/OpenRR) 构建的**独立 OptiScaler `.asi` 插件分支**，用于在 AMD Radeon RX 9000 系列（RDNA4）及实验性支持的 RX 7000 / RDNA3 / RDNA3.5 显卡上运行 NVIDIA DLSS Ray Reconstruction（光线重建，`nvngx_dlssd.dll` 310.9.1）。
 
 关于 OpenRR 的网络重实现原理、RDNA4 着色器架构、Clean-room 验证方法与基准数据，请直接参阅上游主仓库 **[OpenNeuralRendering/OpenRR](https://github.com/OpenNeuralRendering/OpenRR)**，本文不再赘述。
 
 ---
 
-当前整合上游 **v0.1.5**，采用其 Fast 模式显存复用与预投影权重优化，并保留本分支的 ASI 集成、菜单和 GPU 资源生命周期保护。旧版本的测试数据见下方历史记录。
+当前整合上游 **v0.1.7**（含 RDNA4 固定 ACO 路线、RX 7000 / RDNA3 `shaders-gfx11` 路径，以及通用 Windows + Linux Wine / Proton 系统 Mesa RADV >= 26.3 原生支持），并保留本分支的 ASI 集成、菜单和 GPU 资源生命周期保护。v0.1.7 Stage 10 审计与复测证据见 [v017-stage10-audit.md](docs/test-evidence/v017-stage10-audit.md)，旧版本历史数据见下方表格。
 
 ## 本仓库做了什么
 
@@ -59,7 +59,10 @@ those before keeping it.
 
 ## 运行要求
 
-- **显卡与驱动**：AMD Radeon RX 9000 系列显卡（RDNA4），驱动需支持 `VK_KHR_cooperative_matrix`、`VK_EXT_shader_float8`（`shaderFloat8` + `shaderFloat8CooperativeMatrix`）与 `VK_KHR_workgroup_memory_explicit_layout`（Windows D3D12 Direct 模式需 `amdxc64.dll` 提供 `IAmdExtD3DDevice5`）。
+- **显卡与驱动**：
+  - **Windows RDNA4（RX 9000 系列，`gfx1201`/`gfx1200`）**：固定严格走离线预编译 **ACO** 路径；Vulkan 需支持 `VK_KHR_cooperative_matrix`、`VK_EXT_shader_float8`（`shaderFloat8` + `shaderFloat8CooperativeMatrix`）、`VK_KHR_workgroup_memory_explicit_layout`、`VK_KHR_pipeline_binary` 与 `maintenance5`，Windows D3D12 Direct 模式需 `amdxc64.dll` 提供 `IAmdExtD3DDevice5`。
+  - **Linux Wine / Proton（Mesa RADV >= 26.3）**：直接调用系统 Mesa RADV（无需自定义 `libvulkan_radeon.so` 或启动包装脚本）；RDNA4 原生运行 ACO 并对 `shaders/` 执行内存级 `SpvDecorationNoContraction` 硬化，通过 `winevulkan.dll` 与 `vkd3d-proton` `RecordVk` 互操作运行。
+  - **RDNA3 / RDNA3.5（RX 7000 系列 / 780M 等，`gfx11`）**：固定使用独立 `shaders-gfx11/` FP16 / LLPC 路径。
 - **Vulkan**：Vulkan 1.3，支持 `hostQueryReset` 与 `scalarBlockLayout`。
 - **模型权重文件**：`nvngx_dlssd.dll` 版本必须为 **310.9.1**。
 
@@ -71,15 +74,18 @@ those before keeping it.
 
 推荐使用 **[dlss-5-amd-project](https://github.com/TheAutomatic/dlss-5-amd-project)** 启动器进行自动部署、配置管理以及与 [`dlssnr-amd.asi`](https://gitlab.com/mochizuki0323/DLSSNR-AMD) 的共存安装。
 
-### 方式二：手动配合官方原版 OptiScaler
+### 方式二：手动配合官方原版 OptiScaler（Windows / Linux 通用发行包）
 
-将构建产物放入游戏目录（即 OptiScaler 的 `dxgi.dll` / `OptiScaler.ini` 所在目录）：
+将构建产物（共 `392` 个文件的通用 `stage/` 包）放入游戏目录（即 OptiScaler 的 `dxgi.dll` / `OptiScaler.ini` 所在目录）：
 
 | 文件 / 目录 | 放置位置（相对于 `OptiScaler.ini` 所在目录） |
 |---|---|
 | `openrr-amd.asi` | `plugins\openrr-amd.asi` |
 | `openrr-amd.ini` | `openrr-amd.ini` |
-| `openrr-amd\shaders\*.spv` | `openrr-amd\shaders\*.spv`（共 90 个 `.spv`） |
+| `openrr-amd\shaders\*.spv` | `openrr-amd\shaders\*.spv`（共 `94` 个 `.spv`） |
+| `openrr-amd\shaders-gfx11\*.spv` | `openrr-amd\shaders-gfx11\*.spv`（共 `94` 个 `.spv`，RDNA3 / RDNA3.5 必需） |
+| `openrr-amd\aco\gfx1201\openrr-d3d12-v1\`、`openrr-amd\aco\gfx1200\openrr-d3d12-v1\` | 保持相同目录结构，每目标含 `94` 份 `.nrp`、`manifest.json` 和 `manifest.msgpack`；Windows RDNA4 严格 ACO 必需，Linux Mesa RADV 自动忽略 |
+| `openrr-amd\lang\` | `openrr-amd\lang\`（`English.txt`、`ja.txt`、`ko.txt`、`zh-CN.txt` 与 `fonts\`） |
 | `nvngx_dlssd.dll`（**310.9.1**） | 游戏目录或 `openrr-amd\nvngx_dlssd.dll` |
 
 在 `OptiScaler.ini` 中开启 ASI 插件加载（OptiScaler 默认关闭该项）：
@@ -88,6 +94,12 @@ those before keeping it.
 [Plugins]
 LoadAsiPlugins=true
 ```
+
+#### Linux（Wine / Proton + 系统 Mesa RADV >= 26.3）补充说明
+
+- 使用同一份通用发行包即可直接在 Linux Wine / Proton 下运行：**只需系统安装 Mesa RADV >= 26.3**（无需打包或注入自定义 `libvulkan_radeon.so`，也无需 `with_mesa263.sh` / `VK_ICD_FILENAMES` 包装脚本）。
+- 运行时优先通过 `winevulkan.dll` 解析 Vulkan 入口、使用 `vkd3d-proton` 原生 `RecordVk` 互操作，并在加载阶段对 `shaders/*.spv` 注入 `SpvDecorationNoContraction` 硬化直接交由系统 RADV 编译（自动跳过 Windows PAL 专用的 `aco\*.nrp` 离线记录）。
+- 部署要点：游戏目录下除 OptiScaler（`dxgi.dll`、`OptiScaler.ini` 设 `LoadAsiPlugins=true`）与游戏自带或自备的 `nvngx_dlssd.dll`（**310.9.1**）外，仍需将 `plugins/openrr-amd.asi`、`openrr-amd/`（`shaders/`、`shaders-gfx11/`、`lang/`）与 `openrr-amd.ini` 完整复制到游戏目录（不能只放单个 `.asi`），并在 Steam 启动选项设置 `WINEDLLOVERRIDES="dxgi=n,b" %command%`。
 
 > **重要提示**：
 > 1. **切勿将插件改名为 `*-loadlate.asi`**：OptiScaler 会将 `loadlate` 插件放到独立线程并延迟 `LateAsiPluginsDelay`（默认 30 秒）再加载。届时游戏早已完成 NGX 能力查询与 `vkCreateDevice`，OpenRR 无法改写光线重建能力或准备 Vulkan 设备。
@@ -103,7 +115,7 @@ LoadAsiPlugins=true
 bash asi/build/build_asi.sh
 ```
 
-构建完成后，可直接发布的打包目录位于 `build/asi/stage/`（分离出的调试符号保存在 `build/asi/openrr-amd.debug`，单元测试与命令列表切分验证套件位于 `build/asi/test_asi_units.exe`）。
+构建完成后，打包目录位于 `build/asi/stage/`（分离出的调试符号保存在 `build/asi/openrr-amd.debug`，单元测试与命令列表切分验证套件位于 `build/asi/test_asi_units.exe`）。默认离线构建固定版本 Mesa 的 global/vector8 ACO 记录，需要现有 WSL Mesa 源码与依赖；详见 [ACO 构建说明](asi/build/mesa/README.md)。stage 同时包含 `LICENSE` 和 `THIRD_PARTY.md`，不包含 OptiScaler 或外部权重 DLL。独立候选使用 `bash asi/build/build_asi.sh build/asi-delivery-candidate`，审查和包级验证完成后再决定替换正式 stage。
 
 ---
 

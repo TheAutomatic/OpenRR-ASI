@@ -1,0 +1,15 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#include "onr_common.glsl"
+layout(local_size_x=64) in;
+layout(push_constant,scalar) uniform P { U32Buf dst; uint noise; uint mode; } pc;
+void main() {
+    uint i=gl_GlobalInvocationID.x;
+    float16_t a=hbits(i), b=hbits((i&0xfc00u)|pc.noise), m=hbits(i&0xfc00u);
+    precise float16_t tt=a+b;
+    precise float16_t r=tt-m;
+    pc.dst.v[i*2u]=uint(float16BitsToUint16(tt))|(uint(float16BitsToUint16(r))<<16);
+    precise f16vec2 v=f16vec2(a,hbits(i^0x8000u))+f16vec2(b,hbits(((i^0x8000u)&0xfc00u)|pc.noise));
+    precise f16vec2 q=v-f16vec2(m,hbits((i^0x8000u)&0xfc00u));
+    pc.dst.v[i*2u+1u]=packFloat2x16(q);
+}
