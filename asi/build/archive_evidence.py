@@ -26,7 +26,7 @@ def main():
     ap.add_argument("--tag", required=True, help="Stage/phase slug, e.g. phase2-fp8-input")
     ap.add_argument("--baseline-runtime", default="build/asi/base_d6f70fb/plugins/openrr-amd.asi")
     ap.add_argument("--baseline-data-dir", default="build/asi/base_d6f70fb/openrr-amd")
-    ap.add_argument("--runtime", default="build/asi/stage/plugins/openrr-amd.asi")
+    ap.add_argument("--runtime", default="build/asi/stage/OptiScaler/plugins/openrr-amd.asi")
     ap.add_argument("--data-dir", default="build/asi/stage/openrr-amd")
     ap.add_argument("--dlssd", default="C:/Users/Kenny/Downloads/dlssnr_on_amd_setup/dist/weights/nvngx_dlssd.dll")
     args = ap.parse_args()

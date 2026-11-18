@@ -8,9 +8,10 @@ set "BUILD_RESULT=%ERRORLEVEL%"
 echo.
 if "%BUILD_RESULT%"=="0" (
     echo [OpenRR] Build succeeded.
-    echo   ASI plugin : "%CD%\build\asi\stage\plugins\openrr-amd.asi"
+    echo   ASI plugin : "%CD%\build\asi\stage\OptiScaler\plugins\openrr-amd.asi"
     echo   Config INI : "%CD%\build\asi\stage\openrr-amd.ini"
     echo   Shaders    : "%CD%\build\asi\stage\openrr-amd\shaders"
+    echo   Release ZIP: "%CD%\dist\"
 ) else (
     echo [OpenRR] Build failed with exit code %BUILD_RESULT%.
 )

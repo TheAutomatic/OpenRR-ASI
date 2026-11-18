@@ -10,8 +10,8 @@ stage="$out/stage"
 if [[ "${OPENRR_CLEAN_STAGE:-0}" == "1" ]]; then
     rm -rf -- "$stage"
 fi
-rm -rf -- "$stage/plugins/"*.log "$stage/"*.log "$out"/bench-* "$out/occ_ab" "$out/occ_nopad" "$out/occ_pad16k" "$out/b2_base" "$out/b2_post_exp" "$out/b2_post_log" "$out/b2_attr_rcp" "$out/b2_attr_same" "$out/b2_c64_far3"
-mkdir -p -- "$out" "$stage/plugins" "$stage/openrr-amd/shaders" "$stage/openrr-amd/shaders-gfx11"
+rm -rf -- "$stage/plugins" "$stage/LICENSE" "$stage/THIRD_PARTY.md" "$stage/OptiScaler/plugins/"*.log "$stage/"*.log "$out"/bench-* "$out/occ_ab" "$out/occ_nopad" "$out/occ_pad16k" "$out/b2_base" "$out/b2_post_exp" "$out/b2_post_log" "$out/b2_attr_rcp" "$out/b2_attr_same" "$out/b2_c64_far3"
+mkdir -p -- "$out" "$stage/OptiScaler/plugins" "$stage/openrr-amd/shaders" "$stage/openrr-amd/shaders-gfx11"
 
 cxx=${OPENRR_MINGW:-x86_64-w64-mingw32-g++}
 cc=${OPENRR_MINGW_CC:-x86_64-w64-mingw32-gcc}
@@ -23,7 +23,29 @@ glslang=${OPENRR_GLSLANG:-$(command -v glslangValidator || command -v glslang)}
 command -v "$cxx" >/dev/null || { echo "missing mingw cross compiler ($cxx)" >&2; exit 1; }
 [[ -n "$glslang" ]] || { echo "missing glslangValidator / glslang" >&2; exit 1; }
 
-stamp=${OPENRR_STAMP:-$(git rev-parse --short HEAD 2>/dev/null || echo "dev")}
+resolve_git_stamp() {
+    local s
+    if s=$(git rev-parse --short HEAD 2>/dev/null) && [[ -n "$s" ]]; then
+        printf "%s" "$s"
+        return
+    fi
+    if [[ -f .git ]] && command -v wslpath >/dev/null 2>&1; then
+        local win_gitdir wsl_gitdir commondir
+        win_gitdir=$(sed -n 's/^gitdir:[[:space:]]*//p' .git | tr -d '\r')
+        if [[ -n "$win_gitdir" ]] && wsl_gitdir=$(wslpath -u "$win_gitdir" 2>/dev/null) && [[ -d "$wsl_gitdir" ]]; then
+            commondir="$wsl_gitdir"
+            if [[ -f "$wsl_gitdir/commondir" ]]; then
+                commondir=$(realpath -m -- "$wsl_gitdir/$(tr -d '\r\n' < "$wsl_gitdir/commondir")")
+            fi
+            if s=$(GIT_DIR="$wsl_gitdir" GIT_COMMON_DIR="$commondir" git rev-parse --short HEAD 2>/dev/null) && [[ -n "$s" ]]; then
+                printf "%s" "$s"
+                return
+            fi
+        fi
+    fi
+    printf "dev"
+}
+stamp=${OPENRR_STAMP:-$(resolve_git_stamp)}
 
 minhook="asi/third_party/minhook"
 imgui="asi/third_party/imgui"
@@ -115,11 +137,11 @@ echo "[3/4] Generating Vulkan lazy loader & linking openrr-amd.asi..."
 "$cxx" -std=c++20 -O2 -Iasi/src -I"$minhook/include" asi/tests/test_dxgi_queue.cpp \
     "$out"/mh_*.o -ld3d12 -ldxgi -lole32 -static -static-libgcc -static-libstdc++ -o "$out/test_dxgi_queue.exe"
 count=$(bash asi/build/vulkan_lazy.sh "$out" "$cxx" -shared "${objs[@]}" "${ldflags[@]}" | grep -o '[0-9]*$')
-"$cxx" -shared -o "$stage/plugins/openrr-amd.asi" "$out/openrr.def" "${objs[@]}" "$out/vulkan_lazy_s.o" "$out/vulkan_lazy_c.o" "${ldflags[@]}"
+"$cxx" -shared -o "$stage/OptiScaler/plugins/openrr-amd.asi" "$out/openrr.def" "${objs[@]}" "$out/vulkan_lazy_s.o" "$out/vulkan_lazy_c.o" "${ldflags[@]}"
 rm -f "$out/openrr-amd.debug"
-"$objcopy" --only-keep-debug "$stage/plugins/openrr-amd.asi" "$out/openrr-amd.debug"
-"$strip" --strip-unneeded "$stage/plugins/openrr-amd.asi"
-"$objcopy" --add-gnu-debuglink="$out/openrr-amd.debug" "$stage/plugins/openrr-amd.asi"
+"$objcopy" --only-keep-debug "$stage/OptiScaler/plugins/openrr-amd.asi" "$out/openrr-amd.debug"
+"$strip" --strip-unneeded "$stage/OptiScaler/plugins/openrr-amd.asi"
+"$objcopy" --add-gnu-debuglink="$out/openrr-amd.debug" "$stage/OptiScaler/plugins/openrr-amd.asi"
 
 echo "[4/4] Building runtime SPIR-V shaders & staging package..."
 python3 asi/build/build_shaders.py "$glslang" gpu "$stage/openrr-amd/shaders"
@@ -136,7 +158,8 @@ if [[ -f "asi/lang/fonts/NotoSansCJKsc-Regular.ttf" ]]; then
 elif [[ -f "$cjk_font" ]]; then
     cp -- "$cjk_font" "$stage/openrr-amd/lang/fonts/"
 fi
-cp LICENSE THIRD_PARTY.md "$stage/"
+cp -- LICENSE "$stage/openrr-amd/OpenRR_LICENSE.txt"
+cp -- THIRD_PARTY.md "$stage/openrr-amd/OpenRR_THIRD_PARTY.md"
 "$cxx" "${common_cxx[@]}" -DOPENRR_TEST_HOOKS=1 asi/tests/test_asi_units.cpp \
     "$out/rr_pe_config.o" "$out/rr_pe_d3d12split.o" "$out/rr_pe_vkdevice.o" "$out/rr_pe_log.o" "$out/rr_pe_crash.o" \
     "$out/rt_runtime_test.o" "$out/rt_vk_host.o" "$out/gpu_vk_test.o" "$out/gpu_d3d12_test.o" "$out/gpu_kernels.o" \
@@ -163,5 +186,9 @@ if [[ "${OPENRR_BUILD_ACO:-1}" == "1" ]]; then
             "${aco_common_args[@]}"
     done
 fi
-echo "Built $stage/plugins/openrr-amd.asi ($(stat -c %s "$stage/plugins/openrr-amd.asi") bytes, $count Vulkan entry points resolved lazily)"
-echo "Exports: $("$objdump" -p "$stage/plugins/openrr-amd.asi" | grep -c 'InitializeASI')  Imports: $("$objdump" -p "$stage/plugins/openrr-amd.asi" | grep 'DLL Name' | awk '{print $3}' | tr '\n' ' ')"
+echo "Built $stage/OptiScaler/plugins/openrr-amd.asi ($(stat -c %s "$stage/OptiScaler/plugins/openrr-amd.asi") bytes, $count Vulkan entry points resolved lazily)"
+echo "Exports: $("$objdump" -p "$stage/OptiScaler/plugins/openrr-amd.asi" | grep -c 'InitializeASI')  Imports: $("$objdump" -p "$stage/OptiScaler/plugins/openrr-amd.asi" | grep 'DLL Name' | awk '{print $3}' | tr '\n' ' ')"
+pkg_zip=${OPENRR_PACKAGE_ZIP:-auto}
+if [[ "$pkg_zip" == "1" || ( "$pkg_zip" == "auto" && -f "$stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/manifest.json" && -f "$stage/openrr-amd/aco/gfx1200/openrr-d3d12-v1/manifest.json" ) ]]; then
+    python3 asi/build/package_release.py --stage "$stage" --out-dir "${OPENRR_DIST_DIR:-dist}"
+fi

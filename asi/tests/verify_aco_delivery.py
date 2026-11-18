@@ -73,13 +73,16 @@ def main():
         assert len(record) == 96 + 8*pairs + code_size
         assert fnv(record[96+8*pairs:]) == code_hash == int(row['code_hash'], 16)
     assert (stage/'openrr-amd.ini').read_bytes() == Path('asi/openrr-amd.ini').read_bytes()
-    plugin = (stage/'plugins/openrr-amd.asi').read_bytes()
+    plugin_rel = 'OptiScaler/plugins/openrr-amd.asi' if (stage/'OptiScaler/plugins/openrr-amd.asi').exists() else 'plugins/openrr-amd.asi'
+    plugin = (stage/plugin_rel).read_bytes()
     assert plugin[:2] == b'MZ'
     pe = struct.unpack_from('<I', plugin, 60)[0]
     assert plugin[pe:pe+4] == b'PE\0\0' and struct.unpack_from('<H', plugin, pe+4)[0] == 0x8664
-    expected = {'plugins/openrr-amd.asi','openrr-ngx-host.dll','openrr-amd.ini','LICENSE','THIRD_PARTY.md'}
-    for name in ('LICENSE','THIRD_PARTY.md'):
-        assert (stage/name).read_bytes() == Path(name).read_bytes()
+    doc_map = [('LICENSE', 'openrr-amd/OpenRR_LICENSE.txt'), ('THIRD_PARTY.md', 'openrr-amd/OpenRR_THIRD_PARTY.md')]
+    doc_rels = [new_rel if (stage/new_rel).exists() else src_name for src_name, new_rel in doc_map]
+    expected = {plugin_rel,'openrr-ngx-host.dll','openrr-amd.ini',*doc_rels}
+    for (src_name, _), rel_doc in zip(doc_map, doc_rels):
+        assert (stage/rel_doc).read_bytes() == Path(src_name).read_bytes()
     expected |= {p.relative_to(stage).as_posix() for p in files}
     expected |= {(records/name).relative_to(stage).as_posix() for name in ['manifest.json','manifest.msgpack']}
     expected |= {(records/r['record']).relative_to(stage).as_posix() for r in manifest['records'].values()}

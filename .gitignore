@@ -43,3 +43,12 @@ snippets/
 
 # Bundled CJK font pack staged during build, never tracked in git
 asi/lang/fonts/*.ttf
+
+# Release packages and archives
+/dist/
+/release/
+*.zip
+*.7z
+*.tar.gz
+*.tar.xz
+*.sha256

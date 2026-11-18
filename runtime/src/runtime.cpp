@@ -100,10 +100,19 @@ public:
     ~Log() { close(); }
     void open(const std::wstring& path, bool new_session = false) {
 #ifdef ONR_RR_STATIC
-        // The plugin's own logger (rr_pe_log) owns the module-folder openrr-amd.log; a
-        // host-specified path (the bench's per-run log) is still written here, so every
-        // consumer keeps its file contract.
-        if (path == module_dir() + L"\\openrr-amd.log") return;
+        // The plugin's own logger (rr_pe_log) owns openrr::pe::log_path() (beside OptiScaler in
+        // game, or beside the module when loaded standalone); a host-specified path (the bench's
+        // per-run log) is still written here, so every consumer keeps its file contract.
+        auto norm = [](std::string s) {
+            for (char& ch : s) if (ch == '/') ch = '\\';
+            return s;
+        };
+        if (path == module_dir() + L"\\openrr-amd.log" ||
+            _stricmp(norm(utf8(path)).c_str(), norm(openrr::pe::log_path()).c_str()) == 0) {
+            std::lock_guard l(m_);
+            if (new_session && f_) fclose(f_), f_ = nullptr;
+            return;
+        }
 #endif
         std::lock_guard l(m_);
         if (new_session && f_) fclose(f_), f_ = nullptr;

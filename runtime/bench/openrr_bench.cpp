@@ -770,7 +770,8 @@ try
 {
     int argc = 0;
     LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
-    fs::path runtimePath = L"build/asi/stage/plugins/openrr-amd.asi";
+    fs::path runtimePath = L"build/asi/stage/OptiScaler/plugins/openrr-amd.asi";
+    bool runtimeExplicit = false;
     fs::path baselinePath;
     fs::path dataDir = L"build/asi/stage/openrr-amd";
     fs::path baselineDataDir;
@@ -796,7 +797,7 @@ try
     {
         std::wstring arg = argv[i];
         Require(i + 1 < argc, "Missing argument value");
-        if (arg == L"--runtime") runtimePath = argv[++i];
+        if (arg == L"--runtime") { runtimePath = argv[++i]; runtimeExplicit = true; }
         else if (arg == L"--baseline-runtime") baselinePath = argv[++i];
         else if (arg == L"--baseline-compiler") baselineCompiler = parseCompiler(argv[++i]);
         else if (arg == L"--candidate-compiler") candidateCompiler = parseCompiler(argv[++i]);
@@ -820,6 +821,8 @@ try
         else throw std::runtime_error("Unknown option");
     }
     if (baselineDataDir.empty()) baselineDataDir = dataDir;
+    if (!runtimeExplicit && !fs::exists(runtimePath) && fs::exists(L"build/asi/stage/plugins/openrr-amd.asi"))
+        runtimePath = L"build/asi/stage/plugins/openrr-amd.asi";
 
     Require(!dlssdPath.empty() && fs::exists(dlssdPath), "Explicit --dlssd <path to nvngx_dlssd.dll 310.9.1.0> is required");
     Require(fs::exists(runtimePath), "Candidate runtime module not found: " + runtimePath.string());

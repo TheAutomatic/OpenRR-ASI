@@ -7,7 +7,8 @@ $workspace=(Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 Set-Location -LiteralPath $workspace
 $buildRoot=(Resolve-Path -LiteralPath $Build).Path
 $data=Join-Path $buildRoot 'stage/openrr-amd'
-$plugin=Join-Path $buildRoot 'stage/plugins/openrr-amd.asi'
+$plugin=Join-Path $buildRoot 'stage/OptiScaler/plugins/openrr-amd.asi'
+if(-not (Test-Path -LiteralPath $plugin)){$plugin=Join-Path $buildRoot 'stage/plugins/openrr-amd.asi'}
 if((Test-Path -LiteralPath $Output) -and -not $Resume){throw 'Refusing to overwrite smoke evidence'}
 New-Item -ItemType Directory -Path $Output -Force | Out-Null
 $saved=@{}
@@ -61,12 +62,13 @@ try {
  }
  # The ASI shell may append one exit log beside the module. Archive that exact
  # generated file, then remove it so the candidate remains a clean package.
- $shellLog=Join-Path $buildRoot 'stage/plugins/openrr-amd.log'
- if(Test-Path -LiteralPath $shellLog){
-  $copy=Join-Path $Output 'asi-shell-exit.log'
-  Copy-Item -LiteralPath $shellLog -Destination $copy
-  if((Get-FileHash -LiteralPath $shellLog).Hash -ne (Get-FileHash -LiteralPath $copy).Hash){throw 'Shell log archive mismatch'}
-  Remove-Item -LiteralPath $shellLog
+ foreach($shellLog in @(Join-Path $buildRoot 'stage/OptiScaler/plugins/openrr-amd.log', Join-Path $buildRoot 'stage/plugins/openrr-amd.log')){
+  if(Test-Path -LiteralPath $shellLog){
+   $copy=Join-Path $Output 'asi-shell-exit.log'
+   Copy-Item -LiteralPath $shellLog -Destination $copy
+   if((Get-FileHash -LiteralPath $shellLog).Hash -ne (Get-FileHash -LiteralPath $copy).Hash){throw 'Shell log archive mismatch'}
+   Remove-Item -LiteralPath $shellLog
+  }
  }
 } finally {
  foreach($name in $names){[Environment]::SetEnvironmentVariable($name,$saved[$name],'Process')}

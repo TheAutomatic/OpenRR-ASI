@@ -13,7 +13,7 @@ Single-file D3D12 benchmark and bit-exact FP16 output comparator ([`openrr_bench
 .\build\asi\openrr_bench.exe `
   --baseline-runtime C:\Users\Kenny\Downloads\dlssnr_on_amd_setup\exports\openrr-baseline\OpenNrRrRuntime.dll `
   --baseline-data-dir C:\Users\Kenny\Downloads\dlssnr_on_amd_setup\exports\openrr-runtime\opennr-rr `
-  --runtime build\asi\stage\plugins\openrr-amd.asi `
+  --runtime build\asi\stage\OptiScaler\plugins\openrr-amd.asi `
   --data-dir build\asi\stage\openrr-amd `
   --dlssd C:\Users\Kenny\Downloads\dlssnr_on_amd_setup\dist\weights\nvngx_dlssd.dll `
   --out build\asi\bench-vs-upstream --fast-mode 0
@@ -22,7 +22,7 @@ Single-file D3D12 benchmark and bit-exact FP16 output comparator ([`openrr_bench
 .\build\asi\openrr_bench.exe `
   --baseline-runtime C:\Users\Kenny\Downloads\dlssnr_on_amd_setup\exports\openrr-runtime\OpenNrRrRuntime.dll `
   --baseline-data-dir C:\Users\Kenny\Downloads\dlssnr_on_amd_setup\exports\openrr-runtime\opennr-rr `
-  --runtime build\asi\stage\plugins\openrr-amd.asi `
+  --runtime build\asi\stage\OptiScaler\plugins\openrr-amd.asi `
   --data-dir build\asi\stage\openrr-amd `
   --dlssd C:\Users\Kenny\Downloads\dlssnr_on_amd_setup\dist\weights\nvngx_dlssd.dll `
   --out build\asi\bench-1440p --fast-mode 1
@@ -31,7 +31,7 @@ Single-file D3D12 benchmark and bit-exact FP16 output comparator ([`openrr_bench
 .\build\asi\openrr_bench.exe `
   --baseline-runtime C:\Users\Kenny\Downloads\dlssnr_on_amd_setup\exports\openrr-runtime\OpenNrRrRuntime.dll `
   --baseline-data-dir C:\Users\Kenny\Downloads\dlssnr_on_amd_setup\exports\openrr-runtime\opennr-rr `
-  --runtime build\asi\stage\plugins\openrr-amd.asi `
+  --runtime build\asi\stage\OptiScaler\plugins\openrr-amd.asi `
   --data-dir build\asi\stage\openrr-amd `
   --dlssd C:\Users\Kenny\Downloads\dlssnr_on_amd_setup\dist\weights\nvngx_dlssd.dll `
   --out build\asi\bench-4k --rw 2560 --rh 1440 --ow 3840 --oh 2160 --fast-mode 1

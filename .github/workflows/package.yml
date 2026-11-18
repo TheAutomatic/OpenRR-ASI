@@ -1,0 +1,124 @@
+name: Package OpenRR OptiScaler Release
+
+on:
+  push:
+    branches:
+      - main
+      - asi-plugin
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+      - asi-plugin
+  workflow_dispatch:
+    inputs:
+      package_name:
+        description: 'Optional custom zip stem (leave empty for OpenRR-v<version>-OptiScaler)'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-package:
+    runs-on: ubuntu-24.04
+    container:
+      image: ubuntu:26.04
+
+    steps:
+      - name: Install build toolchain dependencies
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates curl git xz-utils zip unzip pkg-config \
+            build-essential meson ninja-build bison flex \
+            python3 python3-mako python3-yaml python3-packaging python3-fonttools fonts-noto-cjk \
+            g++-mingw-w64-x86-64-win32 gcc-mingw-w64-x86-64-win32 binutils-mingw-w64-x86-64 \
+            glslang-tools spirv-tools \
+            zlib1g-dev libzstd-dev libexpat1-dev libvulkan-dev
+          rm -rf /var/lib/apt/lists/*
+
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Configure git safe.directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Cache Mesa 26.3.0 & libdrm build artifacts
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/openrr-ci
+            ~/src/mesa-deps
+            ~/work/openrr-mesa-263-comparison
+          key: ubuntu2604-mesa263-v5-${{ hashFiles('asi/build/mesa/capture.patch', 'asi/build/mesa/global-address.patch', 'asi/build/mesa/prepare_capture.py', 'asi/build/mesa/prepare_global_address.py', 'asi/build/mesa/build_capture_263.sh', 'asi/build/ci/prepare_ci_deps.sh') }}
+
+      - name: Prepare CI dependencies (Mesa 26.3.0, libdrm, CJK font)
+        env:
+          OPENRR_CJK_FONT_URL: ${{ vars.OPENRR_CJK_FONT_URL }}
+          OPENRR_BUILD_JOBS: '4'
+        run: bash asi/build/ci/prepare_ci_deps.sh
+
+      - name: Build OpenRR ASI, offline ACO records & release zip
+        env:
+          OPENRR_CLEAN_STAGE: '1'
+          OPENRR_BUILD_ACO: '1'
+          OPENRR_PACKAGE_ZIP: '1'
+          OPENRR_BUILD_JOBS: '4'
+        run: |
+          export OPENRR_MESA_263_TARBALL="$HOME/.cache/openrr-ci/mesa-26.3.0.tar.xz"
+          bash asi/build/build_asi.sh build/asi
+          if [ -n "${{ inputs.package_name }}" ]; then
+            rm -rf dist/*
+            python3 asi/build/package_release.py --stage build/asi/stage --out-dir dist --name "${{ inputs.package_name }}"
+          fi
+
+      - name: Validate all SPIR-V shaders & Python unit tests
+        run: |
+          for spv in build/asi/stage/openrr-amd/shaders/*.spv build/asi/stage/openrr-amd/shaders-gfx11/*.spv; do
+            spirv-val --scalar-block-layout "$spv"
+          done
+          python3 -m unittest discover -s asi/tests -p "test_*.py" -v
+
+      - name: Upload release package artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: OpenRR-OptiScaler-Package
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload separated debug symbols
+        uses: actions/upload-artifact@v7
+        with:
+          name: OpenRR-Debug-Symbols
+          path: build/asi/openrr-amd.debug
+          if-no-files-found: error
+          retention-days: 30
+
+  github-release:
+    needs: build-and-package
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download packaged release artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: OpenRR-OptiScaler-Package
+          path: dist
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          name: OpenRR ${{ github.ref_name }} (OptiScaler Plugin)
+          files: |
+            dist/*.zip
+            dist/*.sha256
+          generate_release_notes: true

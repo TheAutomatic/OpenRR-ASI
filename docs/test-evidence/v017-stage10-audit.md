@@ -5,7 +5,7 @@
   - 独立显卡：`AMD Radeon RX 9070 XT`（`1002:7550`，RDNA4 `gfx1201` / `mach=0x4e`）
   - 核显 / RDNA3 验证卡：`AMD Radeon 780M Graphics`（`1002:1900`，RDNA3 `mach=0x44`）
   - 驱动版本：AMD Adrenalin `26.11.1 (LLPC)`，测试权重 `nvngx_dlssd.dll 310.9.1.0`。
-- **洁净交付包（`build/v017-asi/stage/`）**：共 **`392` 个文件、`0` 个 `*.log` 残留**（Round 1 证据留存于 `build/v017-asi/final-audit-evidence/`，Round 2 最终终包证据留存于 `build/v017-asi/final-audit-evidence-r2/`，临时 `work/` 已清理）。
+- **洁净交付包（`build/v017-asi/stage/` 及 `dist/OpenRR-v0.1.7plus-OptiScaler.zip`）**：共 **`392` 个文件、`0` 个 `*.log` 残留**，目录采用 OptiScaler v10 标准 `OptiScaler/plugins/openrr-amd.asi` 并把许可证与第三方声明收入 `openrr-amd/OpenRR_LICENSE.txt` 及 `openrr-amd/OpenRR_THIRD_PARTY.md`（避免覆盖游戏或 Mod 同名文件）；确定性发布压缩包 `dist/OpenRR-v0.1.7plus-OptiScaler.zip`（`23,785,221` B，内嵌提交戳 `0.1.7plus (8455873)`，SHA-256 `0f1babdf307039a1e00f87b9aeb82d3fb3c69cdcfebcbe54a0c5c2195d7b7bf6`，WSL 与 Windows 原生 Python 打包逐比特一致；Round 1 证据留存于 `build/v017-asi/final-audit-evidence/`，Round 2 运行时/GPU 矩阵证据留存于 `build/v017-asi/final-audit-evidence-r2/`）。
 
 ---
 
@@ -18,7 +18,7 @@
      - `gfx1201`/`gfx1200`（以及任一 `is_rdna4` 设备）强制启用 `aco = true, aco_strict = true`；RDNA4 设备若未能映射到已交付离线目标（`!aco_target`）或 Vulkan `VK_KHR_pipeline_binary + maintenance5` / 清单校验未就绪，直接硬失败（禁止回退驱动 LLPC）。`gfx11`（RDNA3／3.5）固定使用独立 `shaders-gfx11` FP16／LLPC 路径。
      - 移除 D3D12、Native Vulkan Host 与 D3D12↔Vulkan Bridge 的所有单核、utility、direct/sampler、base、wide、flow 及 `_lt`/`_lx` LLPC 回退分支；移除 D3D12 运行期因 `_lt`/network 失败静默切换 Vulkan 的回退。
    - **故障注入测试钩子隔离到测试构建**：`ONR_ACO_TARGET`、`ONR_ACO_DIR`、`ONR_ACO_DUMP`（`d3d12.cpp`、`rr_pipeline_binary.hpp`、`runtime.cpp`、`aco_runtime_trace.hpp`）及 `ONR_TEST_SPOOF_LOADER`（`vk.cpp`）等仅用于 `test_asi_units.exe`（`#ifdef OPENRR_TEST_HOOKS`），并去除 `ONR_ACO_OPTIONAL`。验证工具（`runtime/validate/main.cpp`、`runtime/validate/vk_main.cpp`）通过临时复制 `ci.data_dir` 与隔离 `ci.cache_dir` 经公开 ABI 对正式版 `openrr-amd.asi` 做故障注入。
-   - **二进制字符串扫描实证**：`build/v017-asi/stage/plugins/openrr-amd.asi`（`769441a2...`）中 `ONR_RR_COMPILER`、`ONR_ACO_OPTIONAL`、`ONR_ACO_TARGET`、`ONR_ACO_DIR`、`ONR_ACO_DUMP`、`ONR_TEST_SPOOF_LOADER`、`ONR_TEST_SIMULATE_RADV` 出现次数均为 **`0`**。
+   - **二进制字符串扫描实证**：`build/v017-asi/stage/OptiScaler/plugins/openrr-amd.asi`（`v0.1.7plus (8455873)`，`1b49d32b...`；以及此前 `7ed8b47` 构建 `769441a2...`）经 `package_release.py` 校验，`ONR_RR_COMPILER`、`ONR_ACO_OPTIONAL`、`ONR_ACO_TARGET`、`ONR_ACO_DIR`、`ONR_ACO_DUMP`、`ONR_TEST_SPOOF_LOADER`、`ONR_TEST_SIMULATE_RADV` 出现次数均为 **`0`**。
 2. **结构化错误定位与异步 `ONR_RR_STATE_FAILED` 传播**：
    - `format_pipeline_error` 统一输出 `[backend=<d3d12|vulkan-host|vulkan-bridge> arch=<...> mach=0x<...> target=<...> pkg=<...> stage=<...> kernel=<...>]: <underlying>`。
    - `build_lite()` 在 `_lt`/`_lx` 加载失败时于锁下卸载部分核、清空 `engine.set_lite(nullptr)`、标记 `lite_failed = true`、`state = ONR_RR_STATE_FAILED`；`Record`、`RecordVk`、`RecordInputs`、`RecordPost`、`PrepareDenoised`、`EnqueueNetwork`、`EnqueuePost`、`RecordOutput` 在检测到 `ONR_RR_STATE_FAILED` 时立即返回 `ONR_RR_FAILED`，且 `asi/src/rr_asi_main.cpp` 在帧录制失败时同步更新菜单／状态机；`OnrRrGetFastMode` / `OnrRrGetFp8` 报告 `3`。
@@ -51,28 +51,31 @@
 
 ---
 
-## 2. 终版交付包清单与 SHA-256（`build/v017-asi/stage/`，核对自 `release_hashes.json`）
+## 2. 终版交付包清单与 SHA-256（`build/v017-asi/stage/` 与 `dist/`）
 
 | 制品 / 目录 | 数量 / 字节数 | SHA-256 / 校验说明 |
 |---|---:|---|
-| 交付包总计 | `392` 文件，`0` `*.log` | `94` `.spv` (`shaders/`) + `94` `.spv` (`shaders-gfx11/`) + `188` `.nrp` (`aco/{gfx1201,gfx1200}`) + `4` manifests + 插件、宿主桥与多语言字库 |
-| `plugins/openrr-amd.asi` | `3,545,026` B | `769441a2d0f54f1eea83339245b786031cf8607dfdb51c68138c1eb94e8a7de3`（7 项测试/覆写环境变量字符串扫描全为 `0`） |
-| `openrr-ngx-host.dll` | `585,819` B | `c4abb249d236959799c5a3c006bb2a5a70700cf93089f139c48022131f4c3a96` |
+| 交付包总计 | `392` 文件，`0` `*.log` | `94` `.spv` (`shaders/`) + `94` `.spv` (`shaders-gfx11/`) + `188` `.nrp` (`aco/{gfx1201,gfx1200}`) + `4` manifests + 插件、宿主桥、`openrr-amd/OpenRR_{LICENSE.txt,THIRD_PARTY.md}` 与多语言字库 |
+| `OptiScaler/plugins/openrr-amd.asi` | `3,546,050` B | `1b49d32b1909695acc47447edfb0e8651541abd9fd22cb7ede256b61eb660ba8`（`v0.1.7plus (8455873)`，7 项测试/覆写环境变量字符串扫描全为 `0`；C++/GPU 实机矩阵系基于此前 `7ed8b47` 构建 `769441a2...` 运行） |
+| `openrr-ngx-host.dll` | `585,819` B | `714a43c696dd9d3fad44f81e36c88f4068af5bccca1cfa0dd16f63acb50e9296` |
 | `openrr-amd.ini` | `2,291` B | `96b17b9c06c5f8c258f34870ca538d20d8ab6556ae530f57fd117174e967f4f9` |
 | `aco/gfx1201/openrr-d3d12-v1/manifest.json` | `137,573` B | `0b8f4633c12705d4fdac0854b385faef67ce2dc2bdd85e5058b9eae54c78c001` |
 | `aco/gfx1201/openrr-d3d12-v1/manifest.msgpack` | `19,051` B | `87bd4e03028643c8220dc6540853bdb01eabd5cb28ebb66dec7f6babd82818ca` |
 | `aco/gfx1200/openrr-d3d12-v1/manifest.json` | `137,573` B | `2b4e8f497ba4527a100388c773e221132d488b5b25e1e5f179471ab808738e2c` |
 | `aco/gfx1200/openrr-d3d12-v1/manifest.msgpack` | `19,051` B | `0d9e693c322a0f4252837abb731cf86442d3cbfdf6114c209970f6d0a693d26f` |
+| `dist/OpenRR-v0.1.7plus-OptiScaler.zip` | `23,785,221` B | `0f1babdf307039a1e00f87b9aeb82d3fb3c69cdcfebcbe54a0c5c2195d7b7bf6`（`392` 条 POSIX 路径条目，WSL 与 Windows 原生打包逐比特一致，附 `.sha256`） |
 
 > 注：全量 ACO `94/94` `spv_hash`、`code_hash` 及 `188` 份 `.nrp` `record_sha256` 与 Round 1 逐字节一致；仅 `manifest.{json,msgpack}` 顶层 `fingerprint` 因 `aco_capture` 随 `gpu/src/vk.cpp` 更新重链接而变更。
+>
+> 注：上表中的 `8455873` / `0f1babdf...` SHA-256 记录对应合并压栈前在 `codex/v017-merge` 上的本地预检构建；正式合入 `asi-plugin` 分支后的官方发布压缩包（`OpenRR-v0.1.7plus-OptiScaler.zip` 及 `.sha256`）由 GitHub Actions（`.github/workflows/package.yml`）在纯净环境中可复现构建，`OPENRR_BUILD_STAMP` 对应 `asi-plugin` 提交短哈希。
 
 ---
 
 ## 3. Round 2 单元测试与回归套件（全量通过）
 
-| 套件 | 命令 / 范围 | 实测结果（证据：`build/v017-asi/final-audit-evidence-r2/`） |
+| 套件 | 命令 / 范围 | 实测结果（证据：`build/v017-asi/final-audit-evidence-r2/` 等） |
 |---|---|---|
-| Python 单测 | `python -m unittest discover -s asi/tests -p "test_*.py" -v` | **`38/38 OK`**（`1.930 s`，`unit_python.txt`） |
+| Python 单测 | `python -m unittest discover -s asi/tests -p "test_*.py" -v` | **`44/44 OK`**（`7.318 s`，含 6 项 `test_package_release.py` 发布目录/大小写/审计与确定性打包校验） |
 | Present Scope 单测 | `test_present_scope.exe` | **`PASS`**（`EXIT=0`，`test_present_scope.txt`） |
 | DXGI Queue 单测 | `test_dxgi_queue.exe` | **`PASS`**（`EXIT=0`，`test_dxgi_queue.txt`） |
 | C++ GPU/Runtime 单测 | `test_asi_units.exe`（`-DOPENRR_TEST_HOOKS=1`） | **`56/56 [PASS]`、`ALL ASI UNIT TESTS PASSED`**（`EXIT=0`，`test_asi_units.txt`），含 Round 1 51 项及 Round 2 新增 5 项： |
@@ -84,7 +87,7 @@
 
 ---
 
-## 4. RX 9070 XT 与 780M Round 2 实机矩阵验证结果（基于终版 `769441a2...`）
+## 4. RX 9070 XT 与 780M Round 2 实机矩阵验证结果（基于 `7ed8b47` 终版源码，`769441a2...`）
 
 ### 4.1 `[P2-2]` `openrr_bench.exe` 基线编译器透传与路由核验（4 项全通过）
 | 用例 | 命令配置 | 实测结果 | 证据 |
@@ -120,7 +123,7 @@
 ## 5. 测试边界说明与未本地覆盖硬件
 
 1. **按用户指令“暂时不用测速和5090画质”跳过项目**：
-   - 未在终版二进制 `769441a2...` 上运行长稳态 ABBA 吞吐测试与 RTX 5090 `openrr_contrast_eval.exe` 画质对比。
+   - 未在 `7ed8b47` / 打包重链二进制上运行长稳态 ABBA 吞吐测试与 RTX 5090 `openrr_contrast_eval.exe` 画质对比。
 2. **本机无物理卡未实机覆盖的目标硬件**：
    - **`RX 9060 / 9060 XT`（`gfx1200`, `mach=0x48`）**：已通过离线 `94/94` `.nrp` 校验、`pal::splice` / `pal::splice_vulkan` 与 `test_asi_units.exe` 故障注入，缺真机实跑。
    - **独立 `RX 7000`（`gfx1100`/`1101`/`1102`）与 `RDNA3.5`（`gfx115x`）**：同走 `shaders-gfx11` LLPC 路径，当前仅以 `780M`（`mach=0x44`）与架构表覆盖。
