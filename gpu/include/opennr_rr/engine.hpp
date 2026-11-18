@@ -19,7 +19,10 @@ struct EngineFrame {
     float view_to_clip[16] = {};
     float depth_sign = 1;       // the depth guide holds view z * depth_sign (linear, positive ahead)
     bool reset = false;
+    bool mv_jittered = false;  // ONR_RR_FRAME_MV_JITTERED: the motion vectors include the jitter difference
     uint64_t transparency = 0;   // the transparency layer, rgba16f at the render size; 0 = none
+    // or, D3D12 with the output written in place, read from the game's texture: descriptor transparency_view - 1, origin x | y << 16
+    uint32_t transparency_view = 0, transparency_origin = 0;
     // DLSS.DisocclusionMask and the SSS guide (or ColorBeforeFog), r32f at the render size; 0 = none (rr2_enc0 slots 336 / 288)
     uint64_t disocclusion = 0, sss = 0;
     // more of rr2_enc0's optional guides, at the render size; 0 = none (docs/NOTA-ENTRADAS.md): DLSSD.ResponsivityMask
@@ -62,6 +65,7 @@ struct GuideTable {
 struct Enc0BlockInput {
     I2 render, internal, ds;
     float jitter[2], prev_jitter[2], mv_scale[2];
+    float mv_offset[2];     // raw units, added to every motion vector before mv_scale (0x328 / 0x32c)
     const float* w2v;
     const float* v2c;
     const float* prev_w2v;
@@ -88,10 +92,12 @@ struct DfnImport {
 std::vector<uint8_t> qv_bytes(const uint16_t* v, size_t n);
 // row-major [n / K][K] weights followed by the same values in 16x16 tiles (wout, fc1, fc2 of the network kernels)
 std::vector<uint16_t> with_tiles(const std::vector<uint16_t>& v, size_t K);
+// fp16 bits -> OCP e4m3 code, round-to-nearest-even, satfinite (never emits the NaN codes 0x7f/0xff)
+uint8_t e4m3_rne(uint16_t h);
 
 class Engine {
 public:
-    void init(Gpu& dev, const Kernels& k, const Weights& w);
+    void init(Gpu& dev, const Kernels& k, const Weights& w, bool pack_fp8 = true);
     void destroy();
     void set_fast(bool fast) { fast_ = fast; }
     void set_kernels(const Kernels* k, bool fast) { k_ = k, fast_ = fast; }
@@ -158,12 +164,14 @@ public:
     void set_deep_on(bool on) { deep_on_ = on; }
 
 private:
+    friend struct EngineTestAccess;
+    friend struct EngineRuntimeTraceAccess;
     struct StageBufs { Buffer in_a, in_b, out, out_b, fc1, fc1_b, fc2, fc2_b, bias, dfn_w, dfn_b, mrg_w, mrg_b, up_w, up_b; };
     Buffer make(size_t bytes);
     bool out_image_ = false;
     Buffer upload(const H16& v);
-    Buffer upload_qv(const H16& v, const H16& lr);
-    void upload_stage(const StageWeights& s, StageBufs& b);
+    Buffer upload_qv(const H16& v, const H16& lr, bool pack_fp8 = true);
+    void upload_stage(const StageWeights& s, StageBufs& b, bool pack_fp8);
     EncBlockPC block_pc(const StageWeights& s, const StageBufs& b, uint64_t x, uint64_t y, I2 size, I2 shift) const;
     std::string sfx() const { return fast_ ? "_f" : ""; }
     void run(Gpu& d, const std::string& n, const void* pc, uint32_t size, uint32_t groups) const {

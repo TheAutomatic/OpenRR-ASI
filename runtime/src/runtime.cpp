@@ -39,14 +39,21 @@
 
 #include "opennr_rr/d3d12.hpp"
 #include "opennr_rr/engine.hpp"
+#include "opennr_rr/gpu_arch.hpp"
 #include "opennr_rr_api.h"
 #include "vk_host.hpp"
+#include "aco_runtime_trace.hpp"
+#ifdef ONR_RR_STATIC
+extern "C" void rr_vk_load(void);
+#include "rr_pe_log.hpp"
+#include "rr_d3d12_record.hpp"
+#endif
 
 using namespace onr;
 
 namespace {
 
-thread_local std::string t_error;
+thread_local char t_error[1024] = {};
 
 // contexts alive in the process. The flow kernels' windows spin on row flags, which only holds while one network runs
 // at a time: two of them on two queues can fill the GPU with waiting windows whose producers never get launched (a
@@ -54,10 +61,13 @@ thread_local std::string t_error;
 // keeps its barrier, and on a Vulkan game's device always (its features come and go with others in flight).
 // ONR_RR_FLOW=0: never, =1: always (measurements).
 std::atomic<int> g_live{0};
-const char* const g_flow = getenv("ONR_RR_FLOW");
+inline bool flow_env_enabled() {
+    const char* e = getenv("ONR_RR_FLOW");
+    return e && strcmp(e, "0") != 0;
+}
 
 int32_t fail(int32_t code, const std::string& what) {
-    t_error = what;
+    std::snprintf(t_error, sizeof(t_error), "%s", what.c_str());
     return code;
 }
 
@@ -88,11 +98,21 @@ void copy_str(char* dst, size_t n, const std::string& s) {
 class Log {
 public:
     ~Log() { close(); }
-    void open(const std::wstring& path) {
+    void open(const std::wstring& path, bool new_session = false) {
+#ifdef ONR_RR_STATIC
+        // The plugin's own logger (rr_pe_log) owns the module-folder openrr-amd.log; a
+        // host-specified path (the bench's per-run log) is still written here, so every
+        // consumer keeps its file contract.
+        if (path == module_dir() + L"\\openrr-amd.log") return;
+#endif
         std::lock_guard l(m_);
+        if (new_session && f_) fclose(f_), f_ = nullptr;
         if (!f_) f_ = _wfsopen(path.c_str(), L"a", _SH_DENYNO);
     }
     void flush() {
+#ifdef ONR_RR_STATIC
+        openrr::pe::flush_log();
+#endif
         std::lock_guard l(m_);
         if (f_) fflush(f_);
     }
@@ -106,6 +126,14 @@ public:
         va_start(a, fmt);
         vsnprintf(b, sizeof b, fmt, a);
         va_end(a);
+#ifdef ONR_RR_STATIC
+        // everything also goes to the plugin's crash-watch trail
+        {
+            size_t len = std::strlen(b);
+            while (len > 0 && (b[len - 1] == '\n' || b[len - 1] == '\r')) b[--len] = '\0';
+            openrr::pe::log("%s", b);
+        }
+#endif
         SYSTEMTIME t;
         GetLocalTime(&t);
         const ULONGLONG now = GetTickCount64();
@@ -402,8 +430,12 @@ struct Ctx {
     std::atomic<bool> lx_want{false};
     int lx_logged = -1;
     std::atomic<bool> lite_want{false}, lite_started{false}, lite_built{false}, lite_failed{false};
+    std::atomic<bool> lx_built{false}, lx_failed{false};
+    std::string lx_error;
     std::thread lite_builder;
     bool lite_logged = false;
+    std::atomic<bool> f8_host_req{false};
+    bool lite_has_fp8 = false;
     std::atomic<bool> built{false};
     std::atomic<bool> building{false};
     std::atomic<bool> quit{false};    // Destroy: the builders stop at the next kernel
@@ -411,10 +443,14 @@ struct Ctx {
     Weights w;
     std::atomic<bool> weights_ok{false};
     Engine engine;
+    RuntimeTrace trace;
     bool engine_ready = false;
     std::atomic<uint32_t> state{ONR_RR_STATE_BUILDING};
     std::string message, weights_source;
     std::wstring dlssd_path, shader_dir;
+    uint32_t compiler_choice = 0;
+    bool aco = false;
+    bool aco_strict = false;
     I2 out_size{}, max_render{};
     SharedFence toVk, fromVk;
     uint64_t value = 0;
@@ -469,8 +505,14 @@ struct Ctx {
     bool direct_ok = false;            // d3d_ingest / d3d_pack read and write the game's textures (their check passed)
     Buffer dinput, doutput, dimage;    // the guides' copies, the output's rows, the denoised image (hop)
     uint64_t drecords = 0;             // recordings into the game's lists (dx ring slots)
+    // the last footprint per guide slot: GetCopyableFootprints only when the texture's description or offset changes
+    struct Footprint { D3D12_RESOURCE_DESC desc; UINT64 off, total; D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp; };
+    Footprint fps[G_COUNT] = {};
     uint32_t dq[D3dDevice::kSlots] = {}, dqnet[D3dDevice::kSlots][2] = {};
+    bool dqhop[D3dDevice::kSlots] = {};   // the slot holds a hop's first half, its RecordPost the rest
+    float dhop_ms = 0;                    // that first half's time, added to the RecordPost's
     std::wstring cache_dir;
+    std::wstring data_dir;
     // Vulkan host backend (ABI 5): dev is the game's device, the frames recorded into its command buffers
     bool vk_host = false;
     bool small_view = false;           // Vulkan host: a secondary view's feature, the colour scaled without the network
@@ -478,9 +520,14 @@ struct Ctx {
     VkQueryPool hqp[kHostSlots] = {};
     uint32_t hq[kHostSlots] = {}, hqnet[kHostSlots][2] = {};
     uint64_t hrecords = 0;
+    Buffer vhq_seq;
+    uint64_t* vhq_seq_map = nullptr;
+    uint64_t hq_seq_gen = 0;
+    uint64_t hq_expect[kHostSlots] = {};
     Buffer vinput, voutput;            // the guides' copies, the output's rows
     VkImageLayout logged_layout[G_COUNT + 1] = {};
     int logged_flow = -1;
+    int logged_paths = -1;
 
     void set_message(const std::string& s) {
         message = s;
@@ -488,35 +535,91 @@ struct Ctx {
     }
 };
 
+std::string format_pipeline_error(const Ctx* c, const char* backend, const char* stage, const std::string& kernel,
+                                  const std::string& underlying) {
+    if (underlying.rfind("[backend=", 0) == 0) return underlying;
+    const auto& info = c->dev.info();
+    const char* aco_target = onr::arch::aco_target_for_mach(info.elf_mach);
+    std::string pkg = utf8(c->shader_dir);
+    if (c->dev.info().is_radv && !c->use_d3d) {
+        pkg = utf8(c->shader_dir) + " (radv-native-aco)";
+    } else if (c->aco) {
+        pkg = utf8(c->data_dir) + "\\aco\\" + (aco_target ? aco_target : "none") + "\\openrr-d3d12-v1";
+#ifdef OPENRR_TEST_HOOKS
+        if (const char* env_dir = getenv("ONR_ACO_DIR"); env_dir && *env_dir) pkg = env_dir;
+#endif
+    }
+    char hdr[512];
+    snprintf(hdr, sizeof hdr, "[backend=%s arch=%s mach=0x%x target=%s pkg=%s stage=%s kernel=%s]: ",
+             backend, onr::arch::arch_name(info.arch), info.elf_mach, aco_target ? aco_target : "none",
+             pkg.c_str(), stage, kernel.empty() ? "<none>" : kernel.c_str());
+    return std::string(hdr) + underlying;
+}
+
+void load_named(Ctx* c, Kernels& k, Gpu& d, const char* backend, const char* stage, const std::vector<std::string>& names,
+                const char* lite = nullptr) {
+    for (const auto& n : names) {
+        if (c->quit) throw std::runtime_error("destroyed while building");
+        try {
+            lite ? k.load_required_variants(d, utf8(c->shader_dir), {n}, lite) : k.load(d, utf8(c->shader_dir), {n});
+        } catch (const std::exception& e) {
+            throw std::runtime_error(format_pipeline_error(c, backend, stage, lite ? (n + lite) : n, e.what()));
+        }
+    }
+}
+
 // optional: the enc0 halves with the 64-byte record, for a depth of field guide or a responsivity mask
-void load_wide(Kernels& k, Gpu& d, const std::wstring& dir) {
+void load_wide(Ctx* c, Kernels& k, Gpu& d, const char* backend) {
     for (const char* n : {"enc0_attr_f_w", "enc0_stage_32_64_f_w", "d3d_enc0_attr_f_w"}) {
         if (!strncmp(n, "d3d_", 4) && !k.has("d3d_enc0_attr_f")) continue;
         try {
-            k.load(d, utf8(dir), {n});
+            load_named(c, k, d, backend, "wide", {n});
         } catch (const std::exception& e) {
+            if (c->aco || (!c->use_d3d && c->dev.info().is_radv)) throw;
             g_log("%s not loaded (the responsivity mask and the depth of field guide are left out): %s", n, e.what());
         }
     }
 }
 
-// the small levels without barriers between them (Engine::flow_kernel_names); without them each keeps its barrier
-void load_flow(Kernels& k, Gpu& d, const std::wstring& dir) {
+// the small levels without barriers between them (Engine::flow_kernel_names), only with ONR_RR_FLOW=1; without them
+// each keeps its barrier
+void load_flow(Ctx* c, Kernels& k, Gpu& d, const char* backend) {
+    if (!flow_env_enabled()) return;
     try {
-        k.load(d, utf8(dir), Engine::flow_kernel_names());
+        load_named(c, k, d, backend, "flow", Engine::flow_kernel_names());
     } catch (const std::exception& e) {
+        if (c->aco) throw;
         g_log("small levels with barriers (flow kernels not loaded): %s", e.what());
     }
 }
 
 void build_lite(Ctx* c);
 
-// one kernel at a time, so a Destroy during the build waits for one pipeline, not for all of them
-void load_each(Ctx* c, Kernels& k, Gpu& d, const std::vector<std::string>& names, const char* lite = nullptr) {
-    for (const auto& n : names) {
-        if (c->quit) throw std::runtime_error("destroyed while building");
-        lite ? k.load_lite(d, utf8(c->shader_dir), {n}, lite) : k.load(d, utf8(c->shader_dir), {n});
+void load_vk_net_all(Ctx* c, Kernels& k, const std::vector<std::string>& names) {
+    const char* be = c->vk_host ? "vulkan-host" : "vulkan-bridge";
+    load_named(c, k, c->dev, be, "base", names);
+    if (c->vk_host && c->direct_ok) {
+        try {
+            load_named(c, k, c->dev, be, "direct", {"d3d_downsample", "d3d_downsample_tl"});
+        } catch (const std::exception& e) {
+            if (c->aco) throw;
+            g_log("downsample into the output image off: %s", e.what());
+        }
+        try {
+            load_named(c, k, c->dev, be, "direct", {"d3d_enc0_attr_f", "d3d_ae"});
+        } catch (const std::exception& e) {
+            if (c->aco) throw;
+            g_log("guides through the ingest: %s", e.what());
+        }
     }
+    load_wide(c, k, c->dev, be);
+    load_flow(c, k, c->dev, be);
+}
+
+void resolve_compiler(Ctx* c, bool vulkan_backend);
+
+const char* active_compiler_label(const Ctx* c) {
+    return (c->aco || (!c->use_d3d && c->dev.info().is_radv)) ? "ACO" : "LLPC";
 }
 
 void build_network(Ctx* c) {
@@ -534,50 +637,50 @@ void build_network(Ctx* c) {
         Kernels& k = c->net;
         if (c->use_d3d) {
             const uint32_t h0 = c->dx->cache_hits(), m0 = c->dx->cache_misses();
-            try {
-                k.load(*c->dx, utf8(c->shader_dir), names);
+            auto load_d3d_net_all = [&]() {
+                load_named(c, k, *c->dx, "d3d12", "base", names);
                 try {   // optional: the downsample straight into the output texture (without them, d3d_pack)
-                    k.load(*c->dx, utf8(c->shader_dir), {"d3d_downsample", "d3d_downsample_tl"});
+                    load_named(c, k, *c->dx, "d3d12", "direct", {"d3d_downsample", "d3d_downsample_tl"});
                 } catch (const std::exception& e) {
+                    if (c->aco) throw;
                     g_log("downsample into the output texture off: %s", e.what());
                 }
                 try {   // optional: the guides read from the game's textures by the network (without them, the ingest)
-                    k.load(*c->dx, utf8(c->shader_dir), {"d3d_enc0_attr_f", "d3d_ae"});
+                    load_named(c, k, *c->dx, "d3d12", "direct", {"d3d_enc0_attr_f", "d3d_ae"});
                 } catch (const std::exception& e) {
+                    if (c->aco) throw;
                     g_log("guides through the ingest: %s", e.what());
                 }
-                load_wide(k, *c->dx, c->shader_dir);
-                load_flow(k, *c->dx, c->shader_dir);
-                g_log("network kernels ready on D3D12 (%zu pipelines: %u ELFs from the cache, %u built) in %.1f s", names.size(), c->dx->cache_hits() - h0, c->dx->cache_misses() - m0,
+                load_wide(c, k, *c->dx, "d3d12");
+                load_flow(c, k, *c->dx, "d3d12");
+            };
+            try {
+                load_d3d_net_all();
+                g_log("network kernels ready on D3D12 (%zu pipelines: %u ELFs from the cache, %u built, compiler=%s) in %.1f s",
+                      names.size(), c->dx->cache_hits() - h0, c->dx->cache_misses() - m0, c->aco ? "ACO" : "LLPC",
                       std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
             } catch (const std::exception& e) {
                 std::lock_guard l(c->m);
                 k.unload(*c->dx);
-                // the network never ran on D3D12 here: the frames simply go to Vulkan from now on
-                if (c->engine_ready) throw;
+                // the network never ran on D3D12 here: the frames simply go to Vulkan from now on (when !aco_strict)
+                if (c->engine_ready || c->aco_strict) throw;
                 c->use_d3d = false;
                 c->d3d_message = std::string("a network kernel did not build on D3D12: ") + e.what();
                 g_log("D3D12 backend off, Vulkan from now on: %s", c->d3d_message.c_str());
+                resolve_compiler(c, true);
                 t0 = std::chrono::steady_clock::now();
             }
         }
         if (!c->use_d3d) {
-            load_each(c, k, c->dev, names);
-            if (c->vk_host && c->direct_ok) {
-                try {
-                    k.load(c->dev, utf8(c->shader_dir), {"d3d_downsample", "d3d_downsample_tl"});
-                } catch (const std::exception& e) {
-                    g_log("downsample into the output image off: %s", e.what());
-                }
-                try {
-                    k.load(c->dev, utf8(c->shader_dir), {"d3d_enc0_attr_f", "d3d_ae"});
-                } catch (const std::exception& e) {
-                    g_log("guides through the ingest: %s", e.what());
-                }
+            try {
+                load_vk_net_all(c, k, names);
+            } catch (...) {
+                std::lock_guard l(c->m);
+                k.unload(c->dev);
+                throw;
             }
-            load_wide(k, c->dev, c->shader_dir);
-            load_flow(k, c->dev, c->shader_dir);
-            g_log("network kernels ready (%zu pipelines) in %.1f s", names.size(),
+            g_log("network kernels ready (%zu pipelines: %u from .nrb cache, %u built, compiler=%s) in %.1f s",
+                  names.size(), c->dev.aco_cache_hits(), c->dev.aco_cache_misses(), active_compiler_label(c),
                   std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
         }
         if (c->lite_want && !c->lite_started.exchange(true)) build_lite(c);
@@ -590,25 +693,133 @@ void build_network(Ctx* c) {
     c->building = false;
 }
 
+// Build-declared fast-mode variants matching gpu/fastmode.cmake & asi/build/build_shaders.py (40 _lt, 4 _lx).
+static const std::vector<std::string>& declared_core_lt_stems() {
+    static const std::vector<std::string> v = {
+        "pooled_history2", "enc0_attr_f", "post_f", "downsample", "downsample_tl", "dfn_export", "dfn_import",
+        "post_dlt_f", "enc0_stage_32_64_f", "enc_stage_64_64_96_f", "enc_stage_96_128_128_f",
+        "enc_stage_128_128_160_f", "enc_stage_160_256_160_f", "enc_stage_160_256_0_f",
+        "dec_up_160_256_160_f", "dec_dfn_160_256_f", "dec_up_128_128_160_f", "dec_dfn_128_128_f",
+        "dec_up_96_128_128_f", "dec_dfn_96_128_f", "dec_up_64_64_96_f", "dec_dfn_64_64_f",
+        "dec_up_32_64_64_f", "dec_head_32_64_f",
+    };
+    return v;
+}
+static const std::vector<std::string>& declared_wide_lt_stems() {
+    static const std::vector<std::string> v = {"enc0_attr_f_w", "enc0_stage_32_64_f_w"};
+    return v;
+}
+static const std::vector<std::string>& declared_direct_lt_stems() {
+    static const std::vector<std::string> v = {"d3d_downsample", "d3d_downsample_tl", "d3d_enc0_attr_f", "d3d_enc0_attr_f_w"};
+    return v;
+}
+static const std::vector<std::string>& declared_lx_stems() {
+    static const std::vector<std::string> v = {
+        "enc0_stage_32_64_f", "dec_up_32_64_64_f", "dec_head_32_64_f", "enc0_stage_32_64_f_w",
+    };
+    return v;
+}
+
 // the cheaper kernels, beside the running ones; until they are ready the frames stay on the others
 void build_lite(Ctx* c) {
     Gpu& d = c->use_d3d ? static_cast<Gpu&>(*c->dx) : static_cast<Gpu&>(c->dev);
+    const char* be = c->vk_host ? "vulkan-host" : c->use_d3d ? "d3d12" : "vulkan-bridge";
     auto t0 = std::chrono::steady_clock::now();
+    auto collect_lt_stems = [&]() {
+        std::vector<std::string> req = declared_core_lt_stems();
+        for (const auto& s : declared_wide_lt_stems()) req.push_back(s);
+        if (c->use_d3d || (c->vk_host && c->direct_ok) || c->net.has("d3d_downsample") || c->net.has("d3d_enc0_attr_f")) {
+            for (const auto& s : declared_direct_lt_stems()) req.push_back(s);
+        }
+        if (flow_env_enabled() || c->net.has("enc_stage_96_128_128_fl")) {
+            for (const auto& s : Engine::flow_kernel_names()) req.push_back(s);
+        }
+        return req;
+    };
     try {
-        const uint32_t h0 = c->use_d3d ? c->dx->cache_hits() : 0, m0 = c->use_d3d ? c->dx->cache_misses() : 0;
-        load_each(c, c->net_lite, d, c->net.names(), "_lt");
-        if (c->net_lite.names().empty()) throw std::runtime_error("no *_lt kernels in the shader folder");
-        load_each(c, c->net_lx, d, c->net.names(), "_lx");
-        const size_t lx = c->net_lx.names().size();
-        if (lx) load_each(c, c->net_lx, d, c->net.names(), "_lt");
-        g_log("experimental level: %zu kernels of its own%s", lx, lx ? "" : " (not in the shader folder, it runs as the fast mode)");
-        g_log("fast mode kernels ready (%zu pipelines: %u ELFs from the cache, %u built) in %.2f s", c->net_lite.names().size(),
-              c->use_d3d ? c->dx->cache_hits() - h0 : 0, c->use_d3d ? c->dx->cache_misses() - m0 : 0,
+        const uint32_t h0 = c->use_d3d ? c->dx->cache_hits() : c->dev.aco_cache_hits(),
+                       m0 = c->use_d3d ? c->dx->cache_misses() : c->dev.aco_cache_misses();
+        const std::vector<std::string> lt_req = collect_lt_stems();
+        load_named(c, c->net_lite, d, be, "fast_lt", lt_req, "_lt");
+        if (c->net_lite.names().size() != lt_req.size())
+            throw std::runtime_error(format_pipeline_error(c, be, "fast_lt", "<set>",
+                "loaded fast_lt kernel count mismatch (" + std::to_string(c->net_lite.names().size()) + "/" + std::to_string(lt_req.size()) + ")"));
+        bool lx_ok = false;
+        std::string lx_err;
+        try {
+            const auto& lx_req = declared_lx_stems();
+            load_named(c, c->net_lx, d, be, "fast_lx", lx_req, "_lx");
+            if (c->net_lx.names().size() != lx_req.size())
+                throw std::runtime_error(format_pipeline_error(c, be, "fast_lx", "<set>",
+                    "loaded fast_lx kernel count mismatch (" + std::to_string(c->net_lx.names().size()) + "/" + std::to_string(lx_req.size()) + ")"));
+            std::vector<std::string> backfill;
+            for (const auto& s : lt_req) {
+                if (!c->net_lx.has(s)) backfill.push_back(s);
+            }
+            load_named(c, c->net_lx, d, be, "fast_lx", backfill, "_lt");
+            if (c->net_lx.names().size() != c->net_lite.names().size())
+                throw std::runtime_error(format_pipeline_error(c, be, "fast_lx", "<set>",
+                    "fast_lx combined kernel count mismatch (" + std::to_string(c->net_lx.names().size()) + "/" + std::to_string(c->net_lite.names().size()) + ")"));
+            lx_ok = true;
+        } catch (const std::exception& e) {
+            c->net_lx.unload(d);
+            lx_err = e.what();
+        }
+        std::string fail_msg;
+        {
+            std::lock_guard l(c->m);
+            if (lx_ok) {
+                c->lx_built = true;
+                c->lx_failed = false;
+                c->lx_error.clear();
+            } else {
+                c->lx_built = false;
+                c->lx_failed = true;
+                c->lx_error = lx_err;
+                if (c->lx_want) {
+                    c->engine.set_lite(nullptr);
+                    c->engine.set_lite_on(false);
+                    c->engine.set_deep_on(false);
+                    if (c->aco_strict) {
+                        c->state = ONR_RR_STATE_FAILED;
+                        fail_msg = lx_err;
+                        c->set_message(fail_msg);
+                    }
+                }
+            }
+            if (fail_msg.empty()) c->lite_built = true;
+        }
+        if (!fail_msg.empty()) {
+            g_log("experimental fast mode not available: %s", lx_err.c_str());
+            return;
+        }
+        g_log("experimental level: %zu kernels of its own%s",
+              lx_ok ? declared_lx_stems().size() : size_t(0),
+              lx_ok ? "" : (std::string(" (unavailable: ") + lx_err + ")").c_str());
+        g_log("fast mode kernels ready (%zu pipelines: %u from cache, %u built, compiler=%s) in %.2f s",
+              c->net_lite.names().size(),
+              (c->use_d3d ? c->dx->cache_hits() : c->dev.aco_cache_hits()) - h0,
+              (c->use_d3d ? c->dx->cache_misses() : c->dev.aco_cache_misses()) - m0,
+              active_compiler_label(c),
               std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
-        c->lite_built = true;
     } catch (const std::exception& e) {
-        { std::lock_guard l(c->m); c->net_lite.unload(d); c->net_lx.unload(d); }
-        c->lite_failed = true;
+        {
+            std::lock_guard l(c->m);
+            c->engine.set_lite(nullptr);
+            c->engine.set_lite_on(false);
+            c->engine.set_deep_on(false);
+            c->net_lite.unload(d);
+            c->net_lx.unload(d);
+            c->lite_built = false;
+            c->lite_failed = true;
+            c->lx_built = false;
+            c->lx_failed = true;
+            c->lx_error = e.what();
+            if (c->aco_strict) {
+                c->state = ONR_RR_STATE_FAILED;
+                c->set_message(e.what());
+            }
+        }
         g_log("fast mode not available: %s", e.what());
     }
 }
@@ -696,6 +907,7 @@ EngineFrame engine_frame(const Ctx* c, const Job& j) {
     memcpy(ef.view_to_clip, f.view_to_clip, sizeof ef.view_to_clip);
     ef.depth_sign = sign;
     ef.reset = (f.flags & ONR_RR_FRAME_RESET) != 0;
+    ef.mv_jittered = (f.flags & ONR_RR_FRAME_MV_JITTERED) != 0;
     if (j.in[G_TL].present) ef.transparency = c->guides[G_TL].addr;
     if (j.in[G_DM].present) ef.disocclusion = c->guides[G_DM].addr;
     if (j.in[G_SSS].present) ef.sss = c->guides[G_SSS].addr;
@@ -720,9 +932,15 @@ struct Rec {
     const char* ingest = "ingest";
     const char* pack = "pack";
     uint32_t out_fmt = 0, out_pitch = 0;   // D3D12 straight into the output texture: TF_RGBA16F | 256, x | y << 16
+    ID3D12GraphicsCommandList* diagnostic_list = nullptr;
 };
 
+template <size_t N> void rr_marker(ID3D12GraphicsCommandList* list, const wchar_t (&label)[N]) {
+    if (list) list->SetMarker(0, label, sizeof(label));
+}
+
 void record_pack(Ctx* c, Rec& r, Job& j) {
+    rr_marker(r.diagnostic_list, L"OpenRR: pack output");
     if (!c->out16.addr) c->out16 = r.d.create(size_t(c->out_size.x) * c->out_size.y * 8 + 64);
     r.d.barrier();
     PackPC pk{c->out16.addr, r.output, c->out_size, c->out_size, r.out_fmt ? r.out_pitch : j.out_pitch, r.out_fmt ? r.out_fmt : uint32_t(j.out_tf)};
@@ -801,16 +1019,15 @@ void record_frame(Ctx* c, Rec& r, Job& j, bool network, bool split = false) {
             if (((ip.g[s][2] >> 16) & 12u) != 0) {
                 ip.dst[s] = 0;
             } else {
-                if (!c->guides[s].addr) {
+                if (!c->guides[s].addr)
                     c->guides[s] = d.create(size_t(c->guide_size.x) * c->guide_size.y * bpp8[s] + 64);
-                    d.fill(c->guides[s], 0, c->guides[s].size, 0);
-                }
                 ip.dst[s] = gt.buf[s] = c->guides[s].addr;
                 ingest = true;
             }
         }
     }
     if (ingest) {
+        rr_marker(r.diagnostic_list, L"OpenRR: ingest inputs");
         const size_t bpp8[8] = {8, 4, 4, 8, 2, 4, 4, 2};
         for (int s = 0; s < 8; ++s) {
             if (!direct && (network || s == G_COLOR) && !c->guides[s].addr)
@@ -818,6 +1035,12 @@ void record_frame(Ctx* c, Rec& r, Job& j, bool network, bool split = false) {
         }
         d.dispatch(r.k[r.ingest], &ip, sizeof ip, div_up(render.x, 16), div_up(render.y, 16));
     }
+    // the layer read by d3d_downsample_tl from the game's texture (the output written in place, no hop): not ingested
+    const bool tl_view = network && !split && direct && !c->vk_host && j.in[G_TL].present && j.in[G_TL].direct && r.out_fmt && c->engine.output_image_ok();
+    // the SSS guide and the mask (clamped or not; without its diagnostic invert or scale) read by d3d_enc0_attr from the game's views
+    const bool sss_view = direct && !c->vk_host && j.in[G_SSS].present && j.in[G_SSS].direct;
+    const bool dm_view = direct && !c->vk_host && j.in[G_DM].present && j.in[G_DM].direct &&
+                         !(f.flags & ONR_RR_FRAME_DM_INVERT) && !(f.disocclusion_mask_scale > 0.0f && f.disocclusion_mask_scale != 1.0f);
     if (network) {
         // the optional guides the game gave, in dispatches of their own (eight slots each, the others without a
         // destination): the transparency layer, ColorBeforeTransparency and the layer's opacity as rgba16f, the
@@ -832,7 +1055,7 @@ void record_frame(Ctx* c, Rec& r, Job& j, bool network, bool split = false) {
         int k = 0;
         for (int o = 0; o < int(std::size(opt)); ++o) {
             const Copy& cp = j.in[opt[o]];
-            if (!cp.present) continue;
+            if (!cp.present || (opt[o] == G_TL && tl_view) || (opt[o] == G_SSS && sss_view) || (opt[o] == G_DM && dm_view)) continue;
             Buffer& gb = c->guides[opt[o]];
             if (!gb.addr) gb = d.create(size_t(c->guide_size.x) * c->guide_size.y * bpp[o] + 64);   // fully written below
             tp.dst[k] = gb.addr;
@@ -865,13 +1088,17 @@ void record_frame(Ctx* c, Rec& r, Job& j, bool network, bool split = false) {
     }
     if (network) {
         d.barrier();
-        const bool flow = g_flow ? strcmp(g_flow, "0") != 0 : !c->vk_host && g_live.load() == 1;
+        const bool flow = flow_env_enabled();
         c->engine.set_flow(flow);
         if (int(flow) != c->logged_flow) {
-            g_log("small levels: %s", flow ? "row flags" : c->vk_host && !g_flow ? "barriers (Vulkan host)" : "barriers (more than one network, or ONR_RR_FLOW=0)");
+            g_log("small levels: %s", flow ? "row flags (ONR_RR_FLOW=1)" : "barriers");
             c->logged_flow = int(flow);
         }
-        const EngineFrame ef = engine_frame(c, j);
+        EngineFrame ef = engine_frame(c, j);
+        if (tl_view) ef.transparency = 0, ef.transparency_view = G_TL + 1, ef.transparency_origin = j.in[G_TL].x | j.in[G_TL].y << 16;
+        auto view = [&](int s) { return 1ull << 63 | uint64_t(j.in[s].x | j.in[s].y << 16) << 8 | uint64_t(s); };
+        if (sss_view) ef.sss = view(G_SSS);
+        if (dm_view) ef.disocclusion = view(G_DM) | uint64_t((f.flags & ONR_RR_FRAME_DM_CLAMP) != 0) << 40;
         Guides g{c->guides[G_COLOR].addr, c->guides[G_ALBEDO].addr, c->guides[G_SPEC].addr, c->guides[G_NORMALS].addr,
                  c->guides[G_ROUGH].addr, c->guides[G_DEPTH].addr, c->guides[G_MV].addr, c->guides[G_HIT].addr, direct ? &gt : nullptr};
         r.qnet[0] = d.queries();
@@ -886,7 +1113,15 @@ void record_frame(Ctx* c, Rec& r, Job& j, bool network, bool split = false) {
         const bool img = r.out_fmt && c->engine.output_image_ok();
         c->engine.set_output_image(img);
         if (!img && !c->out16.addr) c->out16 = d.create(size_t(c->out_size.x) * c->out_size.y * 8 + 64);
+        rr_marker(r.diagnostic_list, L"OpenRR: network and downsample");
         c->engine.record(ef, g, img ? uint64_t(r.out_pitch) : c->out16.addr);
+        const bool actual_sampler=EngineRuntimeTraceAccess::sampled(c->engine);
+        const bool actual_flow=EngineRuntimeTraceAccess::flow(c->engine);
+        const int paths=int(direct) | int(img)<<1 | int(actual_sampler)<<2 | int(actual_flow)<<3;
+        if(c->use_d3d && paths!=c->logged_paths) {
+            g_log("runtime paths: direct_guides=%u direct_output=%u sampler=%u flow=%u",unsigned(direct),unsigned(img),unsigned(actual_sampler),unsigned(actual_flow));
+            c->logged_paths=paths;
+        }
         c->engine.set_output_image(false);
         d.stamp();
         r.qnet[1] = d.queries();
@@ -1074,7 +1309,7 @@ void log_vram(Ctx* c);
 template <class F>
 bool prepare_network(Ctx* c, Gpu& d, I2 render, F&& idle) {
     if (c->state != ONR_RR_STATE_FAILED && c->built && !c->engine_ready) {
-        c->engine.init(d, c->net, c->w);
+        c->engine.init(d, c->net, c->w, c->dev.info().fp8_coopmat);
         c->engine.set_fp8_ok(c->dev.info().fp8_coopmat);
         if (getenv("ONR_RR_NO_SAMPLER")) c->engine.set_history_sampler(false);   // measurements
         c->engine_ready = true;
@@ -1091,11 +1326,22 @@ bool prepare_network(Ctx* c, Gpu& d, I2 render, F&& idle) {
     }
     const bool network = c->engine_ready && c->state == ONR_RR_STATE_READY && c->engine.kernels() != nullptr;
     if (network && c->lite_want && !c->lite_started.exchange(true)) c->lite_builder = std::thread(build_lite, c);
+    if (network && c->lx_want && c->lx_failed) {
+        c->engine.set_lite(nullptr);
+        c->engine.set_lite_on(false);
+        c->engine.set_deep_on(false);
+        if (c->aco_strict) {
+            c->state = ONR_RR_STATE_FAILED;
+            c->set_message(c->lx_error);
+            return false;
+        }
+    }
     if (network && c->lite_built) {
-        const bool lx = c->lx_want && !c->net_lx.names().empty();
-        c->engine.set_lite(lx ? &c->net_lx : &c->net_lite);
+        const bool lx = c->lx_want && c->lx_built && !c->net_lx.names().empty();
+        const bool use_lite = c->lite_want && (!c->lx_want || lx);
+        c->engine.set_lite(lx ? &c->net_lx : (use_lite ? &c->net_lite : nullptr));
         c->engine.set_deep_on(lx);
-        c->engine.set_lite_on(c->lite_want);
+        c->engine.set_lite_on(use_lite);
         if (c->lite_want && c->lx_logged != int(lx)) {
             c->lx_logged = lx;
             g_log("experimental level %s at frame %llu", lx ? "on" : "off", (unsigned long long)c->frames);
@@ -1199,11 +1445,15 @@ int32_t enqueue(Ctx* c, Job& j, ID3D12CommandQueue* q, uint32_t* exported = null
     return ONR_RR_OK;
 }
 
-void teardown_ctx_resources(Ctx* c) {
+void stop_ctx_threads(Ctx* c) {
     c->quit = true; // Stop builders before retiring resources or returning the game device.
     if (c->builder.joinable()) c->builder.join();
     if (c->lite_builder.joinable()) c->lite_builder.join();
     if (c->stats_thread.joinable()) c->stats_thread.join();
+}
+
+void teardown_ctx_resources(Ctx* c) {
+    stop_ctx_threads(c);
     if (c->dev.vk() && !c->vk_host) vkDeviceWaitIdle(c->dev.vk());
     c->engine.destroy();
     if (c->dx || c->dev.vk()) {
@@ -1228,7 +1478,8 @@ void teardown_ctx_resources(Ctx* c) {
             }
     }
     if (c->dev.vk()) {
-        for (Buffer* b : {&c->vinput, &c->voutput})
+        c->vhq_seq_map = nullptr;
+        for (Buffer* b : {&c->vinput, &c->voutput, &c->vhq_seq})
             if (b->addr) c->dev.destroy(*b);
     }
 }
@@ -1270,6 +1521,7 @@ bool ctx_retired(Ctx* c) {
             if (!c->hq[s] || !c->hqp[s]) continue;
             if (!c->dev.pool_retired(c->hqp[s])) return false;
             c->hq[s] = 0;
+            c->hq_expect[s] = 0;
         }
     }
     return true;
@@ -1308,7 +1560,7 @@ void sweep_retired(VkDevice destroyed_vk = VK_NULL_HANDLE) {
 
 void destroy_ctx(Ctx* c) {
     --g_live;
-    teardown_ctx_resources(c);
+    stop_ctx_threads(c);
     sweep_retired();
     if (!ctx_retired(c)) {
         std::lock_guard l(g_retired_m);
@@ -1318,11 +1570,74 @@ void destroy_ctx(Ctx* c) {
     free_ctx(c);
 }
 
-std::string gpu_reason(const Device& d) {
+// RX 7000 / RDNA 3.5 (AMD, cooperative matrices without FP8), experimental: the kernels built for RDNA3's fragment layout
+// (ONR_GFX11) in shaders-gfx11 beside shaders
+bool rdna3(const Device& d, const std::wstring& shaders) {
     const auto& i = d.info();
-    if (!i.coopmat) return i.name + ": no cooperative matrices (needs an RDNA4 GPU)";
-    if (!i.fp8_coopmat) return i.name + ": not an RDNA4 GPU (RX 7000 and RX 6000 support comes later)";
+    std::error_code ec;
+    const bool is_rdna3 = i.arch == onr::arch::GpuArch::Rdna3 || (i.vendor == 0x1002 && i.coopmat && !i.fp8_coopmat);
+    return is_rdna3 && std::filesystem::is_directory(shaders + L"-gfx11", ec);
+}
+
+std::string gpu_reason(const Device& d, const std::wstring& shaders) {
+    const auto& i = d.info();
+    if (!i.coopmat) return i.name + ": no cooperative matrices (needs an RDNA4 or RDNA3 GPU)";
+    if (!i.fp8_coopmat && !rdna3(d, shaders)) return i.name + ": not an RDNA4 GPU, and no RDNA3 kernels (openrr-amd\\shaders-gfx11)";
     return {};
+}
+
+void pick_kernels(Ctx* c) {
+    if (!rdna3(c->dev, c->shader_dir)) return;
+    c->shader_dir += L"-gfx11";
+    g_log("RDNA3 GPU (experimental): kernels from %s", utf8(c->shader_dir).c_str());
+}
+
+void resolve_compiler(Ctx* c, bool vulkan_backend) {
+    c->dev.set_compiler_log([](const std::string& line) { g_log("%s", line.c_str()); });
+    const auto& info = c->dev.info();
+    if (vulkan_backend && info.is_radv) {
+        // Linux Wine/Proton + Mesa RADV compiles SPIR-V directly through native ACO (with SPIR-V
+        // NoContraction precision hardening in vk.cpp) rather than Windows PAL .nrp records.
+        c->aco = false;
+        c->aco_strict = false;
+        c->dev.set_compiler(false, false, utf8(c->cache_dir), utf8(c->shader_dir));
+        g_log("compiler resolved: RADV native ACO (%s, %s)", info.name.c_str(), info.driver_info.c_str());
+        return;
+    }
+    const char* aco_target = onr::arch::aco_target_for_mach(info.elf_mach);
+    const char* be = vulkan_backend ? (c->vk_host ? "vulkan-host" : "vulkan-bridge") : "d3d12";
+    const bool is_rdna4 = aco_target != nullptr || info.arch == onr::arch::GpuArch::Rdna4 || info.fp8_coopmat;
+    if (is_rdna4) {
+        if (!aco_target)
+            throw std::runtime_error(format_pipeline_error(c, be, "resolve_compiler", "<none>",
+                                                           "RDNA4 device has unresolved offline ACO target"));
+        c->aco = true;
+        c->aco_strict = true;
+    } else {
+        c->aco = false;
+        c->aco_strict = false;
+    }
+    g_log("compiler resolved (%s): %s (target=%s, arch=%s, mach=0x%x)",
+          vulkan_backend ? "Vulkan" : "D3D12",
+          c->aco_strict ? "ACO strict" : c->aco ? "ACO" : "LLPC",
+          aco_target ? aco_target : "none",
+          onr::arch::arch_name(info.arch),
+          info.elf_mach);
+    c->dev.set_compiler(c->aco, vulkan_backend && c->aco_strict, utf8(c->cache_dir), utf8(c->shader_dir));
+    if (c->aco && vulkan_backend && !c->dev.aco_ready())
+        throw std::runtime_error(format_pipeline_error(c, be, "resolve_compiler", "<manifest>", c->dev.aco_reason()));
+}
+
+std::wstring default_data_dir(const std::wstring& dir) {
+    std::error_code ec;
+    const std::filesystem::path md(dir);
+    if (std::filesystem::exists(md / L"openrr-amd" / L"shaders", ec)) return (md / L"openrr-amd").wstring();
+    if (std::filesystem::exists(md.parent_path() / L"openrr-amd" / L"shaders", ec)) return (md.parent_path() / L"openrr-amd").wstring();
+    if (md.has_parent_path() && md.parent_path().has_parent_path() &&
+        std::filesystem::exists(md.parent_path().parent_path() / L"openrr-amd" / L"shaders", ec))
+        return (md.parent_path().parent_path() / L"openrr-amd").wstring();
+    if (std::filesystem::exists(md / L"opennr-rr" / L"shaders", ec)) return (md / L"opennr-rr").wstring();
+    return dir + L"\\openrr-amd";
 }
 
 // ------------------------------------------------------------------------------------------------ API
@@ -1336,8 +1651,25 @@ int32_t Check(const void* luid, const wchar_t* dlssd) {
         DeviceOptions o;
         o.luid = static_cast<const uint8_t*>(luid);
         o.interop = true;
-        if (!d.init(err, o)) return fail(ONR_RR_UNSUPPORTED, "Vulkan: " + err);
-        std::string why = gpu_reason(d);
+        if (!d.init(err, o)) {
+            Device d_radv;
+            std::string err_radv;
+            DeviceOptions o_radv;
+            o_radv.luid = static_cast<const uint8_t*>(luid);
+            o_radv.interop = false;
+            if (err.find("VK_KHR_external_") != std::string::npos && d_radv.init(err_radv, o_radv) &&
+                d_radv.info().is_radv) {
+                std::string why = gpu_reason(d_radv, default_data_dir(module_dir()) + L"\\shaders");
+                if (!why.empty()) return fail(ONR_RR_UNSUPPORTED, why);
+                if (dlssd) {
+                    Weights w;
+                    if (!build_weights(dlssd, w, err)) return fail(ONR_RR_UNSUPPORTED, "nvngx_dlssd.dll: " + err);
+                }
+                return ONR_RR_OK;
+            }
+            return fail(ONR_RR_UNSUPPORTED, "Vulkan: " + err);
+        }
+        std::string why = gpu_reason(d, default_data_dir(module_dir()) + L"\\shaders");
         if (!why.empty()) return fail(ONR_RR_UNSUPPORTED, why);
         if (dlssd) {
             Weights w;
@@ -1368,23 +1700,35 @@ void create_vk_host(Ctx* c, const OnrRrVkDevice& v) {
     std::string err;
     if (!c->dev.adopt(h, err)) throw std::runtime_error("Vulkan host device: " + err);
     c->vk_host = true;
+    c->lite_has_fp8 = c->dev.info().fp8_coopmat;
     c->dev.set_stamps(g_stamps);
     g_log("Vulkan host device: %s, driver %s; the runtime's queue: family %u, index %u", c->dev.info().name.c_str(),
           c->dev.info().driver_info.c_str(), v.queue_family, v.queue_index);
-    if (std::string why = gpu_reason(c->dev); !why.empty()) throw std::runtime_error(why);
-    c->kern.load(c->dev, utf8(c->shader_dir), {"ingest", "pack", "selftest"});
-    vk_selftest(c);
-    // the guides read through the game's views and the output written through its view (d3d_ kernels, set 0 = views)
+    if (std::string why = gpu_reason(c->dev, c->shader_dir); !why.empty()) throw std::runtime_error(why);
+    pick_kernels(c);
+    resolve_compiler(c, true);
+    bool try_direct_vk = false;
+    if (const char* e = getenv("ONR_RR_DIRECT"); e && !strcmp(e, "1")) try_direct_vk = true;
+    load_named(c, c->kern, c->dev, "vulkan-host", "utility", {"ingest", "pack", "selftest"});
+    load_named(c, c->kern, c->dev, "vulkan-host", "sampler", {"selftest_tex"});
     try {
-        // off unless asked for: reading the game's views hung the GPU in Indiana Jones after its features were made again
-        // (ColorBeforeTransparency, reflection MVs, DoF guide); the copies follow NGX's layouts (guides
-        // SHADER_READ_ONLY, output GENERAL) and cost ~0.2 ms
-        if (const char* e = getenv("ONR_RR_DIRECT"); !e || strcmp(e, "1")) throw std::runtime_error("the default; ONR_RR_DIRECT=1 reads them through the game's views");
-        c->kern.load(c->dev, utf8(c->shader_dir), {"d3d_ingest", "d3d_pack"});
-        c->direct_ok = true;
-        g_log("Vulkan host backend: guides read through the game's views where their formats allow, output written in place when rgba16f");
+        vk_selftest(c);
     } catch (const std::exception& e) {
-        g_log("Vulkan host backend: guides and output copied (%s)", e.what());
+        throw std::runtime_error(format_pipeline_error(c, "vulkan-host", "selftest", "selftest", e.what()));
+    }
+    // the guides read through the game's views and the output written through its view (d3d_ kernels, set 0 = views)
+    // off unless asked for: reading the game's views hung the GPU in Indiana Jones after its features were made again
+    if (!try_direct_vk) {
+        g_log("Vulkan host backend: guides and output copied (the default; ONR_RR_DIRECT=1 reads them through the game's views)");
+    } else {
+        try {
+            load_named(c, c->kern, c->dev, "vulkan-host", "direct", {"d3d_ingest", "d3d_pack"});
+            c->direct_ok = true;
+            g_log("Vulkan host backend: guides read through the game's views where their formats allow, output written in place when rgba16f");
+        } catch (const std::exception& e) {
+            if (c->aco) throw;
+            g_log("Vulkan host backend: guides and output copied (%s)", e.what());
+        }
     }
     for (uint32_t s = 0; s < 8; ++s) {
         VkQueryPoolCreateInfo qi{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
@@ -1392,6 +1736,8 @@ void create_vk_host(Ctx* c, const OnrRrVkDevice& v) {
         qi.queryCount = kMaxQueries;
         if (vkCreateQueryPool(c->dev.vk(), &qi, nullptr, &c->hqp[s]) != VK_SUCCESS) throw std::runtime_error("vkCreateQueryPool");
     }
+    c->vhq_seq = c->dev.create_host_coherent(Ctx::kHostSlots * sizeof(uint64_t), reinterpret_cast<void**>(&c->vhq_seq_map));
+    if (c->vhq_seq_map) memset(c->vhq_seq_map, 0, Ctx::kHostSlots * sizeof(uint64_t));
     g_log("backend: Vulkan host (the game's device), kernels recorded into the game's command buffer");
     c->state = ONR_RR_STATE_BUILDING;
     // A feature for a small secondary view (Indiana Jones makes one at 640x360 or less beside the main one): its
@@ -1410,36 +1756,37 @@ void create_vk_host(Ctx* c, const OnrRrVkDevice& v) {
 }
 
 int32_t Create(const OnrRrCreateInfo* in, void** out) {
-    const OnrRrVkDevice* vkd = in && in->size >= sizeof(OnrRrCreateInfo) ? in->vk_device : nullptr;
+    const OnrRrVkDevice* vkd = in && in->size >= ONR_RR_CREATE_INFO_SIZE_V3 ? in->vk_device : nullptr;
     if (!in || !out || in->size < ONR_RR_CREATE_INFO_SIZE_V1 || (!in->d3d12_device && !vkd) || !in->output_width || !in->output_height ||
         (vkd && (vkd->size < sizeof(OnrRrVkDevice) || !vkd->device || !vkd->physical_device)))
         return fail(ONR_RR_INVALID_ARGUMENT, "Create: missing arguments");
     auto* c = new Ctx;
     try {
+        const uint32_t compiler = in->size >= offsetof(OnrRrCreateInfo, compiler) + sizeof(in->compiler) ? in->compiler : 0;
+        if (compiler != 0) throw std::runtime_error("Create: release compiler override is disabled (pass compiler=0)");
+        c->compiler_choice = 0;
+        uint32_t choice = in->size >= offsetof(OnrRrCreateInfo, backend) + sizeof(in->backend) ? in->backend : uint32_t(ONR_RR_BACKEND_CHOICE_VULKAN);
+        if (choice > ONR_RR_BACKEND_CHOICE_VULKAN && !vkd) throw std::runtime_error("Create: unsupported backend choice");
+        if (choice == ONR_RR_BACKEND_CHOICE_AUTO) {
+            if (const char* e = getenv("ONR_RR_BACKEND"))
+                choice = !_stricmp(e, "vulkan") ? ONR_RR_BACKEND_CHOICE_VULKAN : !_stricmp(e, "d3d12") ? ONR_RR_BACKEND_CHOICE_D3D12 : choice;
+        }
         std::wstring dir = module_dir();
-        g_log.open(in->log_path ? std::wstring(in->log_path) : dir + L"\\openrr-amd.log");
+        g_log.open(in->log_path ? std::wstring(in->log_path) : dir + L"\\openrr-amd.log", g_live.load() == 1);
+        g_log("compiler requested: release policy (RDNA4=ACO strict, RDNA3=LLPC)");
         if (!vkd) {
             c->d3d = static_cast<ID3D12Device*>(in->d3d12_device);
             c->d3d->AddRef();
         }
-        std::wstring data;
-        if (in->data_dir) {
-            data = std::wstring(in->data_dir);
-        } else {
-            std::error_code ec;
-            const std::filesystem::path md(dir);
-            if (std::filesystem::exists(md / L"openrr-amd" / L"shaders", ec))
-                data = (md / L"openrr-amd").wstring();
-            else if (std::filesystem::exists(md.parent_path() / L"openrr-amd" / L"shaders", ec))
-                data = (md.parent_path() / L"openrr-amd").wstring();
-            else if (std::filesystem::exists(md / L"opennr-rr" / L"shaders", ec))
-                data = (md / L"opennr-rr").wstring();
-            else
-                data = dir + L"\\openrr-amd";
-        }
+        std::wstring data = in->data_dir ? std::wstring(in->data_dir) : default_data_dir(dir);
+        c->data_dir = data;
         c->shader_dir = data + L"\\shaders";
         c->dlssd_path = in->dlssd_path ? in->dlssd_path : L"";
         c->weights_source = utf8(c->dlssd_path);
+        wchar_t local[MAX_PATH] = {};
+        c->cache_dir = in->cache_dir ? std::wstring(in->cache_dir)
+                       : GetEnvironmentVariableW(L"LOCALAPPDATA", local, MAX_PATH) ? std::wstring(local) + L"\\OpenRR\\cache"
+                                                                                 : std::wstring();
         c->out_size = {int32_t(in->output_width), int32_t(in->output_height)};
         c->max_render = {int32_t(in->max_render_width), int32_t(in->max_render_height)};
         g_log("OpenRR " ONR_RR_RUNTIME_VERSION " runtime: create, output %dx%d, render up to %dx%d, shaders %s, weights from %s", c->out_size.x,
@@ -1458,40 +1805,38 @@ int32_t Create(const OnrRrCreateInfo* in, void** out) {
         o.descriptors = true;
         std::string err;
         if (!c->dev.init(err, o)) throw std::runtime_error("Vulkan: " + err);
+        c->lite_has_fp8 = c->dev.info().fp8_coopmat;
         // timestamps only at the submit's boundaries: one around every dispatch serialises the ones without a barrier
         c->dev.set_stamps(g_stamps);
         g_log("Vulkan device: %s, driver %s", c->dev.info().name.c_str(), c->dev.info().driver_info.c_str());
-        std::string why = gpu_reason(c->dev);
+        std::string why = gpu_reason(c->dev, c->shader_dir);
         if (!why.empty()) {
             destroy_ctx(c);
             return fail(ONR_RR_UNSUPPORTED, why);
         }
+        pick_kernels(c);
         c->fn.memProps = reinterpret_cast<PFN_vkGetMemoryWin32HandlePropertiesKHR>(vkGetDeviceProcAddr(c->dev.vk(), "vkGetMemoryWin32HandlePropertiesKHR"));
         c->fn.importSem = reinterpret_cast<PFN_vkImportSemaphoreWin32HandleKHR>(vkGetDeviceProcAddr(c->dev.vk(), "vkImportSemaphoreWin32HandleKHR"));
         if (!c->fn.memProps || !c->fn.importSem) throw std::runtime_error("Win32 interop entry points missing");
-        c->kern.load(c->dev, utf8(c->shader_dir), {"ingest", "pack"});
+        resolve_compiler(c, choice == ONR_RR_BACKEND_CHOICE_VULKAN);
         // D3D12 backend: only for a host that knows Record (ABI 4 sets the choice), and only after its self-test
-        uint32_t choice = in->size > ONR_RR_CREATE_INFO_SIZE_V1 ? in->backend : uint32_t(ONR_RR_BACKEND_CHOICE_VULKAN);
-        if (choice == ONR_RR_BACKEND_CHOICE_AUTO) {
-            if (const char* e = getenv("ONR_RR_BACKEND"))   // fallback when host leaves Backend=auto
-                choice = !_stricmp(e, "vulkan") ? ONR_RR_BACKEND_CHOICE_VULKAN : !_stricmp(e, "d3d12") ? ONR_RR_BACKEND_CHOICE_D3D12 : choice;
-        }
         if (choice != ONR_RR_BACKEND_CHOICE_VULKAN) {
-            wchar_t local[MAX_PATH] = {};
-            c->cache_dir = in->cache_dir ? std::wstring(in->cache_dir)
-                           : GetEnvironmentVariableW(L"LOCALAPPDATA", local, MAX_PATH) ? std::wstring(local) + L"\\OpenRR\\cache"
-                                                                                     : std::wstring();
             try {
                 d3d_setup(c);
                 c->use_d3d = true;
                 g_log("backend: D3D12 (%s), kernels recorded into the game's command list; ELF cache %s", choice == ONR_RR_BACKEND_CHOICE_D3D12 ? "asked for" : "auto",
                       utf8(c->cache_dir).c_str());
             } catch (const std::exception& e) {
+                if (c->aco_strict) throw;
                 c->d3d_message = e.what();
                 g_log("backend: Vulkan, the D3D12 path is not usable here: %s", e.what());
+                resolve_compiler(c, true);
             }
         } else {
             g_log("backend: Vulkan (%s)", in->size > ONR_RR_CREATE_INFO_SIZE_V1 ? "asked for" : "host without the backend choice");
+        }
+        if (!c->use_d3d) {
+            load_named(c, c->kern, c->dev, "vulkan-bridge", "utility", {"ingest", "pack"});
         }
         c->toVk.create(c->d3d, c->dev, c->fn);
         c->fromVk.create(c->d3d, c->dev, c->fn);
@@ -1678,6 +2023,17 @@ void stats_record(Ctx* c, const Job& j, ID3D12GraphicsCommandList* cl) {
     }
 }
 
+int32_t check_output_rect(const Ctx& c, const OnrRrTexture& output, uint64_t width, uint32_t height) {
+    const auto output_width = uint32_t(c.out_size.x);
+    const auto output_height = uint32_t(c.out_size.y);
+    if (uint64_t(output.x) + output_width <= width && uint64_t(output.y) + output_height <= height)
+        return ONR_RR_OK;
+    return fail(ONR_RR_INVALID_ARGUMENT,
+                "output rectangle at (" + std::to_string(output.x) + ", " + std::to_string(output.y) + ") of size " +
+                    std::to_string(output_width) + "x" + std::to_string(output_height) +
+                    " exceeds output texture " + std::to_string(width) + "x" + std::to_string(height));
+}
+
 // a frame's job: the guides laid out as placed footprints of one buffer from offset 0 (in_bytes in all) and the
 // output's rows (out_bytes); ONR_RR_UNSUPPORTED for an output format that is not written
 int32_t plan_job(Ctx* c, const OnrRrFrame* f, std::unique_ptr<Job>& j, D3D12_PLACED_SUBRESOURCE_FOOTPRINT* fp, UINT64& off, UINT64& obytes) {
@@ -1735,8 +2091,13 @@ int32_t plan_job(Ctx* c, const OnrRrFrame* f, std::unique_ptr<Job>& j, D3D12_PLA
             }
             continue;
         }
-        UINT64 total = 0;
-        c->d3d->GetCopyableFootprints(&rd, 0, 1, off, &fp[i], nullptr, nullptr, &total);
+        auto& fc = c->fps[i];
+        if (fc.off != off || memcmp(&fc.desc, &rd, sizeof rd)) {
+            fc.desc = rd, fc.off = off;
+            c->d3d->GetCopyableFootprints(&rd, 0, 1, off, &fc.fp, nullptr, nullptr, &fc.total);
+        }
+        fp[i] = fc.fp;
+        const UINT64 total = fc.total;
         // a planar depth-stencil copies its depth plane alone: R32G8X24 gives R32 rows, not 8-byte texels
         if (Tf plane = tf_of(fp[i].Footprint.Format)) tf = plane;
         j->in[i] = Copy{true, tf, fp[i].Offset, fp[i].Footprint.RowPitch, tex[i]->x, tex[i]->y};
@@ -1786,8 +2147,7 @@ int32_t plan_job(Ctx* c, const OnrRrFrame* f, std::unique_ptr<Job>& j, D3D12_PLA
         if (!tf_writable(j->out_tf) || !oi->image)
             return fail(ONR_RR_UNSUPPORTED, "output VkFormat " + std::to_string(oi->format) +
                                                 " is not written (written: RGBA16F/32F, B10G11R11, A2B10G10R10, RGBA8/BGRA8 (sRGB too), RGBA16, E5B9G9R9)");
-        if (oi->width < uint32_t(c->out_size.x) || oi->height < uint32_t(c->out_size.y))
-            return fail(ONR_RR_INVALID_ARGUMENT, "the output image is smaller than the output size given at Create");
+        if (int32_t rc = check_output_rect(*c, f->output, oi->width, oi->height)) return rc;
         j->out_pitch = (uint32_t(c->out_size.x) * tf_bytes(j->out_tf) + 255) & ~255u;
         j->out_bytes = obytes = UINT64(j->out_pitch) * uint32_t(c->out_size.y);
         return ONR_RR_OK;
@@ -1798,6 +2158,7 @@ int32_t plan_job(Ctx* c, const OnrRrFrame* f, std::unique_ptr<Job>& j, D3D12_PLA
     if (!tf_writable(j->out_tf))
         return fail(ONR_RR_UNSUPPORTED, "output texture format " + std::to_string(int(od.Format)) +
                                             " is not written (written: RGBA16F/32F, R11G11B10F, RGB10A2, RGBA8/BGRA8 (sRGB too), RGBA16, R9G9B9E5)");
+    if (int32_t rc = check_output_rect(*c, f->output, od.Width, od.Height)) return rc;
     D3D12_RESOURCE_DESC box = od;
     box.Width = UINT64(c->out_size.x), box.Height = UINT(c->out_size.y);
     D3D12_PLACED_SUBRESOURCE_FOOTPRINT ofp{};
@@ -1816,6 +2177,7 @@ int32_t RecordInputs(void* ctx, const OnrRrFrame* f, void* list, void** job) {
     if (c->vk_host) return fail(ONR_RR_UNSUPPORTED, "RecordInputs: the Vulkan host backend runs, use RecordVk");
     try {
         std::lock_guard l(c->m);
+        if (c->state == ONR_RR_STATE_FAILED) return fail(ONR_RR_FAILED, c->message);
         std::unique_ptr<Job> j;
         UINT64 off = 0, obytes = 0;
         D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp[G_COUNT]{};
@@ -1930,6 +2292,63 @@ void vk_selftest(Ctx* c) {
             }
         }
     g_log("Vulkan host backend: self-test passed on the game's device (push constants, addresses, workgroup count, indirect dispatch)");
+    if (c->kern.has("selftest_tex")) {
+        constexpr uint32_t W = 64, H = 8;
+        std::vector<uint16_t> h1(W * H * 4), h2(W * H * 4), got(W * H * 4);
+        for (size_t i = 0; i < h1.size(); ++i) {
+            uint16_t v = uint16_t(i * 2654435761u >> 9);
+            h1[i] = (v & 0x7c00) == 0x7c00 ? uint16_t(v & 0xbfff) : v;
+        }
+        for (uint32_t p = 0; p < W * H; ++p) {
+            h2[4 * p + 0] = ((p % W) & 1u) ? 0x4200 : 0x3c00;   // 3.0 or 1.0
+            h2[4 * p + 1] = 0x0000;
+            h2[4 * p + 2] = 0x0000;
+            h2[4 * p + 3] = 0x3c00;   // 1.0
+        }
+        Buffer s1 = d.create(W * H * 8), s2 = d.create(W * H * 8), dst = d.create(W * H * 8);
+        Image im1, im2;
+        VkSampler smp = VK_NULL_HANDLE;
+        auto cleanup_tex = [&] {
+            if (smp) d.destroy(smp);
+            if (im1.img) d.destroy(im1);
+            if (im2.img) d.destroy(im2);
+            d.reset_textures();
+            d.destroy(s1), d.destroy(s2), d.destroy(dst);
+        };
+        try {
+            d.upload(s1, h1.data(), W * H * 8);
+            d.upload(s2, h2.data(), W * H * 8);
+            im1 = d.create_image(W, H, VK_FORMAT_R16G16B16A16_SFLOAT, s1);
+            im2 = d.create_image(W, H, VK_FORMAT_R16G16B16A16_SFLOAT, s2);
+            smp = d.sampler(true, true);
+            d.set_texture(1, im1, smp);
+            d.set_texture(2, im2, smp);
+            struct { uint64_t dst; I2 size; uint32_t slot; } pc1{dst.addr, {int32_t(W), int32_t(H)}, 1u},
+                                                                pc2{dst.addr, {int32_t(W), int32_t(H)}, 2u | 0x100u};
+            d.begin();
+            d.dispatch(c->kern["selftest_tex"], &pc1, sizeof pc1, W * H / 64);
+            d.barrier();
+            d.submit();
+            d.download(dst, got.data(), W * H * 8);
+            if (got != h1) throw std::runtime_error("self-test: separated texture binding slot 1 mismatch");
+
+            d.begin();
+            d.dispatch(c->kern["selftest_tex"], &pc2, sizeof pc2, W * H / 64);
+            d.barrier();
+            d.submit();
+            d.download(dst, got.data(), W * H * 8);
+            for (uint32_t p = 0; p < W * H; ++p) {
+                const uint16_t want_r = ((p % W) + 1u < W) ? 0x4000 : 0x4200;   // linear midpoint 2.0, clamped 3.0 at right edge
+                if (got[4 * p + 0] != want_r || got[4 * p + 3] != 0x3c00)
+                    throw std::runtime_error("self-test: separated sampler linear interpolation mismatch");
+            }
+        } catch (...) {
+            cleanup_tex();
+            throw;
+        }
+        cleanup_tex();
+        g_log("Vulkan host backend: separated texture+sampler probe passed (2 slots + linear midpoint)");
+    }
 }
 
 // The kernels' push constants must fit the root constants of the D3D12 path.
@@ -2050,31 +2469,57 @@ std::string d3d_check_direct(Ctx* c, D3dDevice& dx) {
 // 1), sampled at every texel centre by selftest_tex, must give its texels back. Empty when it does.
 std::string d3d_check_sampler(Ctx* c, D3dDevice& dx) {
     constexpr uint32_t W = 64, H = 8;
-    std::vector<uint16_t> half(W * H * 4), got(W * H * 4);
+    std::vector<uint16_t> half(W * H * 4), half2(W * H * 4), got(W * H * 4);
     for (size_t i = 0; i < half.size(); ++i) {
         uint16_t h = uint16_t(i * 2654435761u >> 9);
         half[i] = (h & 0x7c00) == 0x7c00 ? uint16_t(h & 0xbfff) : h;
     }
-    Buffer src = dx.create(W * H * 8 + 65536), dst = dx.create(W * H * 8);
-    Image im;
+    for (uint32_t p = 0; p < W * H; ++p) {
+        half2[4 * p + 0] = ((p % W) & 1u) ? 0x4200 : 0x3c00;   // 3.0 or 1.0
+        half2[4 * p + 1] = 0x0000;
+        half2[4 * p + 2] = 0x0000;
+        half2[4 * p + 3] = 0x3c00;   // 1.0
+    }
+    Buffer src = dx.create(W * H * 8 + 65536), src2 = dx.create(W * H * 8 + 65536), dst = dx.create(W * H * 8);
+    Image im, im2;
     std::string why;
     try {
         dx.upload(src, half.data(), W * H * 8);
+        dx.upload(src2, half2.data(), W * H * 8);
         im = dx.alias_image(src, W, H, VK_FORMAT_R16G16B16A16_SFLOAT, 8);
-        if (!im.img) throw std::runtime_error("no linear image");
-        dx.set_texture(1, im, dx.sampler(true, true));
-        struct { uint64_t dst; I2 size; uint32_t slot; } pc{dst.addr, I2{int32_t(W), int32_t(H)}, 1};
+        im2 = dx.alias_image(src2, W, H, VK_FORMAT_R16G16B16A16_SFLOAT, 8);
+        if (!im.img || !im2.img) throw std::runtime_error("no linear image");
+        VkSampler smp = dx.sampler(true, true);
+        dx.set_texture(1, im, smp);
+        dx.set_texture(2, im2, smp);
+        struct { uint64_t dst; I2 size; uint32_t slot; } pc1{dst.addr, I2{int32_t(W), int32_t(H)}, 1},
+                                                            pc2{dst.addr, I2{int32_t(W), int32_t(H)}, 2 | 0x100u};
         dx.begin_own();
-        dx.dispatch(c->dkern["selftest_tex"], &pc, sizeof pc, W * H / 64);
+        dx.dispatch(c->dkern["selftest_tex"], &pc1, sizeof pc1, W * H / 64);
         dx.barrier();
         dx.submit_own();
         dx.download(dst, got.data(), W * H * 8);
         if (got != half) why = "a texel sampled through the table differs from the buffer";
+        if (why.empty()) {
+            dx.begin_own();
+            dx.dispatch(c->dkern["selftest_tex"], &pc2, sizeof pc2, W * H / 64);
+            dx.barrier();
+            dx.submit_own();
+            dx.download(dst, got.data(), W * H * 8);
+            for (uint32_t p = 0; p < W * H; ++p) {
+                const uint16_t want_r = ((p % W) + 1u < W) ? 0x4000 : 0x4200;
+                if (got[4 * p + 0] != want_r || got[4 * p + 3] != 0x3c00) {
+                    why = "separated sampler linear midpoint mismatch";
+                    break;
+                }
+            }
+        }
     } catch (const std::exception& e) {
         why = e.what();
     }
     if (im.img) dx.destroy(im);
-    dx.destroy(src), dx.destroy(dst);
+    if (im2.img) dx.destroy(im2);
+    dx.destroy(src), dx.destroy(src2), dx.destroy(dst);
     return why;
 }
 
@@ -2180,16 +2625,19 @@ void d3d_setup(Ctx* c) {
     auto dx = std::make_unique<D3dDevice>();
     std::string err;
     if (!dx->init(c->d3d, &c->dev, c->cache_dir, err)) throw std::runtime_error(err);
+    dx->set_compiler(c->aco, c->aco_strict);
+    dx->set_compiler_log([](const std::string& line) { g_log("%s", line.c_str()); });
     dx->set_stamps(g_stamps);
     struct Unload {   // the kernels go with the device when the check fails
         Ctx* c; D3dDevice* d;
         ~Unload() { if (d) c->dkern.unload(*d); }
     } unload{c, dx.get()};
-    c->dkern.load(*dx, utf8(c->shader_dir), {"ingest", "pack", "selftest", "clear_range"});
     std::string direct;   // the texture paths are optional: without them the guides and the output are copied
+    load_named(c, c->dkern, *dx, "d3d12", "utility", {"ingest", "pack", "selftest", "clear_range"});
     try {
-        c->dkern.load(*dx, utf8(c->shader_dir), {"d3d_ingest", "d3d_pack"});
+        load_named(c, c->dkern, *dx, "d3d12", "direct", {"d3d_ingest", "d3d_pack"});
     } catch (const std::exception& e) {
+        if (c->aco) throw;
         direct = e.what();
     }
     Buffer out[2] = {dx->create(256 * 4), dx->create(256 * 4)}, args = dx->create(16);
@@ -2209,6 +2657,10 @@ void d3d_setup(Ctx* c) {
         dx->barrier();
         dx->submit_own();
         for (int t = 0; t < 2; ++t) dx->download(out[t], got[t].data(), 256 * 4);
+    } catch (const std::exception& e) {
+        for (auto& b : out) dx->destroy(b);
+        dx->destroy(args);
+        throw std::runtime_error(format_pipeline_error(c, "d3d12", "selftest", "selftest", e.what()));
     } catch (...) {
         for (auto& b : out) dx->destroy(b);
         dx->destroy(args);
@@ -2222,7 +2674,7 @@ void d3d_setup(Ctx* c) {
             if (got[t][i] != want) {
                 char b[160];
                 snprintf(b, sizeof b, "self-test: %s dispatch, element %u is %08x, %08x expected", t ? "indirect" : "direct", i, got[t][i], want);
-                throw std::runtime_error(b);
+                throw std::runtime_error(format_pipeline_error(c, "d3d12", "selftest", "selftest", b));
             }
         }
     g_log("D3D12 backend: self-test passed (root constants, spill table, workgroup count, indirect dispatch); %u ELFs from the cache, "
@@ -2238,9 +2690,10 @@ void d3d_setup(Ctx* c) {
     if (const char* e = getenv("ONR_RR_NO_SAMPLER")) why = "turned off (ONR_RR_NO_SAMPLER)";   // measurements
     else if (dx->init_sampler(why)) {
         try {
-            c->dkern.load(*dx, utf8(c->shader_dir), {"selftest_tex"});
+            load_named(c, c->dkern, *dx, "d3d12", "sampler", {"selftest_tex"});
             why = d3d_check_sampler(c, *dx);
         } catch (const std::exception& e) {
+            if (c->aco) throw;
             why = e.what();
         }
     }
@@ -2260,7 +2713,13 @@ void d3d_harvest(Ctx* c) {
         std::vector<uint64_t> ts(n);
         if (!c->dx->read_stamps(slot, ts)) continue;
         c->dq[slot] = 0;
+        const bool hop = std::exchange(c->dqhop[slot], false);
         add_gaps(c, ts, ms);
+        const float span = float(double(ts.back() - ts.front()) * ms);
+        if (hop) {
+            c->dhop_ms = span;
+            continue;
+        }
         const uint32_t a = c->dqnet[slot][0], b = c->dqnet[slot][1];
         float part[3] = {};
         const bool has_parts = b > a && b <= n;
@@ -2269,7 +2728,7 @@ void d3d_harvest(Ctx* c) {
             part[1] = float(double(ts[b - 1] - ts[a]) * ms);
             part[2] = float(double(ts.back() - ts[b - 1]) * ms);
         }
-        record_gpu_sample(c, float(double(ts.back() - ts.front()) * ms), part, has_parts);
+        record_gpu_sample(c, span + std::exchange(c->dhop_ms, 0.0f), part, has_parts);
     }
 }
 
@@ -2405,7 +2864,9 @@ int32_t GetBackend(void* ctx, uint32_t* backend) {
     return ONR_RR_OK;
 }
 
-int32_t Record(void* ctx, const OnrRrFrame* f, void* list, uint32_t edit, OnrRrDenoisedImage* image, void** job) {
+int32_t record_d3d12_frame(void* ctx, const OnrRrFrame* f, void* list, uint32_t edit, OnrRrDenoisedImage* image, void** job,
+                           bool& host_bound, bool trace) {
+    host_bound = false;
     if (!ctx || !f || !list || !job || f->size < ONR_RR_FRAME_SIZE_V1 || !f->color.resource || !f->output.resource ||
         (image && image->size < sizeof(OnrRrDenoisedImage)))
         return fail(ONR_RR_INVALID_ARGUMENT, "Record: missing arguments");
@@ -2415,6 +2876,7 @@ int32_t Record(void* ctx, const OnrRrFrame* f, void* list, uint32_t edit, OnrRrD
     auto* cl = static_cast<ID3D12GraphicsCommandList*>(list);
     sweep_retired();
     std::lock_guard l(c->m);
+    if (c->state == ONR_RR_STATE_FAILED) return fail(ONR_RR_FAILED, c->message);
     if (!c->use_d3d) return fail(ONR_RR_UNSUPPORTED, c->vk_host ? "Record: the Vulkan host backend runs, use RecordVk" : "Record: the Vulkan backend runs");
     D3dDevice& d = *c->dx;
     try {
@@ -2428,7 +2890,15 @@ int32_t Record(void* ctx, const OnrRrFrame* f, void* list, uint32_t edit, OnrRrD
         // as PrepareDenoised: no hop on the frame that finds the network ready
         const bool was_ready = c->state == ONR_RR_STATE_READY;
         // our buffers outlive the lists that use them by D3dDevice's deferred release, so nothing waits here
+        if (trace) {
+            g_log("[d3d12 diag] frame %llu list=%p prepare_network built=%d engine_ready=%d",
+                  static_cast<unsigned long long>(j->seq), static_cast<void*>(cl), int(c->built.load()), int(c->engine_ready));
+            g_log.flush();
+        }
         const bool network = prepare_network(c, d, render, [] {});
+#ifdef ONR_RR_STATIC
+        trace = trace || (network && !was_ready && openrr::pe::d3d12_diagnostics_enabled());
+#endif
         // dinput and doutput are allocated on demand below only when a texture is not read/written directly.
         (void)out_bytes;
         const bool hop = network && was_ready && image && (edit == ONR_RR_EDIT_LOOP || edit == ONR_RR_EDIT_DISPLAY);
@@ -2452,12 +2922,15 @@ int32_t Record(void* ctx, const OnrRrFrame* f, void* list, uint32_t edit, OnrRrD
                 g_log("Record: all D3D12 recording slots (63 primary + 64 overflow) are in flight; skipping this frame (output not written)");
             return ONR_RR_BUSY;
         }
+        host_bound = true;
         const uint32_t slot = d.bound_slot();
         const bool overflow = d.using_overflow();
         uint32_t dummy_qnet[2] = {};
         Rec r{d, c->dkern, c->dinput.addr, c->doutput.addr, c->dimage.addr, overflow ? dummy_qnet : c->dqnet[slot]};
+        if (trace) r.diagnostic_list = cl;
         std::vector<D3D12_RESOURCE_BARRIER> back;
         try {
+            rr_marker(r.diagnostic_list, L"OpenRR: input texture preparation");
             d.stamp();
             if (c->direct_ok) {
                 r.ingest = "d3d_ingest", r.pack = "d3d_pack";
@@ -2470,20 +2943,66 @@ int32_t Record(void* ctx, const OnrRrFrame* f, void* list, uint32_t edit, OnrRrD
                 d3d_ensure(c, c->doutput, out_bytes);
                 r.output = c->doutput.addr;
             }
+            if (network && !hop) {
+                char trace_path[32768]{};
+                if (GetEnvironmentVariableA("ONR_RR_TRACE_PATH",trace_path,sizeof trace_path)) {
+                    if (!c->trace.path.empty()) throw std::runtime_error("runtime trace: previous frame not consumed after fence");
+                    c->trace.path = onr::u8_to_path(trace_path);
+                    c->trace.begin(d, c->engine);
+                    for(auto b:c->guides)if(b.res)c->trace.roots.push_back(b);
+                    if(c->dinput.res)c->trace.roots.push_back(c->dinput);
+                    auto& m=c->trace.meta;const auto ef=engine_frame(c,*j);
+                    m<<"frame engine="<<EngineRuntimeTraceAccess::phase(c->engine)<<" phase8="<<(EngineRuntimeTraceAccess::phase(c->engine)%8)
+                     <<" runtime="<<c->frames<<" seq="<<j->seq<<" fresh="<<EngineRuntimeTraceAccess::fresh(c->engine)
+                     <<" reset="<<ef.reset<<" lite="<<c->engine.lite_active()<<" render="<<render.x<<","<<render.y
+                     <<" jitter="<<ef.jitter[0]<<","<<ef.jitter[1]<<" motion-scale="<<ef.mv_scale[0]<<","<<ef.mv_scale[1]
+                     <<" depth-sign="<<ef.depth_sign<<"\nview-to-clip=";
+                    m.precision(9);for(auto v:ef.view_to_clip)m<<v<<',';m<<"\nworld-to-view=";for(auto v:ef.world_to_view)m<<v<<',';m<<'\n';
+                    const OnrRrTexture* textures[G_COUNT];frame_textures(j->f,textures);
+                    for(int s=0;s<G_COUNT;++s) {
+                        const auto& cp=j->in[s];
+                        m<<"guide "<<s<<" present="<<cp.present<<" direct="<<cp.direct<<" format="<<cp.tf<<" pitch="<<cp.pitch
+                         <<" origin="<<cp.x<<","<<cp.y<<" copied-offset="<<cp.offset<<" buffer="<<c->guides[s].addr
+                         <<" resource="<<textures[s]->resource<<" texture-size="<<cp.tw<<","<<cp.th<<" view-format="<<cp.fmt<<'\n';
+                        if(cp.present && cp.direct)c->trace.texture(d,"input-guide-"+std::to_string(s),
+                            static_cast<ID3D12Resource*>(textures[s]->resource),
+                            (textures[s]->state&kRead)?textures[s]->state:uint32_t(kRead),cp.x,cp.y,render.x,render.y);
+                    }
+                    if(c->dinput.addr)c->trace.snapshot(d,"input-copied-textures",c->dinput);
+                }
+            }
+            if (trace) {
+                g_log("[d3d12 diag] frame %llu list=%p network=%d slot=%u overflow=%d ingest=%s pack=%s color=%s output=%s",
+                      static_cast<unsigned long long>(j->seq), static_cast<void*>(cl), int(network), slot, int(overflow),
+                      r.ingest, r.pack, j->in[G_COLOR].direct ? "view" : "copy",
+                      hop ? "deferred" : direct_out ? "view" : "copy");
+                g_log.flush();
+            }
             record_frame(c, r, *j, network, hop);
+            D3dRuntimeTraceAccess::hook(d) = {};
+            if(!c->trace.path.empty() && direct_out)c->trace.texture(d,"output",static_cast<ID3D12Resource*>(j->f.output.resource),
+                D3D12_RESOURCE_STATE_UNORDERED_ACCESS,j->f.output.x,j->f.output.y,c->out_size.x,c->out_size.y);
             if (!hop) {
                 if (direct_out) d.barrier();
-                else d3d_copy_output(c, *j);
-                d.stamp();
+                else {
+                    rr_marker(r.diagnostic_list, L"OpenRR: copy output texture");
+                    d3d_copy_output(c, *j);
+                }
             }
+            d.stamp();
             if (!back.empty()) cl->ResourceBarrier(UINT(back.size()), back.data());
+            rr_marker(r.diagnostic_list, L"OpenRR: recording complete");
         } catch (...) {
+            D3dRuntimeTraceAccess::hook(d) = {};
             if (!overflow) c->dq[slot] = 0;
             d.unbind();
             throw;
         }
-        // a hop's times come with its RecordPost
-        if (!overflow) c->dq[slot] = hop ? 0 : d.queries();
+        // a hop's first half is timed here and added to its RecordPost's
+        if (!overflow) {
+            c->dq[slot] = d.queries();
+            c->dqhop[slot] = hop;
+        }
         if (g_stamps && !hop && !overflow && network) c->stamp_names = d.stamp_names;
         d.unbind();
         if (network) log_frame(c, render);
@@ -2508,12 +3027,21 @@ int32_t Record(void* ctx, const OnrRrFrame* f, void* list, uint32_t edit, OnrRrD
     }
 }
 
+int32_t Record(void* ctx, const OnrRrFrame* f, void* list, uint32_t edit, OnrRrDenoisedImage* image, void** job) {
+    bool host_bound;
+    return record_d3d12_frame(ctx, f, list, edit, image, job, host_bound, false);
+}
+
 int32_t RecordPost(void* ctx, void* job, void* list, uint32_t format) {
     if (!ctx || !job || !list) return fail(ONR_RR_INVALID_ARGUMENT, "RecordPost: missing arguments");
     auto* c = static_cast<Ctx*>(ctx);
     std::lock_guard l(c->m);
     auto it = c->jobs.find(static_cast<Job*>(job));
     if (it == c->jobs.end() || !it->second->d3d || !it->second->post_pending) return fail(ONR_RR_INVALID_ARGUMENT, "RecordPost: unknown job");
+    if (c->state == ONR_RR_STATE_FAILED) {
+        c->jobs.erase(it);
+        return fail(ONR_RR_FAILED, c->message);
+    }
     Job& j = *it->second;
     D3dDevice& d = *c->dx;
     int32_t rc = ONR_RR_OK;
@@ -2575,6 +3103,7 @@ int32_t PrepareDenoised(void* ctx, void* job, uint32_t edit, OnrRrDenoisedImage*
     image->buffer = nullptr;
     auto* c = static_cast<Ctx*>(ctx);
     std::lock_guard l(c->m);
+    if (c->state == ONR_RR_STATE_FAILED) return fail(ONR_RR_FAILED, c->message);
     auto it = c->jobs.find(static_cast<Job*>(job));
     if (it == c->jobs.end()) return fail(ONR_RR_INVALID_ARGUMENT, "PrepareDenoised: unknown job");
     Job& j = *it->second;
@@ -2611,6 +3140,10 @@ int32_t EnqueueNetwork(void* ctx, void* job, void* queue, uint32_t* exported) {
     std::lock_guard l(c->m);
     auto it = c->jobs.find(static_cast<Job*>(job));
     if (it == c->jobs.end()) return fail(ONR_RR_INVALID_ARGUMENT, "Enqueue: unknown job");
+    if (c->state == ONR_RR_STATE_FAILED) {
+        c->jobs.erase(it);
+        return fail(ONR_RR_FAILED, c->message);
+    }
     Job& j = *it->second;
     if (j.enqueued || j.post_pending) return ONR_RR_OK;
     int32_t rc;
@@ -2639,6 +3172,10 @@ int32_t EnqueuePost(void* ctx, void* job, void* queue, uint32_t format) {
     auto it = c->jobs.find(static_cast<Job*>(job));
     // a job EnqueueNetwork ran whole is gone once its output was recorded
     if (it == c->jobs.end()) return ONR_RR_OK;
+    if (c->state == ONR_RR_STATE_FAILED) {
+        c->jobs.erase(it);
+        return fail(ONR_RR_FAILED, c->message);
+    }
     Job& j = *it->second;
     if (!j.post_pending) return ONR_RR_OK;
     j.post_pending = false;
@@ -2673,6 +3210,10 @@ int32_t RecordOutput(void* ctx, void* job, void* list) {
     std::lock_guard l(c->m);
     auto it = c->jobs.find(static_cast<Job*>(job));
     if (it == c->jobs.end()) return fail(ONR_RR_INVALID_ARGUMENT, "RecordOutput: unknown job");
+    if (c->state == ONR_RR_STATE_FAILED) {
+        c->jobs.erase(it);
+        return fail(ONR_RR_FAILED, c->message);
+    }
     Job& j = *it->second;
     auto* cl = static_cast<ID3D12GraphicsCommandList*>(list);
     auto* out = static_cast<ID3D12Resource*>(j.f.output.resource);
@@ -2697,15 +3238,29 @@ int32_t RecordOutput(void* ctx, void* job, void* list) {
 
 // ------------------------------------------------------------------------------------------------ Vulkan host backend
 
-// a slot's timestamps once its command buffer ran; nothing while they are not written
+// a slot's timestamps once its command buffer actually executed on the GPU; nothing if reset/discarded without submit
 void vk_harvest(Ctx* c) {
     const double ms = c->dev.timestamp_period_ns() * 1e-6;
     for (uint32_t slot = 0; slot < Ctx::kHostSlots; ++slot) {
         const uint32_t n = c->hq[slot];
         if (n < 2 || !c->hqp[slot] || !c->dev.pool_retired(c->hqp[slot])) continue;
         c->hq[slot] = 0;
+        const uint64_t expect = std::exchange(c->hq_expect[slot], 0);
+        if (!expect || !c->vhq_seq_map || c->vhq_seq_map[slot] != expect) continue;
+        std::vector<uint64_t> raw(size_t(n) * 2);
+        if (vkGetQueryPoolResults(c->dev.vk(), c->hqp[slot], 0, n, raw.size() * 8, raw.data(), 16,
+                                  VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT) != VK_SUCCESS)
+            continue;
         std::vector<uint64_t> ts(n);
-        if (vkGetQueryPoolResults(c->dev.vk(), c->hqp[slot], 0, n, ts.size() * 8, ts.data(), 8, VK_QUERY_RESULT_64_BIT) != VK_SUCCESS) continue;
+        bool avail = true;
+        for (uint32_t i = 0; i < n; ++i) {
+            if (raw[size_t(i) * 2 + 1] == 0) {
+                avail = false;
+                break;
+            }
+            ts[i] = raw[size_t(i) * 2];
+        }
+        if (!avail) continue;
         add_gaps(c, ts, ms);
         const uint32_t a = c->hqnet[slot][0], b = c->hqnet[slot][1];
         float part[3] = {};
@@ -2920,6 +3475,7 @@ int32_t RecordVk(void* ctx, const OnrRrFrame* f, void* cmd) {
     auto* cb = static_cast<VkCommandBuffer>(cmd);
     if (c->vk_host) sweep_retired();
     std::lock_guard l(c->m);
+    if (c->state == ONR_RR_STATE_FAILED) return fail(ONR_RR_FAILED, c->message);
     if (!c->vk_host) return fail(ONR_RR_UNSUPPORTED, "RecordVk: the runtime was not created on a Vulkan device");
     Device& d = c->dev;
     try {
@@ -2953,6 +3509,8 @@ int32_t RecordVk(void* ctx, const OnrRrFrame* f, void* cmd) {
             qi.queryCount = kMaxQueries;
             if (vkCreateQueryPool(d.vk(), &qi, nullptr, &c->hqp[slot]) != VK_SUCCESS) throw std::runtime_error("vkCreateQueryPool");
         }
+        const uint64_t seq = ++c->hq_seq_gen;
+        if (slot < Ctx::kHostSlots) c->hq_expect[slot] = seq;
         d.bind(cb, c->hqp[slot]);
         d.use_views(slot);
         Rec r{d, c->kern, c->vinput.addr, c->voutput.addr, 0, c->hqnet[slot]};
@@ -2973,8 +3531,28 @@ int32_t RecordVk(void* ctx, const OnrRrFrame* f, void* cmd) {
             if (direct_out) vk_output_written(cb);
             else vk_copy_output(c, *j, cb);
             d.stamp();
+            if (slot < Ctx::kHostSlots && c->vhq_seq.buf) {
+                vkCmdUpdateBuffer(cb, c->vhq_seq.buf, VkDeviceSize(slot) * sizeof(uint64_t), sizeof(uint64_t), &seq);
+                VkBufferMemoryBarrier2 bb{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2};
+                bb.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+                bb.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+                bb.dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT;
+                bb.dstAccessMask = VK_ACCESS_2_HOST_READ_BIT;
+                bb.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                bb.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                bb.buffer = c->vhq_seq.buf;
+                bb.offset = VkDeviceSize(slot) * sizeof(uint64_t);
+                bb.size = sizeof(uint64_t);
+                VkDependencyInfo di{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+                di.bufferMemoryBarrierCount = 1;
+                di.pBufferMemoryBarriers = &bb;
+                vkCmdPipelineBarrier2(cb, &di);
+            }
         } catch (...) {
-            if (slot < Ctx::kHostSlots) c->hq[slot] = 0;
+            if (slot < Ctx::kHostSlots) {
+                c->hq[slot] = 0;
+                c->hq_expect[slot] = 0;
+            }
             d.unbind();
             throw;
         }
@@ -3073,12 +3651,35 @@ int32_t GetLastErrorText(char* buf, uint32_t n) {
 
 }  // namespace
 
+#ifdef ONR_RR_STATIC
+int32_t openrr::pe::record_d3d12(void* context, const OnrRrFrame* frame, ID3D12GraphicsCommandList* list,
+                                bool& host_bound, bool trace) {
+    void* job = nullptr;
+    return record_d3d12_frame(context, frame, list, ONR_RR_EDIT_OFF, nullptr, &job, host_bound, trace);
+}
+#endif
+
 // the user's "Fast mode" (docs/FASE24-FASTMODE.md), outside the ABI as OnrRrSetDeltaRate: a DLL without it has no such mode.
 // Safe every frame; the first frame asked starts the kernels' build, and the next recorded frame after it uses them.
 extern "C" int32_t OnrRrSetFastMode(void* context, int32_t on) {
     if (!context) return ONR_RR_INVALID_ARGUMENT;
-    static_cast<Ctx*>(context)->lite_want = on != 0;
-    static_cast<Ctx*>(context)->lx_want = on == 2;   // 2: the experimental level on top of the mode
+    auto* c = static_cast<Ctx*>(context);
+    const bool lite = on != 0;
+    const bool lx = on == 2;
+    c->lite_want = lite;
+    c->lx_want = lx;   // 2: the experimental level on top of the mode
+    if (lx && c->lx_failed) {
+        std::lock_guard l(c->m);
+        if (c->lx_want && c->lx_failed) {
+            c->engine.set_lite(nullptr);
+            c->engine.set_lite_on(false);
+            c->engine.set_deep_on(false);
+            if (c->aco_strict && c->state != ONR_RR_STATE_FAILED) {
+                c->state = ONR_RR_STATE_FAILED;
+                c->set_message(c->lx_error);
+            }
+        }
+    }
     return ONR_RR_OK;
 }
 
@@ -3088,8 +3689,27 @@ extern "C" int32_t OnrRrGetFastMode(void* context) {
     auto* c = static_cast<Ctx*>(context);
     if (!c->lite_want) return 0;
     if (c->lite_failed) return 3;
+    if (c->lx_want && c->lx_failed) return 3;
     if (!c->lite_built) return 2;
-    return c->lx_want && !c->net_lx.names().empty() ? 4 : 1;
+    if (c->lx_want) return c->lx_built ? 4 : 2;
+    return 1;
+}
+
+extern "C" int32_t OnrRrSetFp8(void* context, int32_t on) {
+    if (!context) return ONR_RR_INVALID_ARGUMENT;
+    static_cast<Ctx*>(context)->f8_host_req = on != 0;
+    return ONR_RR_OK;
+}
+
+// 0 off, 1 on (RDNA4 Fast/New uses 16-stage ACO FP8 _lt/_lx), 2 building, 3 asked and not available, 4 Legacy does not use it
+extern "C" int32_t OnrRrGetFp8(void* context) {
+    if (!context) return 0;
+    auto* c = static_cast<Ctx*>(context);
+    if (!c->lite_has_fp8) return c->f8_host_req ? 3 : 0;
+    if (!c->lite_want) return c->f8_host_req ? 4 : 0;
+    if (c->lite_failed || (c->lx_want && c->lx_failed)) return 3;
+    if (!c->lite_built || (c->lx_want && !c->lx_built)) return 2;
+    return 1;
 }
 
 extern "C" int32_t OnrRrGetGpuTiming(void* context, float* raw_last, float* raw_p50, float* raw_p95, float* clean_last, float* clean_avg) {
@@ -3152,14 +3772,40 @@ extern "C" void OnrRrNotifyVkDeviceDestroyed(void* device) {
     sweep_retired(static_cast<VkDevice>(device));
 }
 
+// Optional benchmark-only export. The caller must wait for the host list's fence
+// before consuming readbacks or changing the diagnostic phase.
+extern "C" int32_t OnrRrDiagnostic(void* context, uint32_t action, uint64_t* phase) {
+    if(!context)return ONR_RR_INVALID_ARGUMENT;
+    auto* c=static_cast<Ctx*>(context);std::lock_guard l(c->m);
+    try {
+        if(action==1)c->trace.finish();
+        else if(action==2)EngineRuntimeTraceAccess::align_phase(c->engine);
+        else if(action!=0)return ONR_RR_INVALID_ARGUMENT;
+        if(phase)*phase=EngineRuntimeTraceAccess::phase(c->engine);
+        return ONR_RR_OK;
+    } catch(const std::exception& e){return fail(ONR_RR_FAILED,e.what());}
+}
+
 extern "C" int32_t OnrRrSetDeltaRate(void* context, float rate) {
     if (!context || !(rate > 0.0f)) return ONR_RR_INVALID_ARGUMENT;
     static_cast<Ctx*>(context)->engine.set_delta_alpha(std::min(rate, 1.0f));
     return ONR_RR_OK;
 }
 
+#ifdef OPENRR_TEST_HOOKS
+extern "C" size_t onr_test_gpu_sample_count(void* context) {
+    if (!context) return 0;
+    auto* c = static_cast<Ctx*>(context);
+    std::lock_guard l(c->m);
+    return c->gpu_raw_hist.size();
+}
+#endif
+
 extern "C" int32_t OnrRrGetApi(uint32_t abi, OnrRrApi* api) {
     if (abi < ONR_RR_ABI_VERSION || abi > ONR_RR_ABI_VERSION_5 || !api) return ONR_RR_INVALID_ARGUMENT;
+#ifdef ONR_RR_STATIC
+    rr_vk_load();
+#endif
     if (abi >= ONR_RR_ABI_VERSION_5) {
         auto* a5 = reinterpret_cast<OnrRrApi5*>(api);
         a5->PrepareVkDevice = PrepareVkDevice;

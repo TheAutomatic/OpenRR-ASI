@@ -4,10 +4,16 @@
 #include <vulkan/vulkan.h>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
+#include "opennr_rr/gpu_arch.hpp"
+
 namespace onr {
+
+class PipelineBinaryLoader;
 
 std::filesystem::path u8_to_path(const std::string& s);
 std::string path_to_u8(const std::filesystem::path& p);
@@ -37,16 +43,23 @@ struct Kernel {
     std::string name;
     void* pso = nullptr;   // ID3D12PipelineState* on the D3D12 device
     bool views = false;    // D3D12: set 0 is the recording's views (d3d_ kernels), not the sampled-image table
+    bool aco = false;      // D3D12: linear push ABI (entry 4), from a validated ACO record
 };
 
 struct DeviceInfo {
     std::string name;
+    uint32_t vendor = 0;
+    uint32_t device = 0;
     uint32_t driver_version = 0;
     std::string driver_info;
     bool fp8_coopmat = false;
     bool coopmat = false;
     bool fp64 = false;
     bool int64_atomics = false;
+    onr::arch::GpuArch arch = onr::arch::GpuArch::Unknown;
+    uint32_t elf_mach = 0;
+    uint32_t driver_id = 0;
+    bool is_radv = false;
 };
 
 // luid: pick the adapter with this LUID (8 bytes) instead of the first discrete AMD GPU. interop: also enable the
@@ -65,6 +78,8 @@ struct HostDevice {
     VkPhysicalDevice physical = VK_NULL_HANDLE;
     VkDevice device = VK_NULL_HANDLE;
     uint32_t queue_family = 0, queue_index = 0;
+    std::function<void()> queue_lock;
+    std::function<void()> queue_unlock;
 };
 
 // What the engine and the kernels record through: the Vulkan device below, or the D3D12 one (d3d12.hpp) that records
@@ -101,6 +116,7 @@ public:
 
 class Device : public Gpu {
 public:
+    Device();
     ~Device() override;
     bool init(std::string& err, const DeviceOptions& opt = {});
     bool adopt(const HostDevice& h, std::string& err);
@@ -129,6 +145,7 @@ public:
     bool vram(uint64_t& used, uint64_t& budget) const;
 
     Buffer create(VkDeviceSize size) override;
+    Buffer create_host_coherent(VkDeviceSize size, void** map = nullptr);
     void destroy(Buffer& b) override;
     void upload(const Buffer& b, const void* src, VkDeviceSize size, VkDeviceSize off = 0) override;
     void download(const Buffer& b, void* dst, VkDeviceSize size, VkDeviceSize off = 0) override;
@@ -145,6 +162,7 @@ public:
     VkSampler sampler(bool linear, bool unnormalized) override;
     void destroy(VkSampler s) override;
     void set_texture(uint32_t slot, const Image& i, VkSampler s) override;   // call outside begin()/submit()
+    void reset_textures();
     // hosted: set 0 of the d3d_ kernels (16 sampled images, then 2 storage images) for the bound recording, one set
     // per ring slot (a slot's set is written again kViewSlots recordings later); set_view fills index 0..17 of it
     static constexpr uint32_t kViewSlots = 64;
@@ -153,8 +171,20 @@ public:
     bool pool_retired(VkQueryPool q);
     bool all_retired();
 
+    // Native Vulkan ACO compiler selection (VK_KHR_pipeline_binary)
+    void set_compiler(bool aco, bool strict = false, const std::string& cache_dir = {}, const std::string& shader_dir = {});
+    void set_compiler_log(std::function<void(const std::string&)> log);
+    bool aco() const { return aco_; }
+    bool aco_ready() const;
+    const std::string& aco_reason() const { return aco_reason_; }
+    uint32_t aco_cache_hits() const;
+    uint32_t aco_cache_misses() const;
+    // Direct test hook access (defined only in unit tests compiled with OPENRR_TEST_HOOKS).
+    friend struct VkTestAccess;
+
     // SPIR-V file -> compute pipeline. All kernels share one layout: 256 bytes of push constants.
     Kernel load(const std::string& spv_path, uint32_t subgroup = 0) override;   // subgroup: required size, 0 = any
+    VkPipelineCreateFlags pipeline_flags = 0;   // added to every pipeline load() makes (rr_probe)
     void destroy(Kernel& k) override;
     std::string stats(const Kernel& k);   // compiler statistics (registers, spills), if the driver exposes them
     // the 48 bytes of a combined image sampler descriptor (DeviceOptions::descriptors); false without the extension
@@ -196,6 +226,7 @@ private:
         VkDeviceMemory mem = VK_NULL_HANDLE;
         VkImage img = VK_NULL_HANDLE;
         VkImageView view = VK_NULL_HANDLE;
+        VkSampler sampler = VK_NULL_HANDLE;
         VkPipeline pipe = VK_NULL_HANDLE;
         VkShaderModule module = VK_NULL_HANDLE;
         VkDescriptorSet set = VK_NULL_HANDLE;
@@ -249,6 +280,12 @@ private:
     bool budget_ = false;                     // the GPU offers VK_EXT_memory_budget
     bool set_bound_ = false;                  // hosted: set_ was bound by a dispatch since it was written
     VkDescriptorImageInfo slots_[kTexSlots] = {};   // hosted: what set_ holds, to write a fresh set
+    VkSampler tex_smp_ = VK_NULL_HANDLE;            // separated binding 1 sampler for fresh sets
+    bool aco_ = false;
+    bool aco_strict_ = false;
+    std::string cache_dir_, shader_dir_, aco_reason_;
+    std::function<void(const std::string&)> aco_log_;
+    std::unique_ptr<PipelineBinaryLoader> aco_state_;
     VkDescriptorPool vpool_ = VK_NULL_HANDLE;
     VkDescriptorSet vsets_[kViewSlots] = {};
     VkDescriptorSet views_ = VK_NULL_HANDLE;
@@ -257,6 +294,8 @@ private:
     uint64_t bound_pool_epoch_ = 0;
     bool batch_ = false;
     bool batch_dirty_ = false;
+    std::function<void()> host_queue_lock_;
+    std::function<void()> host_queue_unlock_;
 };
 
 // Game-side Vulkan command buffer / pool reset retirement tracking (Item #3)
@@ -267,7 +306,31 @@ void vk_note_command_pool_reset(VkDevice dev, VkCommandPool pool);
 void vk_note_command_pool_destroyed(VkDevice dev, VkCommandPool pool);
 void vk_note_device_destroyed(VkDevice dev);
 bool vk_device_is_destroyed(VkDevice dev);
+void vk_set_device_pipeline_binary(VkDevice dev, bool enabled);
+bool vk_device_has_pipeline_binary(VkDevice dev);
 
+struct TrustedVkIdentity {
+    std::string name;
+    uint32_t vendor = 0;
+    uint32_t device = 0;
+    uint32_t driver_version = 0;
+    std::string driver_info;
+    uint32_t elf_mach = 0;
+    onr::arch::GpuArch arch = onr::arch::GpuArch::Unknown;
+    uint32_t driver_id = 0;
+    bool is_radv = false;
+    bool verified_icd = false;
+};
+
+TrustedVkIdentity identify_vk_physical_device(VkPhysicalDevice pd, bool* out_luid_valid = nullptr,
+                                                uint8_t out_luid[VK_LUID_SIZE] = nullptr);
+
+// Query physical device properties and driver properties, bypassing loader-level GPU spoofing
+// (e.g. OptiScaler [Spoofing] Vulkan=true rewriting vendorID/name/driverID to NVIDIA) by asking
+// loaded amdvlk*.dll ICDs directly via vk_icdGetInstanceProcAddr matched by device LUID.
+bool query_real_vk_props(VkPhysicalDevice pd, VkPhysicalDeviceProperties& out_props,
+                         VkPhysicalDeviceDriverProperties& out_drv,
+                         VkPhysicalDeviceIDProperties* out_id = nullptr);
 // Shared physical device selector used by both cheap capability checks and Device::init.
 VkPhysicalDevice pick_vk_physical_device(const std::vector<VkPhysicalDevice>& devs, const uint8_t* luid,
                                          std::string* out_name = nullptr, uint32_t* out_api_version = nullptr,

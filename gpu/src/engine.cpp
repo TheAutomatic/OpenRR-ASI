@@ -113,7 +113,7 @@ std::array<uint32_t, 272> enc0_block(const Enc0BlockInput& in) {
     F(0x310, 1.0f / ix), F(0x314, 1.0f / iy);
     F(0x318, in.prev_jitter[0] / rx), F(0x31c, in.prev_jitter[1] / ry);
     F(0x320, in.mv_scale[0] * (ix / rx)), F(0x324, in.mv_scale[1] * (iy / ry));
-    F(0x328, 0), F(0x32c, 0);
+    F(0x328, in.mv_offset[0]), F(0x32c, in.mv_offset[1]);
     I(0x350, in.ds.x), I(0x354, in.ds.y);
     F(0x358, 1.0f / ix), F(0x35c, 1.0f / iy);
     F(0x360, 1.0f / float(in.ds.x)), F(0x364, 1.0f / float(in.ds.y));
@@ -126,6 +126,15 @@ std::array<uint32_t, 272> enc0_block(const Enc0BlockInput& in) {
     to_d(in.w2v, w2v), to_d(in.v2c, v2c), to_d(in.prev_w2v, pw2v), to_d(in.prev_v2c, pv2c);
     if (!invert(w2v, iw2v)) memset(iw2v, 0, sizeof iw2v), iw2v[0] = iw2v[5] = iw2v[10] = iw2v[15] = 1;
     if (!invert(v2c, iv2c)) memset(iv2c, 0, sizeof iv2c), iv2c[0] = iv2c[5] = iv2c[10] = iv2c[15] = 1;
+    // world positions relative to the current camera: the same reflection vectors, but the shader's fp32 math no longer
+    // works on game world coordinates (thousands of units in an open world), where pixel -> world -> previous pixel
+    // lost whole pixels with a still camera and reflections crept across the screen (OpenRR 0.1.7)
+    if (iw2v[12] != 0 || iw2v[13] != 0 || iw2v[14] != 0) {
+        double t[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, iw2v[12], iw2v[13], iw2v[14], 1};
+        mul(t, pw2v, pw2v);
+        t[12] = -t[12], t[13] = -t[13], t[14] = -t[14];
+        mul(iw2v, t, iw2v);
+    }
     // camera position (world), the current projection, pixel -> world and world -> previous pixel
     F(0x3d8, float(iw2v[12])), F(0x3dc, float(iw2v[13])), F(0x3e0, float(iw2v[14]));
     // the projection as the depth guide reads it (row 2 takes view z)
@@ -184,6 +193,9 @@ std::vector<uint8_t> qv_bytes(const uint16_t* v, size_t n) {
         if (e >= 9) {
             if ((m & 127) || e > 23) throw std::runtime_error("Q/V weight is not an e4m3 value");
             c = ((e - 8) << 3) | (m >> 7);
+            // OCP e4m3 codes 0x7f/0xff are NaN (largest finite is 448 = 0x7e); FP16 +-480.0
+            // (0x5f80/0xdf80) would otherwise land exactly there
+            if ((c & 0x7f) == 0x7f) throw std::runtime_error("Q/V weight is not an e4m3 value");
         } else if (e || m) {
             uint32_t k = 1024 + m, sh = 16 - e;   // value k 2^(e - 25) = (k >> sh) 2^-9
             if (!e || (k & ((1u << sh) - 1))) throw std::runtime_error("Q/V weight is not an e4m3 value");
@@ -253,30 +265,83 @@ static H16 vo_values(const H16& in_b, const H16& out, int C, int X) {
     return m;
 }
 
-Buffer Engine::upload_qv(const H16& v, const H16& lr) {
+// fp16 bits -> OCP e4m3 code, round-to-nearest-even with satfinite semantics: |x| >= 448 (and inf/NaN)
+// maps to the largest finite code +-448. The NaN codes 0x7f/0xff are never emitted.
+uint8_t e4m3_rne(uint16_t h) {
+    _Float16 v;
+    std::memcpy(&v, &h, sizeof v);
+    const float x = float(v);
+    const uint32_t s = uint32_t(x < 0.0f) << 7;
+    const float a = std::fabs(x);
+    if (std::isnan(a) || a >= 448.0f) return uint8_t(s | 0x7e);
+    const float sc = std::ldexp(a, 9);                  // in units of the e4m3 subnormal step 2^-9
+    if (sc < 8.0f) {                                    // e4m3 subnormal / zero (ties-to-even at .5)
+        const float r = std::nearbyint(sc);
+        return uint8_t(s | (r >= 7.5f ? 8u : uint32_t(r)));
+    }
+    int ex;
+    const float m = std::frexp(a, &ex);                // a = m * 2^ex, m in [0.5, 1)
+    float r = std::nearbyint(m * 16.0f);               // 4-bit significand, [8, 16)
+    int E = ex - 1;
+    if (r >= 16.0f) { r -= 8.0f; E += 1; }              // carry into the exponent
+    const uint32_t code = (uint32_t(E + 7) << 3) | (uint32_t(r) - 8u);
+    return uint8_t(s | (code > 0x7e ? 0x7e : code));
+}
+Buffer Engine::upload_qv(const H16& v, const H16& lr, bool pack_fp8) {
     if (v.empty()) return {};
     auto d = qv_bytes(v.data(), v.size());
-    d.resize(v.size() * 3 + lr.size() * 2);   // LT_Q16 reads lr at 3 n bytes; the regular kernels never do
-    std::memcpy(d.data() + v.size() * 3, lr.data(), lr.size() * 2);
+    const size_t base = v.size() * 3;
+    d.resize(base + lr.size() * (pack_fp8 ? 3 : 2));   // LT_Q16 reads lr at 3 n bytes; LT_VO8 reads e4m3(lr) at 5 n bytes
+    if (!lr.empty()) {
+        std::memcpy(d.data() + base, lr.data(), lr.size() * 2);
+        if (pack_fp8) {
+            const size_t e8 = base + lr.size() * 2;
+            for (size_t i = 0; i < lr.size(); ++i) d[e8 + i] = e4m3_rne(lr[i]);
+        }
+    }
     return pack_bytes(dev_, fixed_, d.data(), d.size());
 }
 
-void Engine::upload_stage(const StageWeights& s, StageBufs& b) {
+void Engine::upload_stage(const StageWeights& s, StageBufs& b, bool pack_fp8) {
     auto U = [&](Buffer& dst, const H16& v) { if (!v.empty()) pack_bytes(dev_, fixed_, v.data(), v.size() * 2, &dst); else dst = {}; };
     auto UQ = [&](Buffer& dst, const H16& v, const H16& lr) {
         if (v.empty()) { dst = {}; return; }
         auto d = qv_bytes(v.data(), v.size());
-        d.resize(v.size() * 3 + lr.size() * 2);
-        std::memcpy(d.data() + v.size() * 3, lr.data(), lr.size() * 2);
+        const size_t base = v.size() * 3;
+        d.resize(base + lr.size() * (pack_fp8 ? 3 : 2));
+        if (!lr.empty()) {
+            std::memcpy(d.data() + base, lr.data(), lr.size() * 2);
+            if (pack_fp8) {
+                const size_t e8 = base + lr.size() * 2;
+                for (size_t i = 0; i < lr.size(); ++i) d[e8 + i] = e4m3_rne(lr[i]);
+            }
+        }
         pack_bytes(dev_, fixed_, d.data(), d.size(), &dst);
     };
     UQ(b.in_a, s.b.in_a, s.b.C == 32 ? lr_keys(s.b.in_a, s.b.C, s.b.X) : H16{});
     UQ(b.in_b, s.b.in_b, s.b.C == 32 ? vo_values(s.b.in_b, s.b.out, s.b.C, s.b.X) : H16{});
-    U(b.out, with_tiles(s.b.out, s.b.X));
+    // LT_MLP8: fc1/fc2 get an RNE-saturated e4m3 code copy of the ORIGINAL (untiled) matrix appended after
+    // the fp16 values + tiles, natural [row][K] order - the fast kernels load it straight as 1-byte A tiles
+    // (zero conversions); Legacy reads only the fp16 prefix. The weights sit far inside +-448 and above the
+    // e4m3 subnormal floor, so no per-tensor scaling is applied (a power-of-two scale cannot change the
+    // relative quantization error of a floating-point format anyway).
+    auto UT8 = [&](Buffer& dst, const H16& tiled, const H16& orig) {
+        if (orig.empty()) { dst = {}; return; }
+        std::vector<uint8_t> d(tiled.size() * 2 + (pack_fp8 ? orig.size() : 0));
+        std::memcpy(d.data(), tiled.data(), tiled.size() * 2);
+        if (pack_fp8) {
+            for (size_t i = 0; i < orig.size(); ++i) d[tiled.size() * 2 + i] = e4m3_rne(orig[i]);
+        }
+        pack_bytes(dev_, fixed_, d.data(), d.size(), &dst);
+    };
+    // WP-D5/D6: the out matrix keeps its fp16 + tiles prefix byte-identical and carries the exact
+    // e4m3 codes of the ORIGINAL [row][K] matrix after it (4 * C * X bytes in), for the FP8 W_out
+    // products (natural ROW loads, same shape as the fc1/fc2 tails above)
+    UT8(b.out, with_tiles(s.b.out, s.b.X), s.b.out);
     U(b.out_b, s.b.out_b);
-    U(b.fc1, with_tiles(s.b.fc1, s.b.C));
+    UT8(b.fc1, with_tiles(s.b.fc1, s.b.C), s.b.fc1);
     U(b.fc1_b, s.b.fc1_b);
-    U(b.fc2, with_tiles(s.b.fc2, 4 * s.b.C));
+    UT8(b.fc2, with_tiles(s.b.fc2, 4 * s.b.C), s.b.fc2);
     U(b.fc2_b, s.b.fc2_b);
     U(b.bias, s.b.bias);
     U(b.dfn_w, s.dfn_w);
@@ -288,25 +353,42 @@ void Engine::upload_stage(const StageWeights& s, StageBufs& b) {
         auto d = qv_bytes(v.data(), v.size());
         pack_bytes(dev_, fixed_, d.data(), d.size(), &dst);
     };
-    if (s.Co && s.mrg_w.size() == size_t(s.Co) * 4 * s.b.C) U(b.mrg_w, with_tiles(s.mrg_w, 4 * s.b.C));
+    // LT_MRG8 (enc2+ output merge): the e4m3 codes of the ORIGINAL (untiled) [Co][4C] follow the
+    // fp16 values + tiles (offset tiled.size() * 2 = 16 * Co * C bytes, matching the shader's
+    // MRG_W8); the fp16 prefix stays byte-identical for the regular kernels. Tail bytes = Co*4C
+    // exactly, so every A-tile read stays inside the packed blob by construction.
+    if (s.Co && s.mrg_w.size() == size_t(s.Co) * 4 * s.b.C) UT8(b.mrg_w, with_tiles(s.mrg_w, 4 * s.b.C), s.mrg_w);
     else if (s.Co) U8(b.mrg_w, s.mrg_w);
     else U(b.mrg_w, s.mrg_w);
     U(b.mrg_b, s.mrg_b);
-    if (s.b.C <= 64) U8(b.up_w, s.up_w);
-    else U(b.up_w, s.up_w);
+    // Every stage keeps the exact e4m3 codes of up_w after its fp16 values: Stage 3's native-FP8 products read
+    // the tail directly, and with the fp16-only buffer a deep dec_up B-tile read walks past the packed wb blob's
+    // end on the units weight layout (test_asi_units tripped a device removal; the bench layout happened not to).
+    // The fp16 prefix is byte-identical, so the regular kernels are unaffected either way.
+    if (!s.up_w.empty()) U8(b.up_w, s.up_w);
     U(b.up_b, s.up_b);
 }
 
-void Engine::init(Gpu& dev, const Kernels& k, const Weights& w) {
+void Engine::init(Gpu& dev, const Kernels& k, const Weights& w, bool pack_fp8) {
     dev_ = &dev, k_ = &k, w_ = &w;
     std::vector<uint8_t> blob;
     std::vector<Buffer*> refs;
     blob.reserve(24ull << 20);
     t_pack_blob = &blob;
     t_pack_refs = &refs;
-    for (int s = 0; s < 6; ++s) upload_stage(w.enc[s], enc_[s]);
-    for (int l = 0; l < 5; ++l) upload_stage(w.dec0[l], dec0_[l]), upload_stage(w.dec1[l], dec1_[l]);
-    pack_bytes(dev_, fixed_, w.embed_w.data(), w.embed_w.size() * 2, &embed_w_);
+    for (int s = 0; s < 6; ++s) upload_stage(w.enc[s], enc_[s], pack_fp8);
+    for (int l = 0; l < 5; ++l) upload_stage(w.dec0[l], dec0_[l], pack_fp8), upload_stage(w.dec1[l], dec1_[l], pack_fp8);
+    // EMB8 (ENC_EMBED, W1 body): the exact e4m3 codes of the embed MLP's [64][64] + [32][64]
+    // follow the fp16 values (offset 12,288 B, codes 6,144 B; the weights sit far inside +-448).
+    // The fp16 prefix stays byte-identical - the Legacy embed reads only it.
+    {
+        std::vector<uint8_t> d(w.embed_w.size() * (pack_fp8 ? 3 : 2));
+        std::memcpy(d.data(), w.embed_w.data(), w.embed_w.size() * 2);
+        if (pack_fp8) {
+            for (size_t i = 0; i < w.embed_w.size(); ++i) d[w.embed_w.size() * 2 + i] = e4m3_rne(w.embed_w[i]);
+        }
+        pack_bytes(dev_, fixed_, d.data(), d.size(), &embed_w_);
+    }
     pack_bytes(dev_, fixed_, w.embed_b.data(), w.embed_b.size() * 2, &embed_b_);
     pack_bytes(dev_, fixed_, w.lut.data(), w.lut.size() * 2, &lut_);
     H16 masks(512);
@@ -562,8 +644,11 @@ void Engine::record_net(const EngineFrame& f, const Guides& g, uint64_t dfn_out,
     const float* pw2v = zero_matrix(prev_w2v_) ? ident : prev_w2v_;
     const float* v2c = zero_matrix(f.view_to_clip) ? persp : f.view_to_clip;
     const float* pv2c = zero_matrix(prev_v2c_) ? persp : prev_v2c_;
+    float mvo[2] = {0, 0};
+    for (int i = 0; i < 2 && f.mv_jittered && !reset; ++i)
+        if (f.mv_scale[i] != 0.0f) mvo[i] = (f.jitter[i] - prev_jitter_[i]) / f.mv_scale[i];
     Enc0BlockInput bi{f.render, internal_, ds_, {f.jitter[0], f.jitter[1]}, {prev_jitter_[0], prev_jitter_[1]},
-                      {f.mv_scale[0], f.mv_scale[1]}, w2v, v2c, pw2v, pv2c, W.enc0_scalars, f.depth_sign};
+                      {f.mv_scale[0], f.mv_scale[1]}, {mvo[0], mvo[1]}, w2v, v2c, pw2v, pv2c, W.enc0_scalars, f.depth_sign};
     auto blk = enc0_block(bi);
     if (fresh_) d.fill(expo_[old], 0, 4, 0);
     d.update(prm_, 0, kBlockBytes, blk.data());
@@ -606,10 +691,10 @@ void Engine::record_net(const EngineFrame& f, const Guides& g, uint64_t dfn_out,
     if (flow && reuse) {
         // a skipped level's row flags read as done: the first decoder kernel that runs waits on the slot before it
         // (three fills that do not overlap: nothing orders them)
-        const size_t sl = size_t(DL == 5 ? 3 : DL == 4 ? 5 : 7) * 512 * 4;
+        const size_t sl = size_t(DL == 5 ? 3 : DL == 4 ? 5 : 7) * 1280 * 4;
         d.fill(flow_, 0, sl, 0);
-        d.fill(flow_, sl, 512 * 4, 1);
-        d.fill(flow_, sl + 512 * 4, 10 * 1280 * 4 - sl - 512 * 4, 0);
+        d.fill(flow_, sl, 1280 * 4, 1);
+        d.fill(flow_, sl + 1280 * 4, 10 * 1280 * 4 - sl - 1280 * 4, 0);
     } else if (flow) {
         d.fill(flow_, 0, 10 * 1280 * 4, 0);
     }
@@ -659,7 +744,7 @@ void Engine::record_net(const EngineFrame& f, const Guides& g, uint64_t dfn_out,
             const I2 apad = {(alloc_render_.x + 31) & ~31, (alloc_render_.y + 31) & ~31};
             // Wide attributes must not relocate views inside the lifetime arena.
             if (!attr_wide_.addr) {
-                attr_wide_ = dev_->create_unzeroed(size_t(apad.x) * apad.y * 64 + 64);
+                attr_wide_ = dev_->create(size_t(apad.x) * apad.y * 64 + 64);
                 sized_.push_back(attr_wide_);
             }
             a.attr = attr_wide_.addr;
@@ -835,7 +920,8 @@ void Engine::record_post(const EngineFrame& f, uint64_t out, DfnEdit edit, const
     const DownsamplePC ds{frg_.addr, fb_.addr, out, blk_.addr, internal_, f.output, {0, 0}, f.output, internal_, {0, internal_.x}};
     // out_image_: out is the origin x | y << 16 in the D3D12 output texture, written by the d3d_ variants
     const bool img = out_image_ && k_->has("d3d_downsample") && k_->has("d3d_downsample_tl");
-    if (f.transparency && k_->has("downsample_tl")) {
+    const bool tl = f.transparency || (img && f.transparency_view);
+    if (tl && k_->has("downsample_tl")) {
         if (!tlh_[0].addr)   // never read before written: the layer's first frame takes no history
             for (auto& b : tlh_) b = d.create(size_t(f.output.x) * f.output.y * 8 + 64);
         // the parameters NGX gives the kernel (constant 0.25 weight and output / internal motion scale in its captures)
@@ -847,6 +933,7 @@ void Engine::record_post(const EngineFrame& f, uint64_t out, DfnEdit edit, const
             p.mv_scale[i] = o[i] / ir[i];
         }
         p.weight = 0.25f, p.reset = reset || !tl_last_ ? 1u : 0u;
+        if (img) p.tl_view = f.transparency_view, p.tl_origin = f.transparency_origin;
         if (f.transparency_motion) {
             p.tlmv = f.transparency_motion, p.tlmv_size = f.transparency_motion_size;
             p.tlmv_scale[0] = f.mv_scale[0], p.tlmv_scale[1] = f.mv_scale[1];
@@ -864,7 +951,7 @@ void Engine::record_post(const EngineFrame& f, uint64_t out, DfnEdit edit, const
     } else {
         (frame_lite_ && lk_->has("downsample") ? *lk_ : K).downsample(d, ds);
     }
-    tl_last_ = f.transparency != 0;
+    tl_last_ = tl;
     to_last_ = tl_last_ && f.transparency_opacity != 0;
 
     memcpy(prev_w2v_, f.world_to_view, sizeof prev_w2v_);

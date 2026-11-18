@@ -66,8 +66,8 @@ extern "C" {
 #define ONR_RR_ABI_VERSION_4 4
 #define ONR_RR_ABI_VERSION_5 5
 
-#define ONR_RR_RUNTIME_VERSION "0.1.5"
-#define ONR_RR_RUNTIME_VERSION_RC 0, 1, 5, 0
+#define ONR_RR_RUNTIME_VERSION "0.1.7"
+#define ONR_RR_RUNTIME_VERSION_RC 0, 1, 7, 0
 
 enum OnrRrResult {
     ONR_RR_OK = 0,
@@ -139,10 +139,14 @@ typedef struct OnrRrCreateInfo {
     // Optional tail (size may be ONR_RR_CREATE_INFO_SIZE_V2 without it): the game's Vulkan device (ABI 5). With it
     // d3d12_device and backend are not read and the frames go through RecordVk.
     const struct OnrRrVkDevice* vk_device;
+    // Reserved ABI slot (keep zero). Release builds select strict ACO on gfx1200/gfx1201
+    // and shaders-gfx11 FP16/LLPC on gfx11 by hardware identity without runtime compiler overrides.
+    uint32_t compiler;
 } OnrRrCreateInfo;
 
 #define ONR_RR_CREATE_INFO_SIZE_V1 ((uint32_t)offsetof(OnrRrCreateInfo, backend))
 #define ONR_RR_CREATE_INFO_SIZE_V2 ((uint32_t)offsetof(OnrRrCreateInfo, vk_device))
+#define ONR_RR_CREATE_INFO_SIZE_V3 ((uint32_t)offsetof(OnrRrCreateInfo, compiler))
 
 // The game's Vulkan device (ABI 5). Its instance must be Vulkan 1.3 or later and the device created with the create
 // info PrepareVkDevice gave; queue_family / queue_index: the queue FinishVkDevice named, which the host never uses.
@@ -360,6 +364,18 @@ int32_t OnrRrSetFastMode(void* context, int32_t on);
 __declspec(dllexport)
 #endif
 int32_t OnrRrGetFastMode(void* context);
+// Option 1 FP8 ABI (OpenRR 0.1.7+): on RDNA4 (gfx12) New/Fast modes always run full Stage 9 ACO FP8 kernels;
+// Legacy (mode=0) runs FP16 _f kernels; RX 7000 (gfx11) runs shaders-gfx11 FP16 kernels (FP8 hardware unavailable).
+// Set: always returns ONR_RR_OK on a valid context and stores host preference for diagnostics without disabling RDNA4 ACO FP8.
+// Get (actual active path): 0 off, 1 on (RDNA4 New/Fast running FP8), 2 building, 3 not available (reported on gfx11 when requested, or on failure), 4 Legacy mode (FP8 not used).
+#if defined(ONR_RR_BUILDING) && !defined(ONR_RR_STATIC)
+__declspec(dllexport)
+#endif
+int32_t OnrRrSetFp8(void* context, int32_t on);
+#if defined(ONR_RR_BUILDING) && !defined(ONR_RR_STATIC)
+__declspec(dllexport)
+#endif
+int32_t OnrRrGetFp8(void* context);
 #if defined(ONR_RR_BUILDING) && !defined(ONR_RR_STATIC)
 __declspec(dllexport)
 #endif

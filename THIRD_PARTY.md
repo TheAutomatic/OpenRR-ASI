@@ -1,5 +1,14 @@
 # Third-Party Notices and Licenses
 
+The offline source-level ACO address32 capture strategy in
+asi/build/mesa/prepare_capture.py and the dual-capture validation in
+asi/build/build_aco_records.py are adapted from the OpenNR record producer in
+neural-amd-opti-reference/tools/aco-records/mesa-25.3.6-nr-record.patch and
+make_record.py. That reference project is licensed under GPL-3.0; these offline
+build-tool adaptations retain that provenance and are not linked into the
+Windows runtime. See the reference project's LICENSE when redistributing these
+tools or a compiler built with the adapted patch.
+
 OpenRR (`openrr-amd.asi`) incorporates or adapts the following third-party software components:
 
 ---
@@ -7,6 +16,7 @@ OpenRR (`openrr-amd.asi`) incorporates or adapts the following third-party softw
 ## 1. DLSSNR-AMD ASI Shell (`asi/src/rr_*.cpp`, `asi/src/rr_*.hpp`, `asi/build/`)
 
 Adapted from `DLSSNR-AMD` (`windows/src/pe/`), Copyright (c) 2026 mochizuki0323.
+- The PAL ELF, MessagePack, NRPAL002 parser and prologue in `gpu/src/rr_pal_binary.hpp` are adapted from `windows/src/core/nr_pal_binary.hpp` of the same project under the MIT license below.
 - `asi/src/rr_ngx_abi.hpp` and `asi/src/rr_ngx_slots.hpp` are clean-room ABI declarations transcribed from NVIDIA NGX SDK headers (`nvsdk_ngx.h`, `nvsdk_ngx_defs.h`, `nvsdk_ngx_defs_dlssd.h`, `nvsdk_ngx_params.h`, `nvsdk_ngx_vk.h`) for binary interoperability without NVIDIA SDK header dependencies.
 
 ```text
@@ -110,3 +120,23 @@ Full license text in `asi/third_party/inter/LICENSE.txt`.
 
 Copyright (c) 2015-2025 The Khronos Group Inc. Licensed under the Apache License, Version 2.0.
 Full license text in `asi/third_party/vulkan/LICENSE.md`.
+
+---
+
+## 6. Mesa RADV / ACO (offline build tool)
+
+Offline shader records are generated with Mesa 26.3.0, pinned to
+`0a6fa60abb737d26ac8a316a4aad7c9ddf64f9e4`, with the source patches in
+`asi/build/mesa/`. Mesa RADV/ACO sources used here retain their upstream MIT
+license notices. The package includes generated shader records; Mesa shared
+libraries, the noop DRM shim and the capture executable are build tools and
+are not distributed in the Windows stage. See `asi/build/mesa/README.md` for
+patch provenance and reproducible build instructions.
+
+---
+
+## 7. Noto Sans CJK SC (`openrr-amd/lang/fonts/NotoSansCJKsc-Regular.ttf`)
+
+Menu CJK glyph coverage (`zh-CN`, `ja`, `ko`) uses Google Noto Sans CJK SC,
+licensed under the SIL Open Font License, Version 1.1.
+Full license text in `asi/lang/fonts/Noto-CJK-LICENSE.txt`.

@@ -92,6 +92,76 @@ struct Buf {
     void* map = nullptr;
 };
 
+struct StagedDataDir {
+    std::wstring data_dir;
+    std::wstring cache_dir;
+    std::filesystem::path temp_root;
+
+    StagedDataDir(const wchar_t* orig_data, const wchar_t* env_cache, const char* env_aco) {
+        if (env_cache && *env_cache) cache_dir = env_cache;
+        const char* env_rm_spv = getenv("ONR_TEST_REMOVE_SPV");
+        const bool need_stage = (env_aco && *env_aco) || (env_rm_spv && *env_rm_spv);
+        if (!need_stage) {
+            data_dir = orig_data ? orig_data : L"";
+            return;
+        }
+        wchar_t tmp[MAX_PATH] = {};
+        GetTempPathW(MAX_PATH, tmp);
+        wchar_t tag[96] = {};
+        swprintf_s(tag, L"openrr_val_vk_stage_%lu_%llu", GetCurrentProcessId(), GetTickCount64());
+        temp_root = std::filesystem::path(tmp) / tag;
+        std::filesystem::create_directories(temp_root);
+        const std::filesystem::path src_data(orig_data);
+        for (const wchar_t* sub : {L"shaders", L"shaders-gfx11", L"aco"}) {
+            if (std::filesystem::exists(src_data / sub)) {
+                std::filesystem::copy(src_data / sub, temp_root / sub,
+                                      std::filesystem::copy_options::recursive | std::filesystem::copy_options::overwrite_existing);
+            }
+        }
+        if (env_aco && *env_aco) {
+            std::filesystem::path aco_src(env_aco);
+            std::filesystem::remove_all(temp_root / "aco");
+            if (std::filesystem::exists(aco_src)) {
+                for (const char* tgt : {"gfx1201", "gfx1200"}) {
+                    const auto dst = temp_root / "aco" / tgt / "openrr-d3d12-v1";
+                    std::filesystem::create_directories(dst.parent_path());
+                    std::filesystem::copy(aco_src, dst,
+                                          std::filesystem::copy_options::recursive | std::filesystem::copy_options::overwrite_existing);
+                }
+            }
+        }
+        if (env_rm_spv && *env_rm_spv) {
+            std::string list(env_rm_spv);
+            size_t pos = 0;
+            while (pos < list.size()) {
+                size_t comma = list.find(',', pos);
+                if (comma == std::string::npos) comma = list.size();
+                std::string name = list.substr(pos, comma - pos);
+                if (!name.empty()) {
+                    for (const wchar_t* sub : {L"shaders", L"shaders-gfx11"}) {
+                        std::error_code ec;
+                        std::filesystem::remove(temp_root / sub / name, ec);
+                    }
+                }
+                pos = comma + 1;
+            }
+        }
+        if (cache_dir.empty()) {
+            const auto cdir = temp_root / "cache";
+            std::filesystem::create_directories(cdir);
+            cache_dir = cdir.wstring();
+        }
+        data_dir = temp_root.wstring();
+    }
+
+    ~StagedDataDir() {
+        if (!temp_root.empty()) {
+            std::error_code ec;
+            std::filesystem::remove_all(temp_root, ec);
+        }
+    }
+};
+
 }  // namespace
 
 int wmain(int argc, wchar_t** argv) {
@@ -121,6 +191,7 @@ int wmain(int argc, wchar_t** argv) {
 
         HMODULE dll = LoadLibraryW(argv[1]);
         if (!dll) throw std::runtime_error("cannot load the runtime DLL");
+        if (auto vk_load = reinterpret_cast<void(*)()>(GetProcAddress(dll, "rr_vk_load"))) vk_load();
         auto get = reinterpret_cast<PFN_OnrRrGetApi>(GetProcAddress(dll, "OnrRrGetApi"));
         OnrRrApi5 a5{};
         OnrRrApi& api = a5.v4.v3.v2.v1;
@@ -145,16 +216,38 @@ int wmain(int argc, wchar_t** argv) {
         std::vector<VkPhysicalDevice> pds(n);
         vkEnumeratePhysicalDevices(inst, &n, pds.data());
         VkPhysicalDevice pd = VK_NULL_HANDLE;
-        for (auto p : pds) {
-            VkPhysicalDeviceProperties pp;
-            vkGetPhysicalDeviceProperties(p, &pp);
-            if (pp.vendorID == 0x1002 && pp.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
-                pd = p;
-                printf("Vulkan device: %s\n", pp.deviceName);
-                break;
+        const char* want_gpu = getenv("ONR_GPU_NAME");
+        auto icontains = [](const char* hay, const char* needle) {
+            if (!needle || !*needle) return true;
+            for (const char* p = hay; *p; ++p) {
+                const char* a = p;
+                const char* b = needle;
+                while (*a && *b && tolower(static_cast<unsigned char>(*a)) == tolower(static_cast<unsigned char>(*b))) ++a, ++b;
+                if (!*b) return true;
+            }
+            return false;
+        };
+        for (int pass = 0; pass < 3 && !pd; ++pass) {
+            for (auto p : pds) {
+                VkPhysicalDeviceProperties pp;
+                vkGetPhysicalDeviceProperties(p, &pp);
+                if (want_gpu && *want_gpu) {
+                    if (pass == 0 && icontains(pp.deviceName, want_gpu)) {
+                        pd = p;
+                        printf("Vulkan device: %s\n", pp.deviceName);
+                        break;
+                    }
+                    continue;
+                }
+                if ((pass == 0 && pp.vendorID == 0x1002 && pp.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) ||
+                    (pass == 1 && pp.vendorID == 0x1002)) {
+                    pd = p;
+                    printf("Vulkan device: %s\n", pp.deviceName);
+                    break;
+                }
             }
         }
-        if (!pd) throw std::runtime_error("no discrete AMD GPU");
+        if (!pd) throw std::runtime_error("no matching AMD GPU");
         VkPhysicalDeviceIDProperties idp{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES};
         VkPhysicalDeviceProperties2 pp2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &idp};
         vkGetPhysicalDeviceProperties2(pd, &pp2);
@@ -358,7 +451,10 @@ int wmain(int argc, wchar_t** argv) {
         submit_wait();
 
         OnrRrVkDevice vd{sizeof vd, VK_API_VERSION_1_3, inst, pd, dev, rfam, ridx};
-        OnrRrCreateInfo ci{sizeof ci, ONR_RR_MODE_FAST, nullptr, RW, RH, OW, OH, argv[3], nullptr, argv[2], nullptr, ONR_RR_BACKEND_CHOICE_AUTO, &vd};
+        const StagedDataDir staged(argv[2], _wgetenv(L"ONR_CACHE_DIR"), getenv("ONR_ACO_DIR"));
+        const wchar_t* log_path_env = _wgetenv(L"ONR_LOG_PATH");
+        OnrRrCreateInfo ci{sizeof ci, ONR_RR_MODE_FAST, nullptr, RW, RH, OW, OH, argv[3],
+                           staged.cache_dir.empty() ? nullptr : staged.cache_dir.c_str(), staged.data_dir.c_str(), log_path_env, ONR_RR_BACKEND_CHOICE_AUTO, &vd};
         if (const char* e = getenv("ONR_VALIDATE_RENDER")) {   // WxH: a smaller render size, the guides' top left corner
             UINT w = 0, h = 0;
             if (sscanf_s(e, "%ux%u", &w, &h) == 2 && w && h && w <= RW && h <= RH) ci.max_render_width = w, ci.max_render_height = h;
@@ -388,7 +484,13 @@ int wmain(int argc, wchar_t** argv) {
 
         // the second feature (ONR_VALIDATE_VK_SECOND)
         const bool second = getenv("ONR_VALIDATE_VK_SECOND") && comp != UINT32_MAX;
-        const uint32_t RW2 = 426, RH2 = 240, OW2 = 640, OH2 = 360;
+        uint32_t OW2 = 640, OH2 = 360;
+        if (const char* so = getenv("ONR_VALIDATE_VK_SECOND_OUT")) {
+            UINT w2 = 0, h2 = 0;
+            if (sscanf_s(so, "%ux%u", &w2, &h2) == 2 && w2 && h2) OW2 = w2, OH2 = h2;
+        }
+        const uint32_t RW2 = std::min(RW, OW2 * 2 / 3), RH2 = std::min(RH, OH2 * 2 / 3);
+        const bool expect_second_network = OW2 >= 960 || getenv("ONR_RR_SMALL_VIEWS") != nullptr;
         uint32_t cw = ci.max_render_width, chh = ci.max_render_height, sw2 = RW2, sh2 = RH2;   // the render sizes recorded (CHURN changes them)
         Img tex2[8], out2;
         VkQueue qc = VK_NULL_HANDLE;
@@ -589,9 +691,11 @@ int wmain(int argc, wchar_t** argv) {
         if (second) {
             maker.join();
             if (made.load() < 0) throw std::runtime_error("Create (second feature): " + made_err);
-            printf("second feature created (426x240 -> 640x360, compute queue)\n");
+            printf("second feature created (%ux%u -> %ux%u, compute queue, %s)\n", RW2, RH2, OW2, OH2,
+                   expect_second_network ? "network" : "scaled colour");
         }
         printf("frame  PSNR dB  equal %%   GPU ms (ingest + network + pack)  output hash\n");
+        const bool no_ref = (frames == L"-");
         int bad = 0;
         double lo = 1e9, hi = 0;
         for (int f = 0; f < nframes; ++f) {
@@ -605,40 +709,61 @@ int wmain(int argc, wchar_t** argv) {
                        get_fast(ctx));
             }
             api.GetInfo(ctx, &info);
+            if (info.state == ONR_RR_STATE_FAILED) throw std::runtime_error(std::string("runtime failed: ") + info.message);
+            if (getenv("ONR_VALIDATE_FAST") && get_fast && get_fast(ctx) == 3)
+                throw std::runtime_error("fast mode failed (GetFastMode=3)");
             const uint16_t* m = static_cast<const uint16_t*>(rb.map);
-            wchar_t p[MAX_PATH];
-            swprintf_s(p, L"%s\\f%04d_output.raw", frames.c_str(), f);
-            auto ref = read_file(p);
-            const uint16_t* r = reinterpret_cast<const uint16_t*>(ref.data());
-            double se = 0, peak = 0;
+            double db = 0.0;
             size_t cnt = 0, eq = 0, non_finite = 0;
             uint64_t hash = 1469598103934665603ull;
-            for (size_t i = 0; i < size_t(OW) * OH * 4; ++i) {
-                hash = (hash ^ m[i]) * 1099511628211ull;
-                if (i % 4 == 3) continue;
-                double u = h2f(m[i]), v = h2f(r[i]);
-                if (!std::isfinite(u) || !std::isfinite(v)) non_finite++;
-                else se += (u - v) * (u - v), peak = std::max(peak, std::fabs(v)), ++cnt, eq += m[i] == r[i];
+            if (no_ref) {
+                for (size_t i = 0; i < size_t(OW) * OH * 4; ++i) {
+                    hash = (hash ^ m[i]) * 1099511628211ull;
+                    if (i % 4 == 3) continue;
+                    if (!std::isfinite(h2f(m[i]))) non_finite++;
+                }
+                printf("%5d        -        -  %7.2f  %016llx\n", f, info.gpu_ms_last, (unsigned long long)hash);
+                bad += non_finite > 0;
+            } else {
+                wchar_t p[MAX_PATH];
+                swprintf_s(p, L"%s\\f%04d_output.raw", frames.c_str(), f);
+                auto ref = read_file(p);
+                const uint16_t* r = reinterpret_cast<const uint16_t*>(ref.data());
+                double se = 0, peak = 0;
+                for (size_t i = 0; i < size_t(OW) * OH * 4; ++i) {
+                    hash = (hash ^ m[i]) * 1099511628211ull;
+                    if (i % 4 == 3) continue;
+                    double u = h2f(m[i]), v = h2f(r[i]);
+                    if (!std::isfinite(u) || !std::isfinite(v)) non_finite++;
+                    else se += (u - v) * (u - v), peak = std::max(peak, std::fabs(v)), ++cnt, eq += m[i] == r[i];
+                }
+                db = (non_finite == 0 && cnt > 0 && std::isfinite(se) && std::isfinite(peak) && se >= 0.0)
+                         ? (se > 0.0 ? (peak > 0.0 ? 10 * std::log10(peak * peak / (se / double(cnt))) : 0.0) : 999.0)
+                         : 0.0;
+                if (!std::isfinite(db)) db = 0.0;
+                lo = std::min(lo, db), hi = std::max(hi, db);
+                printf("%5d  %7.2f  %7.3f  %7.2f  %016llx\n", f, db, cnt ? 100.0 * double(eq) / double(cnt) : 0.0, info.gpu_ms_last, (unsigned long long)hash);
+                bad += !(db >= 45.0) || non_finite > 0;
             }
-            double db = (non_finite == 0 && cnt > 0 && std::isfinite(se) && std::isfinite(peak) && se >= 0.0)
-                            ? (se > 0.0 ? (peak > 0.0 ? 10 * std::log10(peak * peak / (se / double(cnt))) : 0.0) : 999.0)
-                            : 0.0;
-            if (!std::isfinite(db)) db = 0.0;
-            lo = std::min(lo, db), hi = std::max(hi, db);
-            printf("%5d  %7.2f  %7.3f  %7.2f  %016llx\n", f, db, cnt ? 100.0 * double(eq) / double(cnt) : 0.0, info.gpu_ms_last, (unsigned long long)hash);
             // ONR_VALIDATE_DUMP=<prefix>: every frame's output, rgba16f rows, as <prefix><frame>.raw (as the D3D12 validator)
             if (const char* dp = getenv("ONR_VALIDATE_DUMP")) {
                 char fn[512];
                 snprintf(fn, sizeof fn, "%s%04d.raw", dp, f);
                 if (FILE* df = fopen(fn, "wb")) fwrite(m, 2, size_t(OW) * OH * 4, df), fclose(df);
             }
-            bad += !(db >= 45.0) || non_finite > 0;
         }
-        printf("PSNR %.2f .. %.2f dB over %d frames%s\n", lo, hi, nframes, bad ? " (some below 45 dB)" : "");
+        if (no_ref) {
+            printf("validated %d frames without reference (%s)\n", nframes, bad ? "non-finite detected" : "all finite");
+        } else {
+            printf("PSNR %.2f .. %.2f dB over %d frames%s\n", lo, hi, nframes, bad ? " (some below 45 dB)" : "");
+        }
         if (const char* lp = getenv("ONR_VALIDATE_LOOP")) {
             rec_ms = 0, rec_n = 0;
             for (int i = 0, k = atoi(lp); i < k; ++i) run_frame(nframes - 1, false);
             api.GetInfo(ctx, &info);
+            if (info.state == ONR_RR_STATE_FAILED) throw std::runtime_error(std::string("runtime failed: ") + info.message);
+            if (getenv("ONR_VALIDATE_FAST") && get_fast && get_fast(ctx) == 3)
+                throw std::runtime_error("fast mode failed (GetFastMode=3)");
             printf("loop of %s frames: GPU %.2f ms (average of the last 64: %.2f ms); RecordVk on the command buffer, host timestamps: %.3f ms mean\n",
                    lp, info.gpu_ms_last, info.gpu_ms_average, rec_n ? rec_ms / rec_n : 0.0);
         }
@@ -663,7 +788,14 @@ int wmain(int argc, wchar_t** argv) {
                 api.Destroy(ctx);
                 ctx = nullptr;
                 const bool alt = (k & 1) == 0;
-                cw = alt ? 1129 : RW, chh = alt ? 635 : RH, sw2 = alt ? 376 : RW2, sh2 = alt ? 211 : RH2;
+                cw = alt ? 1129 : RW, chh = alt ? 635 : RH;
+                if (OW2 < 960) {
+                    sw2 = alt ? 376 : RW2, sh2 = alt ? 211 : RH2;
+                } else {
+                    sw2 = alt ? ((RW2 * 85 / 100) & ~1u) : RW2, sh2 = alt ? ((RH2 * 85 / 100) & ~1u) : RH2;
+                }
+                const uint32_t out2_w = (OW2 >= 960) ? OW2 : (sw2 * 3 / 2);
+                const uint32_t out2_h = (OW2 >= 960) ? OH2 : (sh2 * 3 / 2);
                 OnrRrCreateInfo c1 = ci;
                 c1.max_render_width = cw, c1.max_render_height = chh;
                 if (api.Create(&c1, &ctx)) {
@@ -672,7 +804,7 @@ int wmain(int argc, wchar_t** argv) {
                 }
                 maker = std::thread([&] {
                     OnrRrCreateInfo c2 = ci;
-                    c2.max_render_width = sw2, c2.max_render_height = sh2, c2.output_width = sw2 * 3 / 2, c2.output_height = sh2 * 3 / 2;
+                    c2.max_render_width = sw2, c2.max_render_height = sh2, c2.output_width = out2_w, c2.output_height = out2_h;
                     if (api.Create(&c2, &ctx2)) {
                         char e2[512] = {};
                         api.GetLastError(e2, sizeof e2);
@@ -687,19 +819,21 @@ int wmain(int argc, wchar_t** argv) {
                 OnrRrInfo a{sizeof a}, b{sizeof b};
                 for (int i = 0;; ++i) {
                     run_frame(i % nframes, false);
+                    if (made.load() < 0) break;
                     if (made.load() == 1) {
                         api.GetInfo(ctx, &a);
                         api.GetInfo(ctx2, &b);
-                        // a small view runs no network (ONR_RR_SMALL_VIEWS=1 runs it): 120 frames of its scaled colour
-                        const bool small = !strncmp(b.message, "small view", 10);
+                        if (a.state == ONR_RR_STATE_FAILED) throw std::runtime_error(std::string("churn: primary runtime failed: ") + a.message);
+                        if (b.state == ONR_RR_STATE_FAILED) throw std::runtime_error(std::string("churn: secondary runtime failed: ") + b.message);
+                        const bool small = !expect_second_network;
                         if (a.frames >= 120 && (small ? frames2 - f0 >= 120 : b.frames >= 120)) break;
                     }
                     if (std::chrono::steady_clock::now() - c0 > std::chrono::minutes(2)) throw std::runtime_error("churn: networks not running after 2 minutes");
                 }
                 maker.join();
                 if (made.load() < 0) throw std::runtime_error("Create (churn, second feature): " + made_err);
-                printf("churn %d: %ux%u and %ux%u, %d frames of both, network frames %u / %u, GPU %.2f / %.2f ms\n", k + 1, cw, chh, sw2, sh2, frames2 - f0,
-                       a.frames, b.frames, a.gpu_ms_last, b.gpu_ms_last);
+                printf("churn %d: %ux%u and %ux%u -> %ux%u, %d frames of both, network frames %u / %u, GPU %.2f / %.2f ms\n",
+                       k + 1, cw, chh, sw2, sh2, out2_w, out2_h, frames2 - f0, a.frames, b.frames, a.gpu_ms_last, b.gpu_ms_last);
             }
         }
         if (second) {

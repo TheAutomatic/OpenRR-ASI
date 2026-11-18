@@ -258,6 +258,19 @@ struct VulkanOverlay {
         ImGui_ImplVulkan_NewFrame();
         menu_ui.build(extent.height);
         ImGui::SetCurrentContext(context);
+        if (ImDrawData* draw_data = ImGui::GetDrawData(); draw_data && draw_data->Textures) {
+            for (ImTextureData* tex : *draw_data->Textures) {
+                if (tex->Status != ImTextureStatus_OK) {
+                    const bool held = openrr::pe::vkdevice::lock_queue_held(queue);
+                    struct Unlock {
+                        VkQueue q;
+                        bool h;
+                        ~Unlock() { openrr::pe::vkdevice::unlock_queue_held(q, h); }
+                    } unlock{queue, held};
+                    ImGui_ImplVulkan_UpdateTexture(tex);
+                }
+            }
+        }
         VkClearValue clear{};
         VkRenderPassBeginInfo rb{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
         rb.renderPass = draw_pass; rb.framebuffer = menu_frame; rb.renderArea = {{0, 0}, extent};

@@ -23,8 +23,14 @@ void Kernels::load(Gpu& dev, const std::string& dir) {
 
 void Kernels::load(Gpu& dev, const std::string& dir, const std::vector<std::string>& names) {
     const auto base = u8_to_path(dir);
-    for (auto& n : names)
-        if (!k_.count(n)) k_[n] = dev.load(path_to_u8(base / u8_to_path(n + ".spv")), subgroup_of(n));
+    for (auto& n : names) {
+        if (k_.count(n)) continue;
+        const std::string fname = n + ".spv";
+        const auto p = base / u8_to_path(fname);
+        if (!std::filesystem::exists(p))
+            throw std::runtime_error("missing required SPIR-V: " + fname + " (expected at " + path_to_u8(p) + ")");
+        k_[n] = dev.load(path_to_u8(p), subgroup_of(n));
+    }
 }
 
 void Kernels::load_lite(Gpu& dev, const std::string& dir, const std::vector<std::string>& names, const char* suffix) {
@@ -32,6 +38,18 @@ void Kernels::load_lite(Gpu& dev, const std::string& dir, const std::vector<std:
     for (auto& n : names) {
         auto p = base / u8_to_path(n + suffix + ".spv");
         if (!k_.count(n) && std::filesystem::exists(p)) k_[n] = dev.load(path_to_u8(p), subgroup_of(n));
+    }
+}
+
+void Kernels::load_required_variants(Gpu& dev, const std::string& dir, const std::vector<std::string>& names, const char* suffix) {
+    const auto base = u8_to_path(dir);
+    for (auto& n : names) {
+        if (k_.count(n)) continue;
+        const std::string fname = n + suffix + ".spv";
+        const auto p = base / u8_to_path(fname);
+        if (!std::filesystem::exists(p))
+            throw std::runtime_error("missing required SPIR-V: " + fname + " (expected at " + path_to_u8(p) + ")");
+        k_[n] = dev.load(path_to_u8(p), subgroup_of(n));
     }
 }
 

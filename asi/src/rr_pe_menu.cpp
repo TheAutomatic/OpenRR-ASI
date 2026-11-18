@@ -8,6 +8,7 @@
 #include "mingw_d3d12_compat.h"
 #include "rr_control_shared.hpp"
 #include "rr_ini_edit.hpp"
+#include "rr_lang.hpp"
 #include "rr_menu_font.hpp"
 #include "rr_pe_config.hpp"
 #include "rr_pe_control.hpp"
@@ -210,7 +211,6 @@ struct Menu {
     }
 
     static constexpr int kThemes = 6;
-    static constexpr const char* kThemeNames[kThemes] = {"Blue", "Teal", "Violet", "Amber", "Crimson", "Graphite"};
 
     static ImVec4 theme_accent(int theme) {
         static const ImVec4 accents[kThemes] = {
@@ -303,8 +303,30 @@ struct Menu {
     float window_scale = 0.f;
     ImVec2 window_size{};
     int theme_now = -1;
+    std::string lang_built = "\x01";
+
+    // [OpenRR] Language's folder: openrr-amd\lang beside the module (drop-in layout: lang beside the module too)
+    static std::string lang_folder() {
+        const std::string base = openrr::pe::module_folder();
+        WIN32_FILE_ATTRIBUTE_DATA a{};
+        if (openrr::u8::attributes_ex(base + "\\openrr-amd\\lang", &a) &&
+            (a.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
+            return base + "\\openrr-amd\\lang";
+        return base + "\\lang";
+    }
+
+    static const char* tr_id(const char* text, const char* id_suffix) {
+        thread_local char buf[512];
+        std::snprintf(buf, sizeof(buf), "%s%s", text ? text : "", id_suffix ? id_suffix : "");
+        return buf;
+    }
 
     bool fonts_for(uint32_t height) {
+        // Check language first: its glyphs may require rebuilding the atlas even at the same pixel height.
+        const bool lang_changed = openrr::lang::sync(lang_folder(), ini.get("OpenRR", "Language", ""));
+        const std::string lang_now = openrr::lang::suspended()
+            ? "!"
+            : openrr::lang::table().name + "#" + std::to_string(openrr::lang::table().entries);
         if (const int t = theme(); t != theme_now && font_px > 0.f) { theme_now = t; apply_style(style_scale, t); }
         float scale = openrr::parse_float(ini.get("OpenRR", "MenuScale", "1"), 1.0f);
         if (!(scale >= 0.5f && scale <= 3.f)) scale = 1.f;
@@ -312,8 +334,9 @@ struct Menu {
         if (!(text >= 0.75f && text <= 2.f)) text = 1.f;
         const float menu_px = std::clamp(std::round(float(height) / 1080.f * 17.f * scale), 12.f, 72.f);
         const float px = std::clamp(std::round(menu_px * text), 9.f, 144.f);
-        if (px == font_px) return false;
+        if (px == font_px && lang_now == lang_built && !lang_changed) return false;
         font_px = px;
+        lang_built = lang_now;
         auto& io = ImGui::GetIO();
         io.Fonts->Clear();
         ImFontConfig cfg;
@@ -321,6 +344,52 @@ struct Menu {
         cfg.OversampleH = 2;
         cfg.OversampleV = 1;
         io.Fonts->AddFontFromMemoryTTF(const_cast<unsigned char*>(kMenuFont), int(kMenuFontSize), px, &cfg);
+        openrr::lang::suspended() = false;
+        if (!openrr::lang::table().code_points.empty()) {
+            const std::string folder = lang_folder();
+            std::vector<std::string> try_files;
+            const std::string& named = openrr::lang::table().font;
+            if (!named.empty()) {
+                const bool abs_path = (named.size() >= 2 && named[1] == ':') || named[0] == '\\' || named[0] == '/';
+                try_files.push_back(abs_path ? named : folder + "\\" + named);
+            }
+            try_files.push_back(folder + "\\fonts\\NotoSansCJKsc-Regular.ttf");
+            try_files.push_back("C:\\Windows\\Fonts\\msyh.ttc");
+            try_files.push_back("C:\\Windows\\Fonts\\simhei.ttf");
+            ImFontGlyphRangesBuilder rb;
+            for (unsigned cp : openrr::lang::table().code_points) rb.AddChar(ImWchar(cp));
+            static ImVector<ImWchar> ranges;   // static: AddFontFromFileTTF keeps the pointer
+            ranges.clear();
+            rb.BuildRanges(&ranges);
+            ImFont* merged = nullptr;
+            for (const std::string& f : try_files) {
+                const DWORD attrs = openrr::u8::attributes(f);
+                if (attrs == INVALID_FILE_ATTRIBUTES || (attrs & FILE_ATTRIBUTE_DIRECTORY)) continue;
+                ImFontConfig mc;               // FontDataOwnedByAtlas=true so AddFontFromFileTTF frees its buffer
+                mc.MergeMode = true;
+                mc.OversampleH = 2;
+                mc.OversampleV = 1;
+                mc.Flags |= ImFontFlags_NoLoadError;
+                merged = io.Fonts->AddFontFromFileTTF(f.c_str(), px, &mc, ranges.Data);
+                if (merged) break;
+            }
+            if (!merged) {
+                openrr::lang::suspended() = true;
+            } else {
+                // Verify all needed BMP glyphs exist in the merged fallback font; otherwise keep English.
+                io.Fonts->Build();
+                if (ImFontBaked* baked = merged->GetFontBaked(px)) {
+                    for (unsigned cp : openrr::lang::table().code_points) {
+                        if (!baked->FindGlyphNoFallback(ImWchar(cp))) {
+                            openrr::lang::suspended() = true;
+                            break;
+                        }
+                    }
+                } else {
+                    openrr::lang::suspended() = true;
+                }
+            }
+        }
         theme_now = theme();
         style_scale = menu_px / 17.f;
         apply_style(style_scale, theme_now);
@@ -415,130 +484,171 @@ struct Menu {
                             gpu.empty() ? "" : "  |  ", gpu.c_str());
         ImGui::Separator();
 
-        checkbox_ini("Enable OpenRR (Ray Reconstruction)", "Enabled", true);
+        checkbox_ini(openrr::lang::tr("Enable OpenRR (Ray Reconstruction)"), "Enabled", true);
         ImGui::SameLine();
-        ImGui::TextDisabled("(Menu key: %s)", openrr::pe::vk_name(g_input.open_vk, g_input.open_mods).c_str());
+        ImGui::TextDisabled(openrr::lang::tr("(Menu key: %s)"), openrr::pe::vk_name(g_input.open_vk, g_input.open_mods).c_str());
 
         ImGui::Spacing();
-        if (ImGui::CollapsingHeader("Status", ImGuiTreeNodeFlags_DefaultOpen)) {
+        if (ImGui::CollapsingHeader(tr_id(openrr::lang::tr("Status"), "##sec_status"), ImGuiTreeNodeFlags_DefaultOpen)) {
             if (!s || !s->rr_active) {
-                ImGui::TextWrapped("Idle: waiting for the game to create a DLSS Ray Reconstruction feature.");
+                ImGui::TextWrapped("%s", openrr::lang::tr("Idle: waiting for the game to create a DLSS Ray Reconstruction feature."));
                 if (s && s->message[0]) {
-                    ImGui::TextDisabled("Note: %s", s->message);
+                    ImGui::TextDisabled(openrr::lang::tr("Note: %s"), s->message);
                 }
             } else {
-                const char* st_name = s->state == ONR_RR_STATE_READY      ? "Ready"
-                                    : s->state == ONR_RR_STATE_BUILDING   ? "Building network..."
-                                    : s->state == ONR_RR_STATE_FAILED     ? "Failed"
-                                                                          : "Unknown";
-                const char* be_name = s->backend == ONR_RR_BACKEND_D3D12       ? "D3D12 Direct ELF"
-                                    : s->backend == ONR_RR_BACKEND_VULKAN_HOST ? "Vulkan Host (RecordVk)"
-                                                                               : "Vulkan Interop Bridge";
-                ImGui::Text("State: %s%s%s%s", st_name,
+                const char* st_name = s->state == ONR_RR_STATE_READY      ? openrr::lang::tr("Ready")
+                                    : s->state == ONR_RR_STATE_BUILDING   ? openrr::lang::tr("Building network...")
+                                    : s->state == ONR_RR_STATE_FAILED     ? openrr::lang::tr("Failed")
+                                                                          : openrr::lang::tr("Unknown");
+                const char* be_name = s->backend == ONR_RR_BACKEND_D3D12       ? openrr::lang::tr("D3D12 Direct ELF")
+                                    : s->backend == ONR_RR_BACKEND_VULKAN_HOST ? openrr::lang::tr("Vulkan Host (RecordVk)")
+                                                                               : openrr::lang::tr("Vulkan Interop Bridge");
+                ImGui::Text(openrr::lang::tr("State: %s%s%s%s"), st_name,
                             s->message[0] ? " (" : "", s->message, s->message[0] ? ")" : "");
-                ImGui::Text("Backend: %s", be_name);
+                ImGui::Text(openrr::lang::tr("Backend: %s"), be_name);
                 if (s->backend_message[0]) {
-                    ImGui::TextDisabled("Backend note: %s", s->backend_message);
+                    ImGui::TextDisabled(openrr::lang::tr("Backend note: %s"), s->backend_message);
                 }
                 if (s->render_width && s->output_width) {
-                    ImGui::Text("Resolution: %ux%u -> %ux%u",
+                    ImGui::Text(openrr::lang::tr("Resolution: %ux%u -> %ux%u"),
                                 s->render_width, s->render_height, s->output_width, s->output_height);
                 }
-                ImGui::Text("GPU time (raw): %.2f ms (p50 %.2f ms, p95 %.2f ms)  |  Frames: %u",
+                ImGui::Text(openrr::lang::tr("GPU time (raw): %.2f ms (p50 %.2f ms, p95 %.2f ms)  |  Frames: %u"),
                             double(s->gpu_raw_last), double(s->gpu_raw_p50), double(s->gpu_raw_p95), s->frames);
-                ImGui::TextDisabled("Est. w/o async preemption: %.2f ms (avg %.2f ms)",
+                ImGui::TextDisabled(openrr::lang::tr("Est. w/o async preemption: %.2f ms (avg %.2f ms)"),
                                     double(s->gpu_ms_last), double(s->gpu_ms_average));
                 if (s->weights_source[0]) {
-                    ImGui::TextWrapped("Weights: %s", s->weights_source);
+                    ImGui::TextWrapped(openrr::lang::tr("Weights: %s"), s->weights_source);
                 }
             }
             if (s && s->coexist_mochi) {
-                ImGui::TextDisabled("Coexistence: dlssnr-amd.asi detected (Direct path active)");
+                ImGui::TextDisabled("%s", openrr::lang::tr("Coexistence: dlssnr-amd.asi detected (Direct path active)"));
             }
         }
 
         ImGui::Spacing();
-        if (ImGui::CollapsingHeader("Execution & Backend", ImGuiTreeNodeFlags_DefaultOpen)) {
+        if (ImGui::CollapsingHeader(tr_id(openrr::lang::tr("Execution & Backend"), "##sec_exec"), ImGuiTreeNodeFlags_DefaultOpen)) {
             const std::string be = ini.get("OpenRR", "Backend", "auto");
             int be_idx = (be == "d3d12") ? 1 : (be == "vulkan") ? 2 : 0;
-            const char* be_items[] = {"Auto (D3D12 Direct preferred)", "D3D12 Direct ELF", "Vulkan Interop Bridge"};
-            if (ImGui::Combo("D3D12 Backend", &be_idx, be_items, 3)) {
+            if (ImGui::Combo(openrr::lang::tr("D3D12 Backend"), &be_idx,
+                             openrr::lang::tr_items("Auto (D3D12 Direct preferred)\0D3D12 Direct ELF\0Vulkan Interop Bridge\0"))) {
                 ini.set("OpenRR", "Backend", be_idx == 1 ? "d3d12" : be_idx == 2 ? "vulkan" : "auto");
             }
 
-            const std::string mode = ini.get("OpenRR", "Mode", "new");
-            int mode_idx = (mode == "legacy" || mode == "0") ? 1 : 0;
-            const char* mode_items[] = {"Fast (_lt kernels, recommended)", "Legacy (full-precision _f kernels)"};
-            if (ImGui::Combo("Network Mode", &mode_idx, mode_items, 2)) {
-                ini.set("OpenRR", "Mode", mode_idx == 1 ? "legacy" : "new");
+            int mode_idx = openrr::pe::network_mode_level(ini.get("OpenRR", "Mode", "new"));
+            const char* mode_values[] = {"legacy", "new", "fast"};
+            if (ImGui::Combo(openrr::lang::tr("Network Mode"), &mode_idx,
+                             openrr::lang::tr_items("Legacy\0New (recommended)\0Fast (experimental)\0"))) {
+                ini.set("OpenRR", "Mode", mode_values[mode_idx]);
+            }
+            if (s && s->rr_active) {
+                const char* active_modes[] = {
+                    openrr::lang::tr("Legacy"),
+                    openrr::lang::tr("New"),
+                    openrr::lang::tr("Building fast kernels"),
+                    openrr::lang::tr("Fast kernels unavailable"),
+                    openrr::lang::tr("Fast (experimental)")
+                };
+                if (s->fast_mode < IM_ARRAYSIZE(active_modes))
+                    ImGui::TextDisabled(openrr::lang::tr("Runtime: %s"), active_modes[s->fast_mode]);
             }
 
             const std::string cs = ini.get("OpenRR", "CoexistSplit", "auto");
             int cs_idx = (cs == "off" || cs == "0" || cs == "false") ? 1 : 0;
-            const char* cs_items[] = {"Auto (disable split when dlssnr-amd is present)", "Off (never split command lists)"};
-            if (ImGui::Combo("Coexist Split", &cs_idx, cs_items, 2)) {
+            if (ImGui::Combo(openrr::lang::tr("Coexist Split"), &cs_idx,
+                             openrr::lang::tr_items("Auto (disable split when dlssnr-amd is present)\0Off (never split command lists)\0"))) {
                 ini.set("OpenRR", "CoexistSplit", cs_idx == 1 ? "off" : "auto");
             }
 
             const std::string hw = ini.get("OpenRR", "HardwareDepth", "auto");
             int hw_idx = (hw == "true" || hw == "1") ? 1 : (hw == "false" || hw == "0") ? 2 : 0;
-            const char* hw_items[] = {"Auto", "Hardware Depth (NDC)", "Linear Depth"};
-            if (ImGui::Combo("Depth Type", &hw_idx, hw_items, 3)) {
+            if (ImGui::Combo(openrr::lang::tr("Depth Type"), &hw_idx,
+                             openrr::lang::tr_items("Auto\0Hardware Depth (NDC)\0Linear Depth\0"))) {
                 ini.set("OpenRR", "HardwareDepth", hw_idx == 1 ? "true" : hw_idx == 2 ? "false" : "auto");
             }
 
             const std::string vkl = ini.get("OpenRR", "VkInputLayout", "shader_read");
             int vkl_idx = (vkl == "general") ? 1 : 0;
-            const char* vkl_items[] = {"Shader Read Optimal", "General"};
-            if (ImGui::Combo("Vulkan Input Layout", &vkl_idx, vkl_items, 2)) {
+            if (ImGui::Combo(openrr::lang::tr("Vulkan Input Layout"), &vkl_idx,
+                             openrr::lang::tr_items("Shader Read Optimal\0General\0"))) {
                 ini.set("OpenRR", "VkInputLayout", vkl_idx == 1 ? "general" : "shader_read");
             }
+#ifdef OPENRR_EXPERIMENTAL_OPTIFG_HOST
+            checkbox_ini(openrr::lang::tr("OptiFG Host Bridge (experimental)"), "OptiFGHost", false);
+            ImGui::SetItemTooltip("%s", openrr::lang::tr("Restart required. Set OptiScaler's [Libraries] NvngxPath to load openrr-ngx-host.dll."));
+#endif
         }
 
         ImGui::Spacing();
-        if (ImGui::CollapsingHeader("Guides")) {
-            checkbox_ini("Use Disocclusion Mask", "UseDisocclusionMask", true);
-            checkbox_ini("Invert Disocclusion Mask", "InvertDisocclusionMask", false);
-            checkbox_ini("Clamp Disocclusion Mask (0..1)", "ClampDisocclusionMask", true);
+        if (ImGui::CollapsingHeader(tr_id(openrr::lang::tr("Guides"), "##sec_guides"))) {
+            checkbox_ini(openrr::lang::tr("Use Disocclusion Mask"), "UseDisocclusionMask", true);
+            checkbox_ini(openrr::lang::tr("Invert Disocclusion Mask"), "InvertDisocclusionMask", false);
+            checkbox_ini(openrr::lang::tr("Clamp Disocclusion Mask (0..1)"), "ClampDisocclusionMask", true);
             float dm_scale = openrr::parse_float(ini.get("OpenRR", "DisocclusionMaskScale", "1.0"), 1.0f);
-            if (ImGui::SliderFloat("Disocclusion Mask Scale", &dm_scale, 0.1f, 4.0f, "%.2f")) {
+            if (ImGui::SliderFloat(openrr::lang::tr("Disocclusion Mask Scale"), &dm_scale, 0.1f, 4.0f, "%.2f")) {
                 char buf[32];
                 std::snprintf(buf, sizeof buf, "%.2f", double(dm_scale));
                 ini.set("OpenRR", "DisocclusionMaskScale", buf);
             }
             ImGui::Separator();
-            checkbox_ini("Use SSS Guide (ColorBeforeFog)", "UseSssGuide", true);
-            checkbox_ini("Use Responsivity Mask", "UseResponsivityMask", false);
-            checkbox_ini("Use Color Before Transparency", "UseColorBeforeTransparency", false);
-            checkbox_ini("Use Depth of Field Guide", "UseDepthOfFieldGuide", false);
-            checkbox_ini("Use Reflection Motion Vectors", "UseReflectionMotionVectors", false);
-            checkbox_ini("Use Transparency Layer Opacity & Motion", "UseLayerOpacityAndMotion", false);
+            checkbox_ini(openrr::lang::tr("Use SSS Guide (ColorBeforeFog)"), "UseSssGuide", true);
+            checkbox_ini(openrr::lang::tr("Use Responsivity Mask"), "UseResponsivityMask", false);
+            checkbox_ini(openrr::lang::tr("Use Color Before Transparency"), "UseColorBeforeTransparency", false);
+            checkbox_ini(openrr::lang::tr("Use Depth of Field Guide"), "UseDepthOfFieldGuide", false);
+            checkbox_ini(openrr::lang::tr("Use Reflection Motion Vectors"), "UseReflectionMotionVectors", false);
+            checkbox_ini(openrr::lang::tr("Use Transparency Layer Opacity & Motion"), "UseLayerOpacityAndMotion", false);
         }
 
         ImGui::Spacing();
-        if (ImGui::CollapsingHeader("Menu & Hotkeys")) {
-            checkbox_ini("Pass OptiScaler Key (Insert) while open", "PassOptiScalerKey", true);
+        if (ImGui::CollapsingHeader(tr_id(openrr::lang::tr("Menu & Hotkeys"), "##sec_menu"))) {
+            char menu_key_text[64];
+            std::snprintf(menu_key_text, sizeof menu_key_text, "%s", ini.get("OpenRR", "MenuKey", "optiscaler").c_str());
+            if (ImGui::InputText(openrr::lang::tr("Menu Key"), menu_key_text, sizeof menu_key_text, ImGuiInputTextFlags_EnterReturnsTrue)) {
+                int vk = 0;
+                if (openrr::pe::parse_key(menu_key_text, &vk) && vk)
+                    ini.set("OpenRR", "MenuKey", menu_key_text);
+            }
+            ImGui::SetItemTooltip("%s", openrr::lang::tr("Enter a key such as F7 or Ctrl+F7, then press Enter."));
+            if (ImGui::Button(openrr::lang::tr("Use OptiScaler Shortcut")))
+                ini.set("OpenRR", "MenuKey", "optiscaler");
+            checkbox_ini(openrr::lang::tr("Pass OptiScaler Key (Insert) while open"), "PassOptiScalerKey", true);
             float mscale = openrr::parse_float(ini.get("OpenRR", "MenuScale", "1.0"), 1.0f);
-            if (ImGui::SliderFloat("Menu Size", &mscale, 0.75f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp)) {
+            if (ImGui::SliderFloat(openrr::lang::tr("Menu Size"), &mscale, 0.75f, 2.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp)) {
                 char buf[32];
                 std::snprintf(buf, sizeof buf, "%.2f", double(mscale));
                 ini.set("OpenRR", "MenuScale", buf);
             }
             float tscale = openrr::parse_float(ini.get("OpenRR", "TextScale", "1.0"), 1.0f);
-            if (ImGui::SliderFloat("Text Size", &tscale, 0.75f, 1.75f, "%.2f", ImGuiSliderFlags_AlwaysClamp)) {
+            if (ImGui::SliderFloat(openrr::lang::tr("Text Size"), &tscale, 0.75f, 1.75f, "%.2f", ImGuiSliderFlags_AlwaysClamp)) {
                 char buf[32];
                 std::snprintf(buf, sizeof buf, "%.2f", double(tscale));
                 ini.set("OpenRR", "TextScale", buf);
             }
             int th = theme();
-            if (ImGui::Combo("Theme", &th, kThemeNames, kThemes)) {
+            if (ImGui::Combo(openrr::lang::tr("Theme"), &th,
+                             openrr::lang::tr_items("Blue\0Teal\0Violet\0Amber\0Crimson\0Graphite\0"))) {
                 ini.set("OpenRR", "Theme", std::to_string(th));
             }
+            // [OpenRR] Language: files in openrr-amd\lang; changes take effect next frame via frame-start font rebuild.
+            const std::vector<std::pair<std::string, std::string>> langs = openrr::lang::list(lang_folder());
+            std::vector<const char*> lang_items;
+            lang_items.reserve(langs.size());
+            int lang_sel = 0;
+            const std::string lang_cur = ini.get("OpenRR", "Language", "");
+            for (const auto& [stem, shown] : langs) {
+                lang_items.push_back(shown.c_str());
+                if (stem == lang_cur) lang_sel = int(lang_items.size()) - 1;
+            }
+            if (ImGui::Combo(openrr::lang::tr("Language"), &lang_sel, lang_items.data(), int(lang_items.size()))) {
+                ini.set("OpenRR", "Language", langs[size_t(lang_sel)].first);
+                openrr::pe::log("[openrr] Language -> %s", langs[size_t(lang_sel)].first.c_str());
+            }
+            ImGui::SetItemTooltip("%s", openrr::lang::tr("openrr-amd\\lang\\<name>.txt; the file reloads when it changes."));
         }
 
         ImGui::Spacing();
         ImGui::Separator();
-        if (ImGui::Button("Close")) g_input.close();
+        if (ImGui::Button(openrr::lang::tr("Close"))) g_input.close();
     }
 
     void build(uint32_t height) {
@@ -1245,16 +1355,37 @@ template <int N> HRESULT STDMETHODCALLTYPE resize1_hook(IDXGISwapChain3* sc, UIN
     return hr;
 }
 
+void log_removed_at_present(IDXGISwapChain* sc, HRESULT hr) {
+    if (hr != DXGI_ERROR_DEVICE_REMOVED && hr != DXGI_ERROR_DEVICE_RESET && hr != DXGI_ERROR_DEVICE_HUNG) return;
+    if (!d3d12_diagnostics_enabled()) return;
+    ID3D12Device* device = nullptr;
+    if (FAILED(sc->GetDevice(IID_PPV_ARGS(&device))) || !device) {
+        ID3D12CommandQueue* queue = dxgi_queue::get(sc);
+        if (queue) {
+            queue->GetDevice(IID_PPV_ARGS(&device));
+            queue->Release();
+        }
+    }
+    if (device) {
+        log_d3d12_device_removed(device, "Present");
+        device->Release();
+    }
+}
+
 template <int N> HRESULT STDMETHODCALLTYPE present_hook(IDXGISwapChain* sc, UINT interval, UINT flags) {
     const PresentScope scope;
     if (scope.outermost()) draw_on(sc, flags);
-    return g_present[N](sc, interval, flags);
+    const HRESULT hr = g_present[N](sc, interval, flags);
+    if (scope.outermost()) log_removed_at_present(sc, hr);
+    return hr;
 }
 template <int N> HRESULT STDMETHODCALLTYPE present1_hook(IDXGISwapChain1* sc, UINT interval, UINT flags,
                                                          const DXGI_PRESENT_PARAMETERS* p) {
     const PresentScope scope;
     if (scope.outermost()) draw_on(sc, flags);
-    return g_present1[N](sc, interval, flags, p);
+    const HRESULT hr = g_present1[N](sc, interval, flags, p);
+    if (scope.outermost()) log_removed_at_present(sc, hr);
+    return hr;
 }
 template <int N> HRESULT STDMETHODCALLTYPE colour_space_hook(IDXGISwapChain3* sc, DXGI_COLOR_SPACE_TYPE space) {
     const HRESULT hr = g_colour_space[N](sc, space);

@@ -107,6 +107,76 @@ double uf_val(uint32_t v, int n) {
     return e ? std::ldexp(double(m | 1u << n), int(e) - 15 - n) : std::ldexp(double(m), -14 - n);
 }
 
+struct StagedDataDir {
+    std::wstring data_dir;
+    std::wstring cache_dir;
+    std::filesystem::path temp_root;
+
+    StagedDataDir(const wchar_t* orig_data, const wchar_t* env_cache, const char* env_aco) {
+        if (env_cache && *env_cache) cache_dir = env_cache;
+        const char* env_rm_spv = getenv("ONR_TEST_REMOVE_SPV");
+        const bool need_stage = (env_aco && *env_aco) || (env_rm_spv && *env_rm_spv);
+        if (!need_stage) {
+            data_dir = orig_data ? orig_data : L"";
+            return;
+        }
+        wchar_t tmp[MAX_PATH] = {};
+        GetTempPathW(MAX_PATH, tmp);
+        wchar_t tag[96] = {};
+        swprintf_s(tag, L"openrr_val_stage_%lu_%llu", GetCurrentProcessId(), GetTickCount64());
+        temp_root = std::filesystem::path(tmp) / tag;
+        std::filesystem::create_directories(temp_root);
+        const std::filesystem::path src_data(orig_data);
+        for (const wchar_t* sub : {L"shaders", L"shaders-gfx11", L"aco"}) {
+            if (std::filesystem::exists(src_data / sub)) {
+                std::filesystem::copy(src_data / sub, temp_root / sub,
+                                      std::filesystem::copy_options::recursive | std::filesystem::copy_options::overwrite_existing);
+            }
+        }
+        if (env_aco && *env_aco) {
+            std::filesystem::path aco_src(env_aco);
+            std::filesystem::remove_all(temp_root / "aco");
+            if (std::filesystem::exists(aco_src)) {
+                for (const char* tgt : {"gfx1201", "gfx1200"}) {
+                    const auto dst = temp_root / "aco" / tgt / "openrr-d3d12-v1";
+                    std::filesystem::create_directories(dst.parent_path());
+                    std::filesystem::copy(aco_src, dst,
+                                          std::filesystem::copy_options::recursive | std::filesystem::copy_options::overwrite_existing);
+                }
+            }
+        }
+        if (env_rm_spv && *env_rm_spv) {
+            std::string list(env_rm_spv);
+            size_t pos = 0;
+            while (pos < list.size()) {
+                size_t comma = list.find(',', pos);
+                if (comma == std::string::npos) comma = list.size();
+                std::string name = list.substr(pos, comma - pos);
+                if (!name.empty()) {
+                    for (const wchar_t* sub : {L"shaders", L"shaders-gfx11"}) {
+                        std::error_code ec;
+                        std::filesystem::remove(temp_root / sub / name, ec);
+                    }
+                }
+                pos = comma + 1;
+            }
+        }
+        if (cache_dir.empty()) {
+            const auto cdir = temp_root / "cache";
+            std::filesystem::create_directories(cdir);
+            cache_dir = cdir.wstring();
+        }
+        data_dir = temp_root.wstring();
+    }
+
+    ~StagedDataDir() {
+        if (!temp_root.empty()) {
+            std::error_code ec;
+            std::filesystem::remove_all(temp_root, ec);
+        }
+    }
+};
+
 }  // namespace
 
 int wmain(int argc, wchar_t** argv) {
@@ -135,6 +205,7 @@ int wmain(int argc, wchar_t** argv) {
 
         HMODULE dll = LoadLibraryW(argv[1]);
         if (!dll) throw std::runtime_error("cannot load the runtime DLL");
+        if (auto vk_load = reinterpret_cast<void(*)()>(GetProcAddress(dll, "rr_vk_load"))) vk_load();
         auto get = reinterpret_cast<PFN_OnrRrGetApi>(GetProcAddress(dll, "OnrRrGetApi"));
         OnrRrApi4 a4{};
         OnrRrApi3& a3 = a4.v3;
@@ -161,7 +232,22 @@ int wmain(int argc, wchar_t** argv) {
         IDXGIFactory6* fac = nullptr;
         hr_check(CreateDXGIFactory2(0, IID_PPV_ARGS(&fac)), "CreateDXGIFactory2");
         IDXGIAdapter1* ad = nullptr;
-        hr_check(fac->EnumAdapterByGpuPreference(0, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, IID_PPV_ARGS(&ad)), "adapter");
+        const wchar_t* gpu_filter = _wgetenv(L"ONR_GPU_NAME");
+        for (UINT i = 0;; ++i) {
+            IDXGIAdapter1* cand = nullptr;
+            if (fac->EnumAdapterByGpuPreference(i, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, IID_PPV_ARGS(&cand)) == DXGI_ERROR_NOT_FOUND)
+                break;
+            DXGI_ADAPTER_DESC1 d{};
+            cand->GetDesc1(&d);
+            if (d.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) { cand->Release(); continue; }
+            if (gpu_filter && *gpu_filter) {
+                if (wcsstr(d.Description, gpu_filter)) { ad = cand; break; }
+            } else if (d.VendorId == 0x1002) {
+                ad = cand; break;
+            }
+            cand->Release();
+        }
+        if (!ad) hr_check(fac->EnumAdapterByGpuPreference(0, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, IID_PPV_ARGS(&ad)), "adapter");
         DXGI_ADAPTER_DESC1 add;
         ad->GetDesc1(&add);
         ID3D12Device* dev = nullptr;
@@ -301,13 +387,17 @@ int wmain(int argc, wchar_t** argv) {
         std::map<uint64_t, HostTimes> path_times;   // by network frame: inputs start / end, output start / end
         double enqueue_cpu = 0;
         int enqueue_n = 0;
+        double record_cpu = 0;   // Record's own time on the CPU
+        int record_n = 0;
 
         const char* be = getenv("ONR_VALIDATE_BACKEND");
         const uint32_t choice = !be ? ONR_RR_BACKEND_CHOICE_VULKAN : !_stricmp(be, "d3d12") ? ONR_RR_BACKEND_CHOICE_D3D12
                                 : !_stricmp(be, "auto")                       ? ONR_RR_BACKEND_CHOICE_AUTO
                                                                               : ONR_RR_BACKEND_CHOICE_VULKAN;
+        const StagedDataDir staged(argv[2], _wgetenv(L"ONR_CACHE_DIR"), getenv("ONR_ACO_DIR"));
+        const wchar_t* log_path_env = _wgetenv(L"ONR_LOG_PATH");
         OnrRrCreateInfo ci{sizeof ci, faithful ? uint32_t(ONR_RR_MODE_FAITHFUL) : uint32_t(ONR_RR_MODE_FAST), dev, RW, RH, OW, OH, argv[3],
-                           nullptr, argv[2], nullptr, choice};
+                           staged.cache_dir.empty() ? nullptr : staged.cache_dir.c_str(), staged.data_dir.c_str(), log_path_env, choice};
         void* ctx = nullptr;
         if (api.Create(&ci, &ctx)) {
             api.GetLastError(err, sizeof err);
@@ -674,6 +764,13 @@ int wmain(int argc, wchar_t** argv) {
                 if (re9) d = to_re9(i, d, f);
                 UINT pitch = (RW * gs[i].bpp + 255) & ~255u;
                 for (UINT y = 0; y < RH; ++y) memcpy(um + up_stride * i + UINT64(y) * pitch, d.data() + size_t(y) * RW * gs[i].bpp, size_t(RW) * gs[i].bpp);
+                // ONR_VALIDATE_NAN=1: every 997th texel of the colour and the motion vectors (fp16) as NaN; =2 every other one
+                // as inf, as the Vulkan validator's ONR_VALIDATE_POISON does
+                if (const char* nv = getenv("ONR_VALIDATE_NAN"); nv && (i == 0 || i == 6) && gs[i].bpp % 2 == 0)
+                    for (size_t k = 0; k < size_t(RW) * RH; k += 997) {
+                        const uint16_t v = atoi(nv) == 2 && (k / 997) & 1 ? 0x7C00 : 0x7E00;
+                        memcpy(um + up_stride * i + UINT64(k / RW) * pitch + (k % RW) * gs[i].bpp, &v, 2);
+                    }
                 D3D12_RESOURCE_BARRIER b{D3D12_RESOURCE_BARRIER_TYPE_TRANSITION};
                 b.Transition = {tex[i].res, 0, SRV, D3D12_RESOURCE_STATE_COPY_DEST};
                 cl[0]->ResourceBarrier(1, &b);
@@ -826,7 +923,12 @@ int wmain(int argc, wchar_t** argv) {
                 // the whole frame on the game's list; a hop stops at the image, the host's list, the rest on the second list
                 OnrRrDenoisedImage im{sizeof im};
                 if (half) im.format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-                if (a4.Record(ctx, &fr, cl[0], edit > 0 ? uint32_t(edit) : 0u, edit > 0 ? &im : nullptr, &job)) {
+                LARGE_INTEGER r0, r1;
+                QueryPerformanceCounter(&r0);
+                const int32_t rrc = a4.Record(ctx, &fr, cl[0], edit > 0 ? uint32_t(edit) : 0u, edit > 0 ? &im : nullptr, &job);
+                QueryPerformanceCounter(&r1);
+                record_cpu += double(r1.QuadPart - r0.QuadPart) * 1000.0 / double(qpf.QuadPart), ++record_n;
+                if (rrc) {
                     api.GetLastError(err, sizeof err);
                     throw std::runtime_error(std::string("Record: ") + err);
                 }
@@ -1017,6 +1119,9 @@ int wmain(int argc, wchar_t** argv) {
                 printf("fast mode ready %.2f s after it was asked for (state %d)\n", std::chrono::duration<double>(std::chrono::steady_clock::now() - fast_t0).count(), get_fast(ctx));
             }
             api.GetInfo(ctx, &info);
+            if (info.state == ONR_RR_STATE_FAILED) throw std::runtime_error(std::string("runtime failed: ") + info.message);
+            if (getenv("ONR_VALIDATE_FAST") && get_fast && get_fast(ctx) == 3)
+                throw std::runtime_error("fast mode failed (GetFastMode=3)");
             uint16_t* m = nullptr;
             rb->Map(0, nullptr, reinterpret_cast<void**>(&m));
             wchar_t p[MAX_PATH];
@@ -1079,6 +1184,7 @@ int wmain(int argc, wchar_t** argv) {
             const char* ld = getenv("ONR_VALIDATE_LOOP_DUMP");
             const char* ldc = ld ? strrchr(ld, ',') : nullptr;
             const int ldn = ldc ? atoi(ldc + 1) : 0;
+            record_cpu = 0, record_n = 0;
             for (int i = 0, n = atoi(lp); i < n; ++i) {
                 if (cycle) run_frame(i % nframes);
                 else run_frame(nframes - 1, false);
@@ -1092,6 +1198,9 @@ int wmain(int argc, wchar_t** argv) {
                 }
             }
             api.GetInfo(ctx, &info);
+            if (info.state == ONR_RR_STATE_FAILED) throw std::runtime_error(std::string("runtime failed: ") + info.message);
+            if (getenv("ONR_VALIDATE_FAST") && get_fast && get_fast(ctx) == 3)
+                throw std::runtime_error("fast mode failed (GetFastMode=3)");
             printf("loop of %s frames: GPU %.2f ms (average of the last 64: %.2f ms)\n", lp, info.gpu_ms_last, info.gpu_ms_average);
             // the hops the runtime still keeps (its last 16, less the ones whose submits it has not read back yet)
             double sum[7] = {};
@@ -1147,6 +1256,7 @@ int wmain(int argc, wchar_t** argv) {
                            "second list end %.3f\n",
                            dn, rec / dn, ps2 / dn, ws / dn);
             }
+            if (record_n) printf("Record on the CPU: %.4f ms mean over %d calls\n", record_cpu / record_n, record_n);
             if (enqueue_n) printf("Enqueue on the CPU: %.3f ms mean over %d calls\n", enqueue_cpu / enqueue_n, enqueue_n);
         }
         upload->Unmap(0, nullptr);

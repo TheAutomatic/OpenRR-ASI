@@ -34,6 +34,7 @@ struct DownsampleTlPC {
     float tlmv_scale[2] = {};
     uint64_t op = 0, op_hist_in = 0, op_hist_out = 0;
     uint32_t op_reset = 0;
+    uint32_t tl_view = 0, tl_origin = 0;   // d3d_downsample_tl: the layer from the game's texture (descriptor tl_view - 1)
 };
 struct PostTilePC { uint64_t dfn, ajab, aniso, tile; I2 lr_size; int32_t dfn_stride; };
 struct DfnExportPC { uint64_t dfn, exposure, dst; I2 size; int32_t dfn_stride; uint32_t pitch, half_out; };
@@ -117,8 +118,10 @@ public:
     void load(Gpu& dev, const std::string& spv_dir);
     // only the named kernels (<dir>/<name>.spv); throws when one is missing
     void load(Gpu& dev, const std::string& spv_dir, const std::vector<std::string>& names);
-    // the named kernels that have a <name>_lt.spv (or another suffix), each under its plain name (Engine::set_lite)
+    // the named kernels that have a <name>_lt.spv (or another suffix), each under its plain name (harness/tests)
     void load_lite(Gpu& dev, const std::string& spv_dir, const std::vector<std::string>& names, const char* suffix = "_lt");
+    // strict release fast-mode loader: every <name><suffix>.spv in `names` is required and loaded under <name>
+    void load_required_variants(Gpu& dev, const std::string& spv_dir, const std::vector<std::string>& names, const char* suffix);
     std::vector<std::string> names() const;
     void unload(Gpu& dev);
     const Kernel& operator[](const std::string& n) const { return k_.at(n); }
