@@ -2,15 +2,8 @@ name: Package OpenRR OptiScaler Release
 
 on:
   push:
-    branches:
-      - main
-      - asi-plugin
     tags:
       - 'v*'
-  pull_request:
-    branches:
-      - main
-      - asi-plugin
   workflow_dispatch:
     inputs:
       package_name:
