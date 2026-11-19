@@ -2,13 +2,13 @@
 
 [简体中文](README.md) | English
 
-This repository is a **standalone OptiScaler `.asi` plugin fork** based on [OpenNeuralRendering/OpenRR](https://github.com/OpenNeuralRendering/OpenRR). It runs NVIDIA DLSS Ray Reconstruction (`nvngx_dlssd.dll` 310.9.1) on AMD Radeon RX 9000 series (RDNA4) GPUs.
+This repository is a **standalone OptiScaler `.asi` plugin fork** based on [OpenNeuralRendering/OpenRR](https://github.com/OpenNeuralRendering/OpenRR). It runs NVIDIA DLSS Ray Reconstruction (`nvngx_dlssd.dll` 310.9.1) on AMD Radeon RX 9000 series (RDNA4) and, experimentally, RX 7000 / RDNA3 / RDNA3.5 GPUs.
 
 For details about the OpenRR network reimplementation, RDNA4 shader architecture, clean-room validation methodology, and benchmarks, see the upstream **[OpenNeuralRendering/OpenRR](https://github.com/OpenNeuralRendering/OpenRR)** repository.
 
 ---
 
-This release (**v0.1.7plus**) integrates upstream **v0.1.7** (including fixed RDNA4 ACO routing, RX 7000 / RDNA3 `shaders-gfx11` support, and a unified Windows + Linux Wine / Proton Mesa RADV >= 26.3 release), while retaining its ASI integration, menu, and GPU resource lifetime protections. See [v017-stage10-audit.md](docs/test-evidence/v017-stage10-audit.md) for Stage 10 validation evidence; historical figures for earlier versions are retained below.
+This release (**v0.1.7plus**) integrates upstream **v0.1.7** (including fixed RDNA4 ACO routing, RX 7000 / RDNA3 `shaders-gfx11` support, and a unified Windows + Linux Wine / Proton Mesa RADV >= 26.3 release), while retaining its ASI integration, menu, and GPU resource lifetime protections. See **[v017plus-speed-quality-eval.en.md](docs/test-evidence/v017plus-speed-quality-eval.en.md)** ([简体中文](docs/test-evidence/v017plus-speed-quality-eval.md)) for the full v0.1.7plus speed, image quality, and VRAM evaluation, and [v017-stage10-audit.md](docs/test-evidence/v017-stage10-audit.md) for Stage 10 validation evidence; historical figures for earlier versions are retained at the bottom.
 
 ## What this fork adds
 
@@ -25,6 +25,19 @@ Upstream OpenRR builds as an external `OpenNrRrRuntime.dll` by default and requi
 - **No separate runtime DLL**: `OpenNrRrRuntime` and the GPU engine are statically embedded in `openrr-amd.asi` (approximately 3.4 MB after stripping a release build). Place it in the official OptiScaler `OptiScaler/plugins/` (or legacy `plugins/`) directory to handle DLSS Ray Reconstruction (DLSS-D).
 - **Minimal dependencies and cross-platform support**: the MinGW-w64 build script (`asi/build/build_asi.sh`) statically links runtime libraries and resolves Vulkan entry points on demand through assembly stubs. Dependencies are limited to basic Windows system DLLs, with support for native Windows and Linux Wine / Proton (RADV).
 
+#### Network modes, performance, and VRAM overview (RX 9070 XT, `v0.1.7plus`)
+
+Switch live at runtime from the sidebar menu or via `[OpenRR] Mode` (`new` / `fast` / `legacy`) in `openrr-amd.ini` (on first launch, `New` and `Fast` pipelines compile in the background while output falls back to `Legacy` until ready):
+
+| Mode | 1080p Quality | 1440p Quality | 4K Quality | Speedup vs Official `v0.1.7` (`3×ABBA`) | Quality vs RTX 5090 (47-Frame Mean `PSNR_01` / Reinhard) |
+|---|---|---|---|---|---|
+| **`New` (default)** | `2.80 ms` | `4.79 ms` | `10.50 ms` | **`+6.4% – +8.2%`** (still `+5.3% – +6.9%` faster than `Fp8=1`) | **`49.20 dB` / `54.29 dB`** (`+3.0 dB` above official `v0.1.7`) |
+| **`Fast` (experimental)** | `2.64 ms` | `4.59 ms` | `10.09 ms` | **`+7.7% – +9.2%`** (`0.93 ms` saved at 4K) | `48.44 dB` / `53.49 dB` (deepest temporal reuse; slightly more sensitive on motion/bright highlights) |
+| **`Legacy` (reference)** | `3.66 ms` | `6.18 ms` | `13.47 ms` | **`0-ULP` bit-exact** with upstream FP16 path | `46.96 dB` / `51.87 dB` |
+
+- **Less than half the VRAM of RTX 5090**: lifetime-aliased `Engine::arena_` allocation uses only **`209 / 361 / 586 / 791 MB`** of feature VRAM at 1080p Qual / 1440p Qual / 4K Perf / 4K Qual—saving **`0.7–1.1 GB` (`48%–70%`) at 4K** compared with official NVIDIA NGX on RTX 5090 (`1.32–1.71 GiB` resident, `2.45 GiB` peak under DRS) at comparable image quality. Native Vulkan (`RecordVk`) direct pass-through saves an extra `60–130 MB` over upstream.
+- See the full 6-preset benchmarks, 84-leg `3×ABBA` data, three-way VRAM breakdown, and `v1 + v2_motion` image quality results in **[v0.1.7plus Speed, Image Quality, and VRAM Evaluation Report](docs/test-evidence/v017plus-speed-quality-eval.en.md)** ([简体中文](docs/test-evidence/v017plus-speed-quality-eval.md)).
+
 ### 2. NGX interception, state restoration, and multiple backends
 
 - **Lightweight capability detection**: rewrites NGX `SuperSamplingDenoising` capability parameters. The first query performs a lightweight synchronous check of the `nvngx_dlssd.dll` 310.9.1 version and Vulkan RDNA4 features at instance level, with a 30-second cache for failed checks. Weight parsing and pipeline compilation run on a background thread after `CreateFeature` to avoid blocking the game main thread.
@@ -40,7 +53,7 @@ Upstream OpenRR builds as an external `OpenNrRrRuntime.dll` by default and requi
 ### 4. Built-in ImGui sidebar
 
 - Follows `OptiScaler.ini [Menu] ShortcutKey` (`Insert` by default) and docks to the right of the main OptiScaler panel, respecting its menu scale. Supports SDR, HDR10 PQ, and scRGB composition.
-- Allows in-game switching of `Fast` / `Legacy` network modes, the D3D12 backend, depth type, and additional guides. Changes are saved automatically to `openrr-amd.ini`.
+- Allows in-game switching of `New` / `Fast` / `Legacy` network modes, the D3D12 backend, depth type, and additional guides. Changes are saved automatically to `openrr-amd.ini`.
 
 ### 5. Fixes in `gpu/` and `runtime/`
 
