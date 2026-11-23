@@ -18,13 +18,29 @@ permissions:
 jobs:
   build-and-package:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     container:
       image: ubuntu:26.04
 
     steps:
       - name: Install build toolchain dependencies
+        timeout-minutes: 6
         run: |
           export DEBIAN_FRONTEND=noninteractive
+          cat > /etc/apt/apt.conf.d/99ci-network <<'EOF'
+          Acquire::ForceIPv4 "true";
+          Acquire::Retries "5";
+          Acquire::http::Timeout "30";
+          Acquire::https::Timeout "30";
+          EOF
+          for f in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources; do
+            if [ -f "$f" ]; then
+              sed -i -E \
+                -e 's|https?://([a-z0-9-]+\.)?archive\.ubuntu\.com/ubuntu|http://azure.archive.ubuntu.com/ubuntu|g' \
+                -e 's|https?://security\.ubuntu\.com/ubuntu|http://azure.archive.ubuntu.com/ubuntu|g' \
+                "$f"
+            fi
+          done
           apt-get update
           apt-get install -y --no-install-recommends \
             ca-certificates curl git xz-utils zip unzip pkg-config \
