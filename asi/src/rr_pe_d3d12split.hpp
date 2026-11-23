@@ -69,6 +69,8 @@ void seal(const std::shared_ptr<openrr::gpu::Recording>& rec);
 // Hooks the list's class (once per class) and its queues'. False when lists of this class cannot be
 // cut, or when this list's state since its last Reset is not known yet - the hooks were installed
 // after it was reset - in which case the frame passes through and the next one is cut.
+void set_self_module(HMODULE mod);
+bool is_target_allowed(const void* fn, std::string* out_mod = nullptr);
 bool prepare(ID3D12GraphicsCommandList* list, std::string* why);
 inline bool is_untracked_reset_reason(const std::string& why) {
     return why.find("next Reset (its state is not known yet)") != std::string::npos ||

@@ -9,6 +9,7 @@
 #include "rr_lang.hpp"
 #include "rr_ini_edit.hpp"
 #include "rr_pe_d3d12_hook_policy.hpp"
+#include "rr_pe_d3d12_direct_hooks.hpp"
 #include "rr_pe_d3d12split.hpp"
 #include "rr_pe_vkdevice.hpp"
 #include "rr_pe_vkreset.hpp"
@@ -4532,6 +4533,339 @@ static int test_stage10_r2_fixes() {
     return 0;
 }
 
+namespace hook_safety_test {
+
+struct MockEntry {
+    void* detour = nullptr;
+    void* orig = nullptr;
+    bool queued = false;
+    bool enabled = false;
+};
+
+struct MockState {
+    std::unordered_map<void*, MockEntry> hooks;
+    void* fail_create_target = nullptr;
+    void* fail_queue_target = nullptr;
+    void* fail_apply_on_target = nullptr;
+    void* fail_enable_target = nullptr;
+    bool fail_second_apply = false;
+    int create_calls = 0;
+    int remove_calls = 0;
+    int enable_calls = 0;
+    int disable_calls = 0;
+    int queue_enable_calls = 0;
+    int queue_disable_calls = 0;
+    int apply_calls = 0;
+    uintptr_t next_orig = 0x10000;
+};
+
+MockState* g_mock = nullptr;
+
+MH_STATUS WINAPI mock_create(LPVOID target, LPVOID detour, LPVOID* orig) {
+    ++g_mock->create_calls;
+    if (target == g_mock->fail_create_target) return MH_ERROR_UNSUPPORTED_FUNCTION;
+    if (g_mock->hooks.count(target)) return MH_ERROR_ALREADY_CREATED;
+    void* tramp = reinterpret_cast<void*>(g_mock->next_orig += 0x100);
+    g_mock->hooks[target] = MockEntry{detour, tramp, false, false};
+    if (orig) *orig = tramp;
+    return MH_OK;
+}
+
+MH_STATUS WINAPI mock_remove(LPVOID target) {
+    ++g_mock->remove_calls;
+    return g_mock->hooks.erase(target) ? MH_OK : MH_ERROR_NOT_CREATED;
+}
+
+MH_STATUS WINAPI mock_enable(LPVOID target) {
+    ++g_mock->enable_calls;
+    auto it = g_mock->hooks.find(target);
+    if (it == g_mock->hooks.end()) return MH_ERROR_NOT_CREATED;
+    if (target == g_mock->fail_enable_target) return MH_ERROR_MEMORY_PROTECT;
+    if (it->second.enabled) return MH_ERROR_ENABLED;
+    it->second.enabled = true;
+    return MH_OK;
+}
+
+MH_STATUS WINAPI mock_disable(LPVOID target) {
+    ++g_mock->disable_calls;
+    auto it = g_mock->hooks.find(target);
+    if (it == g_mock->hooks.end()) return MH_ERROR_NOT_CREATED;
+    if (!it->second.enabled) return MH_ERROR_DISABLED;
+    it->second.enabled = false;
+    return MH_OK;
+}
+
+MH_STATUS WINAPI mock_queue_enable(LPVOID target) {
+    ++g_mock->queue_enable_calls;
+    if (target == g_mock->fail_queue_target) return MH_ERROR_NOT_CREATED;
+    auto it = g_mock->hooks.find(target);
+    if (it == g_mock->hooks.end()) return MH_ERROR_NOT_CREATED;
+    it->second.queued = true;
+    return MH_OK;
+}
+
+MH_STATUS WINAPI mock_queue_disable(LPVOID target) {
+    ++g_mock->queue_disable_calls;
+    auto it = g_mock->hooks.find(target);
+    if (it == g_mock->hooks.end()) return MH_ERROR_NOT_CREATED;
+    it->second.queued = false;
+    return MH_OK;
+}
+
+MH_STATUS WINAPI mock_apply() {
+    ++g_mock->apply_calls;
+    if (g_mock->fail_second_apply && g_mock->apply_calls >= 2) return MH_ERROR_MEMORY_PROTECT;
+    for (auto& [target, entry] : g_mock->hooks) {
+        if (entry.enabled != entry.queued) {
+            if (entry.queued && target == g_mock->fail_apply_on_target) {
+                return MH_ERROR_MEMORY_PROTECT;
+            }
+            entry.enabled = entry.queued;
+        }
+    }
+    return MH_OK;
+}
+
+openrr::pe::HookOps make_ops(MockState& state) {
+    g_mock = &state;
+    openrr::pe::HookOps ops{};
+    ops.create_hook = &mock_create;
+    ops.remove_hook = &mock_remove;
+    ops.enable_hook = &mock_enable;
+    ops.disable_hook = &mock_disable;
+    ops.queue_enable = &mock_queue_enable;
+    ops.queue_disable = &mock_queue_disable;
+    ops.apply_queued = &mock_apply;
+    return ops;
+}
+
+void dummy_detour() {}
+
+}  // namespace hook_safety_test
+
+static int test_d3d12_direct_hook_safety() {
+    using namespace hook_safety_test;
+    std::printf("[INFO] Direct D3D12 hook safety regression tests\n");
+
+    int targets[10]{};
+    void* origs[6]{};
+    auto build_items = [&](openrr::pe::BatchHookItem (&items)[6]) {
+        for (size_t i = 0; i < 6; ++i) {
+            origs[i] = nullptr;
+            items[i] = {"slot", unsigned(i), &targets[i], reinterpret_cast<void*>(&dummy_detour), &origs[i]};
+        }
+    };
+
+    // 1. Create failure removes already-created hooks and clears orig
+    {
+        MockState st;
+        st.fail_create_target = &targets[4];
+        const auto ops = make_ops(st);
+        openrr::pe::BatchHookItem items[6];
+        build_items(items);
+        const auto res = openrr::pe::install_hook_batch(items, 6, ops);
+        if (res.error != openrr::pe::BatchInstallError::CreateFailed || res.failed_index != 4 ||
+            res.trampolines_retained || st.remove_calls != 4 || st.apply_calls != 0 || !st.hooks.empty()) {
+            std::fprintf(stderr, "FAIL: CreateFailed rollback mismatch\n");
+            return 1;
+        }
+        for (void* o : origs) {
+            if (o != nullptr) {
+                std::fprintf(stderr, "FAIL: CreateFailed left non-null orig\n");
+                return 1;
+            }
+        }
+    }
+
+    // 2. Queue failure unqueues, removes created hooks, and clears orig
+    {
+        MockState st;
+        st.fail_queue_target = &targets[2];
+        const auto ops = make_ops(st);
+        openrr::pe::BatchHookItem items[6];
+        build_items(items);
+        const auto res = openrr::pe::install_hook_batch(items, 6, ops);
+        if (res.error != openrr::pe::BatchInstallError::QueueFailed || res.failed_index != 2 ||
+            res.trampolines_retained || st.queue_disable_calls != 2 || st.remove_calls != 6 ||
+            st.apply_calls != 0 || !st.hooks.empty()) {
+            std::fprintf(stderr, "FAIL: QueueFailed rollback mismatch\n");
+            return 1;
+        }
+        for (void* o : origs) {
+            if (o != nullptr) {
+                std::fprintf(stderr, "FAIL: QueueFailed left non-null orig\n");
+                return 1;
+            }
+        }
+    }
+
+    // 3. Apply failure disables enabled prefix, NEVER calls remove_hook, and retains non-null origs
+    {
+        MockState st;
+        st.fail_apply_on_target = &targets[4];
+        const auto ops = make_ops(st);
+        openrr::pe::BatchHookItem items[6];
+        build_items(items);
+        const auto res = openrr::pe::install_hook_batch(items, 6, ops);
+        if (res.error != openrr::pe::BatchInstallError::ApplyFailed || !res.trampolines_retained ||
+            st.remove_calls != 0 || st.apply_calls != 2 || st.hooks.size() != 6) {
+            std::fprintf(stderr, "FAIL: ApplyFailed did not retain trampolines safely (err=%d rem=%d apply=%d)\n",
+                         int(res.error), st.remove_calls, st.apply_calls);
+            return 1;
+        }
+        for (size_t i = 0; i < 6; ++i) {
+            if (!origs[i] || st.hooks[&targets[i]].enabled || st.hooks[&targets[i]].queued) {
+                std::fprintf(stderr, "FAIL: ApplyFailed slot %zu orig=%p enabled=%d queued=%d\n",
+                             i, origs[i], int(st.hooks[&targets[i]].enabled), int(st.hooks[&targets[i]].queued));
+                return 1;
+            }
+        }
+    }
+
+    // 3b. Apply failure where second apply_queued also fails falls back to per-hook disable without remove
+    {
+        MockState st;
+        st.fail_apply_on_target = &targets[3];
+        st.fail_second_apply = true;
+        const auto ops = make_ops(st);
+        openrr::pe::BatchHookItem items[6];
+        build_items(items);
+        const auto res = openrr::pe::install_hook_batch(items, 6, ops);
+        if (res.error != openrr::pe::BatchInstallError::ApplyFailed || !res.trampolines_retained ||
+            st.remove_calls != 0 || st.disable_calls != 6) {
+            std::fprintf(stderr, "FAIL: ApplyFailed fallback disable mismatch (rem=%d dis=%d)\n",
+                         st.remove_calls, st.disable_calls);
+            return 1;
+        }
+        for (size_t i = 0; i < 6; ++i) {
+            if (!origs[i] || st.hooks[&targets[i]].enabled) {
+                std::fprintf(stderr, "FAIL: ApplyFailed fallback left hook %zu enabled or orig null\n", i);
+                return 1;
+            }
+        }
+    }
+
+    // 4. Success path enables all hooks in a single apply_queued call
+    {
+        MockState st;
+        const auto ops = make_ops(st);
+        openrr::pe::BatchHookItem items[6];
+        build_items(items);
+        const auto res = openrr::pe::install_hook_batch(items, 6, ops);
+        if (res.error != openrr::pe::BatchInstallError::Ok || res.trampolines_retained ||
+            st.apply_calls != 1 || st.remove_calls != 0) {
+            std::fprintf(stderr, "FAIL: batch Ok path mismatch\n");
+            return 1;
+        }
+        for (size_t i = 0; i < 6; ++i) {
+            if (!origs[i] || !st.hooks[&targets[i]].enabled) {
+                std::fprintf(stderr, "FAIL: batch Ok left hook %zu disabled or orig null\n", i);
+                return 1;
+            }
+        }
+    }
+    std::printf("[PASS] Direct D3D12 hook batch: single-freeze enable and safe trampoline-retaining failure rollback\n");
+
+    // 5. Multi-entry retryable registry tests (bad first device does not lock out later device)
+    {
+        MockState st;
+        st.fail_enable_target = &targets[3]; // Entry D fails enable_hook
+        const auto ops = make_ops(st);
+        openrr::pe::EntryHookRegistry<4> reg;
+        void* const detours[4] = {
+            reinterpret_cast<void*>(uintptr_t(0x1)),
+            reinterpret_cast<void*>(uintptr_t(0x2)),
+            reinterpret_cast<void*>(uintptr_t(0x3)),
+            reinterpret_cast<void*>(uintptr_t(0x4)),
+        };
+        std::vector<void*> known{&targets[5]}; // Entry F already claimed by another hook family
+        int pred_calls = 0;
+        auto pred = [&](const void* fn, std::string* mod) -> bool {
+            ++pred_calls;
+            if (fn == &targets[0]) {
+                if (mod) *mod = "refused.dll";
+                return false;
+            }
+            if (mod) *mod = "wrapper.dll";
+            return true;
+        };
+
+        std::string mod;
+        MH_STATUS mh = MH_OK;
+        // A refused by policy, retry A is AlreadyFailed (does not re-run policy or MinHook)
+        if (openrr::pe::ensure_entry_hook_locked(reg, &targets[0], detours, known, pred, &mod, &mh, ops) !=
+                openrr::pe::EntryHookOutcome::RefusedPolicy ||
+            mod != "refused.dll") {
+            std::fprintf(stderr, "FAIL: expected RefusedPolicy for entry A\n");
+            return 1;
+        }
+        const int pred_after_a = pred_calls;
+        if (openrr::pe::ensure_entry_hook_locked(reg, &targets[0], detours, known, pred, &mod, &mh, ops) !=
+                openrr::pe::EntryHookOutcome::AlreadyFailed ||
+            pred_calls != pred_after_a || st.create_calls != 0) {
+            std::fprintf(stderr, "FAIL: expected AlreadyFailed cached for entry A\n");
+            return 1;
+        }
+
+        // B succeeds on slot 0 even after A failed
+        if (openrr::pe::ensure_entry_hook_locked(reg, &targets[1], detours, known, pred, &mod, &mh, ops) !=
+                openrr::pe::EntryHookOutcome::Installed ||
+            !reg.is_covered_lockfree(&targets[1]) || reg.count.load() != 1) {
+            std::fprintf(stderr, "FAIL: entry B did not install after entry A failed\n");
+            return 1;
+        }
+        if (openrr::pe::ensure_entry_hook_locked(reg, &targets[1], detours, known, pred, &mod, &mh, ops) !=
+                openrr::pe::EntryHookOutcome::AlreadyCovered ||
+            st.create_calls != 1) {
+            std::fprintf(stderr, "FAIL: entry B repeat was not AlreadyCovered\n");
+            return 1;
+        }
+
+        // C (second distinct valid entry) succeeds on slot 1 with distinct orig
+        if (openrr::pe::ensure_entry_hook_locked(reg, &targets[2], detours, known, pred, &mod, &mh, ops) !=
+                openrr::pe::EntryHookOutcome::Installed ||
+            !reg.is_covered_lockfree(&targets[2]) || reg.count.load() != 2 ||
+            !reg.slots[0].orig || !reg.slots[1].orig || reg.slots[0].orig == reg.slots[1].orig) {
+            std::fprintf(stderr, "FAIL: entry C multi-slot install failed\n");
+            return 1;
+        }
+
+        // D fails enable_hook -> removed cleanly, orig cleared, count stays 2, E still installs in slot 2
+        if (openrr::pe::ensure_entry_hook_locked(reg, &targets[3], detours, known, pred, &mod, &mh, ops) !=
+                openrr::pe::EntryHookOutcome::EnableFailed ||
+            st.remove_calls != 1 || reg.slots[2].orig != nullptr || reg.count.load() != 2) {
+            std::fprintf(stderr, "FAIL: entry D EnableFailed cleanup mismatch\n");
+            return 1;
+        }
+        if (openrr::pe::ensure_entry_hook_locked(reg, &targets[4], detours, known, pred, &mod, &mh, ops) !=
+                openrr::pe::EntryHookOutcome::Installed ||
+            reg.count.load() != 3 || !reg.slots[2].orig) {
+            std::fprintf(stderr, "FAIL: entry E did not reuse slot 2 after D failed\n");
+            return 1;
+        }
+
+        // F duplicates known_hooked
+        if (openrr::pe::ensure_entry_hook_locked(reg, &targets[5], detours, known, pred, &mod, &mh, ops) !=
+                openrr::pe::EntryHookOutcome::DuplicateOtherHook ||
+            reg.count.load() != 3) {
+            std::fprintf(stderr, "FAIL: entry F DuplicateOtherHook check failed\n");
+            return 1;
+        }
+
+        // G fills slot 3, H sees SlotsFull
+        if (openrr::pe::ensure_entry_hook_locked(reg, &targets[6], detours, known, pred, &mod, &mh, ops) !=
+                openrr::pe::EntryHookOutcome::Installed ||
+            reg.count.load() != 4 ||
+            openrr::pe::ensure_entry_hook_locked(reg, &targets[7], detours, known, pred, &mod, &mh, ops) !=
+                openrr::pe::EntryHookOutcome::SlotsFull) {
+            std::fprintf(stderr, "FAIL: slot capacity check failed\n");
+            return 1;
+        }
+    }
+    std::printf("[PASS] EntryHookRegistry: multi-entry coverage without one-shot global lockout\n");
+    return 0;
+}
+
 namespace wrap_test {
 
 struct ComObj {
@@ -4667,7 +5001,30 @@ static int test_d3d12_wrapper_compat() {
         VirtualFree(priv_mem, 0, MEM_RELEASE);
         return 1;
     }
-    std::printf("[PASS] D3D12 hook policy: wrapper PE allowed, self/coexist/private-memory rejected\n");
+
+    void* split_vt[32]{};
+    for (void*& p : split_vt) p = const_cast<void*>(local_fn);
+    unsigned bad_slot = 0;
+    if (openrr::pe::validate_split_list_vtable(split_vt, self_exe, &bad_slot, &mod) || bad_slot != 2) {
+        std::fprintf(stderr, "FAIL: validate_split_list_vtable did not reject self slot 2 (bad=%u)\n", bad_slot);
+        VirtualFree(priv_mem, 0, MEM_RELEASE);
+        return 1;
+    }
+    if (!openrr::pe::validate_split_list_vtable(split_vt, nullptr, &bad_slot, &mod)) {
+        std::fprintf(stderr, "FAIL: validate_split_list_vtable rejected valid PE table (slot=%u, mod=%s)\n",
+                     bad_slot, mod.c_str());
+        VirtualFree(priv_mem, 0, MEM_RELEASE);
+        return 1;
+    }
+    split_vt[2] = priv_mem; // kRelease
+    if (openrr::pe::validate_split_list_vtable(split_vt, nullptr, &bad_slot, &mod) ||
+        bad_slot != 2 || mod != "private memory") {
+        std::fprintf(stderr, "FAIL: validate_split_list_vtable missed private memory on kRelease (slot=%u, mod=%s)\n",
+                     bad_slot, mod.c_str());
+        VirtualFree(priv_mem, 0, MEM_RELEASE);
+        return 1;
+    }
+    std::printf("[PASS] D3D12 hook policy: wrapper PE allowed, self/coexist/private-memory/kRelease rejected\n");
 
     // Populate COM-ABI doubles
     for (auto& slot : wrap_test::g_list_vt) slot = wrap_test::fn_ptr(wrap_test::wt_noop);
@@ -4677,7 +5034,7 @@ static int test_d3d12_wrapper_compat() {
     wrap_test::g_list_vt[9] = wrap_test::fn_ptr(wrap_test::wt_close);
     wrap_test::g_list_vt[10] = wrap_test::fn_ptr(wrap_test::wt_reset);
     for (size_t i = 0; i < 60; ++i) wrap_test::g_priv_list_vt[i] = wrap_test::g_list_vt[i];
-    wrap_test::g_priv_list_vt[9] = priv_mem; // slot 9 (Close) in private memory -> coexistence refusal
+    wrap_test::g_priv_list_vt[2] = priv_mem; // slot 2 (Release) in private memory -> coexistence refusal
 
     wrap_test::g_device_vt[0] = wrap_test::fn_ptr(wrap_test::wt_query);
     wrap_test::g_device_vt[2] = wrap_test::fn_ptr(wrap_test::wt_release);
@@ -4757,7 +5114,21 @@ static int test_d3d12_wrapper_compat() {
     wrap_test::g_root_result = S_OK;
     std::printf("[PASS] onr::create_carrier_root_signature bypasses wrapper without fallback and releases refs\n");
 
-    // 3. openrr::pe::split::prepare wrapped COM-ABI double tests
+    // 3. openrr::pe::split::prepare wrapped COM-ABI double tests & self-module protection
+    if (openrr::pe::split::is_target_allowed(local_fn, &mod)) {
+        std::fprintf(stderr, "FAIL: split auto self-module guard failed to reject non-openrr-named module (%s)\n",
+                     mod.c_str());
+        VirtualFree(priv_mem, 0, MEM_RELEASE);
+        return 1;
+    }
+    openrr::pe::split::set_self_module(nullptr);
+    if (!openrr::pe::split::is_target_allowed(local_fn, &mod)) {
+        std::fprintf(stderr, "FAIL: split::set_self_module(nullptr) did not allow test double module (%s)\n",
+                     mod.c_str());
+        VirtualFree(priv_mem, 0, MEM_RELEASE);
+        return 1;
+    }
+
     auto* cmd = reinterpret_cast<ID3D12GraphicsCommandList*>(&wrap_test::g_list);
     if (openrr::pe::split::prepare(cmd, &why) || why.find("next Reset") == std::string::npos) {
         std::fprintf(stderr, "FAIL: wrapped split::prepare initial call expected next Reset, got: %s\n", why.c_str());
@@ -4776,17 +5147,26 @@ static int test_d3d12_wrapper_compat() {
         VirtualFree(priv_mem, 0, MEM_RELEASE);
         return 1;
     }
-    std::printf("[PASS] openrr::pe::split::prepare accepts wrapped list/device/queue outside d3d12*.dll\n");
-
-    // 4. Coexistence refusal test LAST (sets split::g_disabled = true)
-    auto* priv_cmd = reinterpret_cast<ID3D12GraphicsCommandList*>(&wrap_test::g_priv_list);
-    if (openrr::pe::split::prepare(priv_cmd, &why) || why.find("private memory") == std::string::npos) {
-        std::fprintf(stderr, "FAIL: private memory vtable slot was not refused (why=%s)\n", why.c_str());
+    openrr::pe::split::set_self_module(self_exe);
+    if (openrr::pe::split::is_target_allowed(local_fn, &mod)) {
+        std::fprintf(stderr, "FAIL: split::set_self_module(self_exe) did not reject self module (%s)\n", mod.c_str());
         VirtualFree(priv_mem, 0, MEM_RELEASE);
         return 1;
     }
+    openrr::pe::split::set_self_module(nullptr);
+    std::printf("[PASS] openrr::pe::split::prepare accepts wrapped list/device/queue and enforces self-module HMODULE\n");
+
+    // 4. Coexistence refusal test LAST (sets split::g_disabled = true)
+    auto* priv_cmd = reinterpret_cast<ID3D12GraphicsCommandList*>(&wrap_test::g_priv_list);
+    if (openrr::pe::split::prepare(priv_cmd, &why) ||
+        why.find("private memory") == std::string::npos || why.find("slot 2") == std::string::npos) {
+        std::fprintf(stderr, "FAIL: private memory kRelease vtable slot was not refused (why=%s)\n", why.c_str());
+        VirtualFree(priv_mem, 0, MEM_RELEASE);
+        return 1;
+    }
+    openrr::pe::split::set_self_module(self_exe);
     VirtualFree(priv_mem, 0, MEM_RELEASE);
-    std::printf("[PASS] openrr::pe::split::prepare refuses private memory vtable slot for coexistence safety\n");
+    std::printf("[PASS] openrr::pe::split::prepare refuses private memory on kRelease (slot 2)\n");
     return 0;
 }
 
@@ -4817,6 +5197,7 @@ int main() {
     if (test_d3d12_gpu_and_engine() != 0) return 1;
     if (test_stage10_final_audit() != 0) return 1;
     if (test_stage10_r2_fixes() != 0) return 1;
+    if (test_d3d12_direct_hook_safety() != 0) return 1;
     if (test_d3d12_wrapper_compat() != 0) return 1;
     std::printf("ALL ASI UNIT TESTS PASSED\n");
     return 0;

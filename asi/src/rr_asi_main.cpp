@@ -8,6 +8,7 @@
 #include "rr_pe_control.hpp"
 #include "rr_pe_crash.hpp"
 #include "rr_pe_d3d12_hook_policy.hpp"
+#include "rr_pe_d3d12_direct_hooks.hpp"
 #include "rr_pe_d3d12split.hpp"
 #include "rr_d3d12_record.hpp"
 #include "rr_data_paths.hpp"
@@ -406,9 +407,12 @@ void apply_direct_execute_indirect(DirectListState* s, void* sig) {
 std::mutex g_direct_hook_install_mutex;
 std::atomic<bool> g_direct_hooks_installed{false};
 std::atomic<bool> g_direct_hooks_ok{false};
-std::atomic<bool> g_alloc_hook_installed{false};
-std::atomic<bool> g_cmd_sig_hook_installed{false};
-std::atomic<bool> g_cmd_sig_hook_ok{false};
+std::vector<void*> g_known_direct_hook_fns;
+openrr::pe::EntryHookRegistry<8> g_cmd_sig_hooks;
+openrr::pe::EntryHookRegistry<4> g_ca_reset_hooks;
+openrr::pe::EntryHookRegistry<4> g_ca_release_hooks;
+std::atomic<void**> g_alloc_probed_dev_vts[8]{};
+std::atomic<size_t> g_alloc_probed_count{0};
 thread_local int t_in_openrr_record = 0;
 thread_local int t_in_internal_vk = 0;
 
@@ -453,28 +457,48 @@ PFN_CL_SetComputeRootView real_cl_set_compute_uav = nullptr;
 PFN_CL_ExecuteIndirect real_cl_exec_indirect = nullptr;
 PFN_CL_SetPipelineState1 real_cl_set_pso1 = nullptr;
 PFN_Dev_CreateCommandList real_dev_create_cl = nullptr;
-PFN_Dev_CreateCommandSignature real_dev_create_cmd_sig = nullptr;
 PFN_Dev4_CreateCommandList1 real_dev4_create_cl1 = nullptr;
-PFN_CA_Reset real_ca_reset = nullptr;
-PFN_COM_Release real_ca_release = nullptr;
 PFN_COM_Release real_cl_release = nullptr;
-void* g_hooked_cmd_sig_fn = nullptr;
-void* g_hooked_ca_reset_fn = nullptr;
-void* g_hooked_ca_release_fn = nullptr;
 
-HRESULT STDMETHODCALLTYPE hk_ca_reset(ID3D12CommandAllocator* alloc) {
-    const HRESULT hr = real_ca_reset(alloc);
+HRESULT hk_ca_reset_impl(size_t slot, ID3D12CommandAllocator* alloc) {
+    auto orig = reinterpret_cast<PFN_CA_Reset>(g_ca_reset_hooks.slots[slot].orig);
+    const HRESULT hr = orig(alloc);
     if (SUCCEEDED(hr) && alloc) OnrRrNotifyD3d12AllocatorReset(alloc);
     return hr;
 }
 
-ULONG STDMETHODCALLTYPE hk_ca_release(void* alloc) {
-    const ULONG left = real_ca_release(alloc);
+template <size_t Slot>
+HRESULT STDMETHODCALLTYPE hk_ca_reset_slot(ID3D12CommandAllocator* alloc) {
+    return hk_ca_reset_impl(Slot, alloc);
+}
+
+void* const kCaResetDetours[4] = {
+    reinterpret_cast<void*>(&hk_ca_reset_slot<0>),
+    reinterpret_cast<void*>(&hk_ca_reset_slot<1>),
+    reinterpret_cast<void*>(&hk_ca_reset_slot<2>),
+    reinterpret_cast<void*>(&hk_ca_reset_slot<3>),
+};
+
+ULONG hk_ca_release_impl(size_t slot, void* alloc) {
+    auto orig = reinterpret_cast<PFN_COM_Release>(g_ca_release_hooks.slots[slot].orig);
+    const ULONG left = orig(alloc);
     if (left == 0 && alloc) {
         OnrRrNotifyD3d12AllocatorReleased(alloc);
     }
     return left;
 }
+
+template <size_t Slot>
+ULONG STDMETHODCALLTYPE hk_ca_release_slot(void* alloc) {
+    return hk_ca_release_impl(Slot, alloc);
+}
+
+void* const kCaReleaseDetours[4] = {
+    reinterpret_cast<void*>(&hk_ca_release_slot<0>),
+    reinterpret_cast<void*>(&hk_ca_release_slot<1>),
+    reinterpret_cast<void*>(&hk_ca_release_slot<2>),
+    reinterpret_cast<void*>(&hk_ca_release_slot<3>),
+};
 
 ULONG STDMETHODCALLTYPE hk_cl_release(void* cl) {
     const ULONG left = real_cl_release(cl);
@@ -670,9 +694,10 @@ void STDMETHODCALLTYPE hk_cl_exec_indirect(ID3D12GraphicsCommandList* cl, ID3D12
     real_cl_exec_indirect(cl, sig, max_count, arg_buf, arg_offset, count_buf, count_offset);
 }
 
-HRESULT STDMETHODCALLTYPE hk_dev_create_cmd_sig(ID3D12Device* dev, const D3D12_COMMAND_SIGNATURE_DESC* desc,
-                                                ID3D12RootSignature* rs, REFIID riid, void** out) {
-    const HRESULT hr = real_dev_create_cmd_sig(dev, desc, rs, riid, out);
+HRESULT hk_dev_create_cmd_sig_impl(size_t slot, ID3D12Device* dev, const D3D12_COMMAND_SIGNATURE_DESC* desc,
+                                   ID3D12RootSignature* rs, REFIID riid, void** out) {
+    auto orig = reinterpret_cast<PFN_Dev_CreateCommandSignature>(g_cmd_sig_hooks.slots[slot].orig);
+    const HRESULT hr = orig(dev, desc, rs, riid, out);
     if (SUCCEEDED(hr) && out && *out && desc) {
         ID3D12CommandSignature* sig = nullptr;
         if (SUCCEEDED(static_cast<IUnknown*>(*out)->QueryInterface(IID_PPV_ARGS(&sig))) && sig) {
@@ -684,6 +709,23 @@ HRESULT STDMETHODCALLTYPE hk_dev_create_cmd_sig(ID3D12Device* dev, const D3D12_C
     }
     return hr;
 }
+
+template <size_t Slot>
+HRESULT STDMETHODCALLTYPE hk_dev_create_cmd_sig_slot(ID3D12Device* dev, const D3D12_COMMAND_SIGNATURE_DESC* desc,
+                                                     ID3D12RootSignature* rs, REFIID riid, void** out) {
+    return hk_dev_create_cmd_sig_impl(Slot, dev, desc, rs, riid, out);
+}
+
+void* const kCmdSigDetours[8] = {
+    reinterpret_cast<void*>(&hk_dev_create_cmd_sig_slot<0>),
+    reinterpret_cast<void*>(&hk_dev_create_cmd_sig_slot<1>),
+    reinterpret_cast<void*>(&hk_dev_create_cmd_sig_slot<2>),
+    reinterpret_cast<void*>(&hk_dev_create_cmd_sig_slot<3>),
+    reinterpret_cast<void*>(&hk_dev_create_cmd_sig_slot<4>),
+    reinterpret_cast<void*>(&hk_dev_create_cmd_sig_slot<5>),
+    reinterpret_cast<void*>(&hk_dev_create_cmd_sig_slot<6>),
+    reinterpret_cast<void*>(&hk_dev_create_cmd_sig_slot<7>),
+};
 
 HRESULT STDMETHODCALLTYPE hk_dev_create_cl(ID3D12Device* dev, UINT mask, D3D12_COMMAND_LIST_TYPE type,
                                            ID3D12CommandAllocator* alloc, ID3D12PipelineState* pso, REFIID riid, void** out) {
@@ -718,84 +760,109 @@ HRESULT STDMETHODCALLTYPE hk_dev4_create_cl1(void* dev4, UINT mask, D3D12_COMMAN
 }
 
 bool ensure_cmd_sig_hook(ID3D12Device* dev) {
-    if (g_cmd_sig_hook_installed.load(std::memory_order_acquire))
-        return g_cmd_sig_hook_ok.load(std::memory_order_relaxed);
     if (!dev) return false;
-    std::lock_guard<std::mutex> lock(g_direct_hook_install_mutex);
-    if (g_cmd_sig_hook_installed.load(std::memory_order_relaxed))
-        return g_cmd_sig_hook_ok.load(std::memory_order_relaxed);
     void** dvt = *reinterpret_cast<void***>(dev);
-    bool ok = false;
+    void* fn = dvt[41];
+    if (g_cmd_sig_hooks.is_covered_lockfree(fn)) return true;
+
+    std::lock_guard<std::mutex> lock(g_direct_hook_install_mutex);
+    auto pred = [](const void* target, std::string* out_mod) {
+        return in_hookable_d3d12_module(target, out_mod);
+    };
     std::string mod;
-    if (in_hookable_d3d12_module(dvt[41], &mod)) {
-        if (MH_CreateHook(dvt[41], reinterpret_cast<void*>(&hk_dev_create_cmd_sig),
-                          reinterpret_cast<void**>(&real_dev_create_cmd_sig)) == MH_OK) {
-            if (MH_EnableHook(dvt[41]) == MH_OK) {
-                g_hooked_cmd_sig_fn = dvt[41];
-                ok = true;
-            } else {
-                MH_RemoveHook(dvt[41]);
-                real_dev_create_cmd_sig = nullptr;
-                log("[openrr] CreateCommandSignature hook enable failed in %s", mod.c_str());
-            }
-        } else {
-            log("[openrr] CreateCommandSignature hook create failed in %s", mod.c_str());
-        }
-    } else {
-        log("[openrr] CreateCommandSignature slot 41 refused (%s)", mod.c_str());
+    MH_STATUS mh = MH_OK;
+    const auto out = openrr::pe::ensure_entry_hook_locked(
+        g_cmd_sig_hooks, fn, kCmdSigDetours, g_known_direct_hook_fns, pred, &mod, &mh);
+    switch (out) {
+        case openrr::pe::EntryHookOutcome::AlreadyCovered:
+        case openrr::pe::EntryHookOutcome::Installed:
+            return true;
+        case openrr::pe::EntryHookOutcome::AlreadyFailed:
+            return false;
+        case openrr::pe::EntryHookOutcome::RefusedPolicy:
+            log("[openrr] CreateCommandSignature slot 41 refused (%s)", mod.c_str());
+            return false;
+        case openrr::pe::EntryHookOutcome::DuplicateOtherHook:
+            log("[openrr] CreateCommandSignature slot 41 duplicates another hook (%s)", mod.c_str());
+            return false;
+        case openrr::pe::EntryHookOutcome::SlotsFull:
+            log("[openrr] CreateCommandSignature hook slots full (%s)", mod.c_str());
+            return false;
+        case openrr::pe::EntryHookOutcome::CreateFailed:
+            log("[openrr] CreateCommandSignature hook create failed in %s (status=%d)", mod.c_str(), int(mh));
+            return false;
+        case openrr::pe::EntryHookOutcome::EnableFailed:
+            log("[openrr] CreateCommandSignature hook enable failed in %s (status=%d)", mod.c_str(), int(mh));
+            return false;
     }
-    g_cmd_sig_hook_ok.store(ok, std::memory_order_relaxed);
-    g_cmd_sig_hook_installed.store(true, std::memory_order_release);
-    return ok;
+    return false;
 }
 
-void ensure_allocator_reset_hook(ID3D12Device* dev) {
-    ensure_cmd_sig_hook(dev);
-    if (!dev || g_alloc_hook_installed.load(std::memory_order_acquire)) return;
+bool ensure_allocator_reset_hook(ID3D12Device* dev) {
+    const bool cmd_sig_ok = ensure_cmd_sig_hook(dev);
+    if (!dev) return false;
+
+    void** dvt = *reinterpret_cast<void***>(dev);
+    const size_t probed_n = g_alloc_probed_count.load(std::memory_order_acquire);
+    for (size_t i = 0; i < probed_n; ++i) {
+        if (g_alloc_probed_dev_vts[i].load(std::memory_order_relaxed) == dvt) return cmd_sig_ok;
+    }
+
     std::lock_guard<std::mutex> lock(g_direct_hook_install_mutex);
-    if (g_alloc_hook_installed.load(std::memory_order_relaxed)) return;
+    const size_t cur_n = g_alloc_probed_count.load(std::memory_order_relaxed);
+    for (size_t i = 0; i < cur_n; ++i) {
+        if (g_alloc_probed_dev_vts[i].load(std::memory_order_relaxed) == dvt) return cmd_sig_ok;
+    }
+
     ID3D12CommandAllocator* probe = nullptr;
     if (SUCCEEDED(dev->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&probe))) && probe) {
         void** vt = *reinterpret_cast<void***>(probe);
         void* fn_ca_release = vt[2]; // IUnknown::Release on CommandAllocator
         void* fn_ca_reset = vt[8];   // ID3D12CommandAllocator::Reset
+        auto pred = [](const void* target, std::string* out_mod) {
+            return in_hookable_d3d12_module(target, out_mod);
+        };
         std::string mod;
-        if (in_hookable_d3d12_module(fn_ca_reset, &mod) && fn_ca_reset != g_hooked_cmd_sig_fn) {
-            if (MH_CreateHook(fn_ca_reset, reinterpret_cast<void*>(&hk_ca_reset), reinterpret_cast<void**>(&real_ca_reset)) == MH_OK) {
-                if (MH_EnableHook(fn_ca_reset) == MH_OK) {
-                    g_hooked_ca_reset_fn = fn_ca_reset;
-                } else {
-                    MH_RemoveHook(fn_ca_reset);
-                    real_ca_reset = nullptr;
-                }
-            }
-        } else {
+        MH_STATUS mh = MH_OK;
+        const auto reset_out = openrr::pe::ensure_entry_hook_locked(
+            g_ca_reset_hooks, fn_ca_reset, kCaResetDetours, g_known_direct_hook_fns, pred, &mod, &mh);
+        if (reset_out == openrr::pe::EntryHookOutcome::RefusedPolicy ||
+            reset_out == openrr::pe::EntryHookOutcome::DuplicateOtherHook ||
+            reset_out == openrr::pe::EntryHookOutcome::SlotsFull) {
             log("[openrr] allocator Reset slot 8 refused (%s); not hooking", mod.c_str());
+        } else if (reset_out == openrr::pe::EntryHookOutcome::CreateFailed ||
+                   reset_out == openrr::pe::EntryHookOutcome::EnableFailed) {
+            log("[openrr] allocator Reset slot 8 hook failed in %s (status=%d)", mod.c_str(), int(mh));
         }
-        if (fn_ca_release != g_hooked_cmd_sig_fn && fn_ca_release != g_hooked_ca_reset_fn &&
-            in_hookable_d3d12_module(fn_ca_release)) {
-            if (MH_CreateHook(fn_ca_release, reinterpret_cast<void*>(&hk_ca_release), reinterpret_cast<void**>(&real_ca_release)) == MH_OK) {
-                if (MH_EnableHook(fn_ca_release) == MH_OK) {
-                    g_hooked_ca_release_fn = fn_ca_release;
-                } else {
-                    MH_RemoveHook(fn_ca_release);
-                    real_ca_release = nullptr;
-                }
-            }
-        }
+
+        openrr::pe::ensure_entry_hook_locked(
+            g_ca_release_hooks, fn_ca_release, kCaReleaseDetours, g_known_direct_hook_fns, pred);
         probe->Release();
+
+        if (cur_n < std::size(g_alloc_probed_dev_vts)) {
+            g_alloc_probed_dev_vts[cur_n].store(dvt, std::memory_order_relaxed);
+            g_alloc_probed_count.store(cur_n + 1, std::memory_order_release);
+        }
     }
-    g_alloc_hook_installed.store(true, std::memory_order_release);
+    return cmd_sig_ok;
 }
 
 bool ensure_direct_state_hooks(ID3D12Device* dev, ID3D12GraphicsCommandList* cl = nullptr) {
-    ensure_allocator_reset_hook(dev);
-    const bool cmd_sig_ok = (!dev) || g_cmd_sig_hook_ok.load(std::memory_order_acquire);
+    const bool cmd_sig_ok = (!dev) ? true : ensure_allocator_reset_hook(dev);
     if (g_direct_hooks_installed.load(std::memory_order_acquire))
-        return g_direct_hooks_ok.load(std::memory_order_relaxed);
+        return g_direct_hooks_ok.load(std::memory_order_relaxed) && cmd_sig_ok;
+    if (dev && !cmd_sig_ok) {
+        static bool logged_cmd_sig_unavail = false;
+        if (!logged_cmd_sig_unavail) {
+            logged_cmd_sig_unavail = true;
+            log("[openrr] Direct state hook deferred: CreateCommandSignature (slot 41) unavailable for device");
+        }
+        return false;
+    }
+
     std::lock_guard<std::mutex> lock(g_direct_hook_install_mutex);
     if (g_direct_hooks_installed.load(std::memory_order_relaxed))
-        return g_direct_hooks_ok.load(std::memory_order_relaxed);
+        return g_direct_hooks_ok.load(std::memory_order_relaxed) && cmd_sig_ok;
 
     ID3D12CommandAllocator* temp_alloc = nullptr;
     ID3D12GraphicsCommandList* temp_cl = nullptr;
@@ -818,134 +885,140 @@ bool ensure_direct_state_hooks(ID3D12Device* dev, ID3D12GraphicsCommandList* cl 
 
     if (!cl) return false;
 
-    if (dev && !cmd_sig_ok) {
-        log("[openrr] Direct state hook failed: CreateCommandSignature (slot 41) unavailable");
-        g_direct_hooks_ok.store(false, std::memory_order_relaxed);
-        g_direct_hooks_installed.store(true, std::memory_order_release);
-        return false;
-    }
-
     void** vt = *reinterpret_cast<void***>(cl);
-    struct HookItem { const char* name; unsigned slot; void* detour; void** orig; };
-    const HookItem cl_items[] = {
-        {"Reset",                             10, reinterpret_cast<void*>(&hk_cl_reset),             reinterpret_cast<void**>(&real_cl_reset)},
-        {"ClearState",                        11, reinterpret_cast<void*>(&hk_cl_clear_state),       reinterpret_cast<void**>(&real_cl_clear_state)},
-        {"SetPipelineState",                  25, reinterpret_cast<void*>(&hk_cl_set_pso),           reinterpret_cast<void**>(&real_cl_set_pso)},
-        {"ExecuteBundle",                     27, reinterpret_cast<void*>(&hk_cl_exec_bundle),       reinterpret_cast<void**>(&real_cl_exec_bundle)},
-        {"SetDescriptorHeaps",                28, reinterpret_cast<void*>(&hk_cl_set_heaps),          reinterpret_cast<void**>(&real_cl_set_heaps)},
-        {"SetComputeRootSignature",           29, reinterpret_cast<void*>(&hk_cl_set_compute_rs),     reinterpret_cast<void**>(&real_cl_set_compute_rs)},
-        {"SetComputeRootDescriptorTable",     31, reinterpret_cast<void*>(&hk_cl_set_compute_table),  reinterpret_cast<void**>(&real_cl_set_compute_table)},
-        {"SetComputeRoot32BitConstant",       33, reinterpret_cast<void*>(&hk_cl_set_compute_const),  reinterpret_cast<void**>(&real_cl_set_compute_const)},
-        {"SetComputeRoot32BitConstants",      35, reinterpret_cast<void*>(&hk_cl_set_compute_consts), reinterpret_cast<void**>(&real_cl_set_compute_consts)},
-        {"SetComputeRootConstantBufferView",  37, reinterpret_cast<void*>(&hk_cl_set_compute_cbv),    reinterpret_cast<void**>(&real_cl_set_compute_cbv)},
-        {"SetComputeRootShaderResourceView",  39, reinterpret_cast<void*>(&hk_cl_set_compute_srv),    reinterpret_cast<void**>(&real_cl_set_compute_srv)},
-        {"SetComputeRootUnorderedAccessView", 41, reinterpret_cast<void*>(&hk_cl_set_compute_uav),    reinterpret_cast<void**>(&real_cl_set_compute_uav)},
-        {"ExecuteIndirect",                   59, reinterpret_cast<void*>(&hk_cl_exec_indirect),      reinterpret_cast<void**>(&real_cl_exec_indirect)},
+    const openrr::pe::BatchHookItem cl_items[] = {
+        {"Reset",                             10, vt[10], reinterpret_cast<void*>(&hk_cl_reset),             reinterpret_cast<void**>(&real_cl_reset)},
+        {"ClearState",                        11, vt[11], reinterpret_cast<void*>(&hk_cl_clear_state),       reinterpret_cast<void**>(&real_cl_clear_state)},
+        {"SetPipelineState",                  25, vt[25], reinterpret_cast<void*>(&hk_cl_set_pso),           reinterpret_cast<void**>(&real_cl_set_pso)},
+        {"ExecuteBundle",                     27, vt[27], reinterpret_cast<void*>(&hk_cl_exec_bundle),       reinterpret_cast<void**>(&real_cl_exec_bundle)},
+        {"SetDescriptorHeaps",                28, vt[28], reinterpret_cast<void*>(&hk_cl_set_heaps),          reinterpret_cast<void**>(&real_cl_set_heaps)},
+        {"SetComputeRootSignature",           29, vt[29], reinterpret_cast<void*>(&hk_cl_set_compute_rs),     reinterpret_cast<void**>(&real_cl_set_compute_rs)},
+        {"SetComputeRootDescriptorTable",     31, vt[31], reinterpret_cast<void*>(&hk_cl_set_compute_table),  reinterpret_cast<void**>(&real_cl_set_compute_table)},
+        {"SetComputeRoot32BitConstant",       33, vt[33], reinterpret_cast<void*>(&hk_cl_set_compute_const),  reinterpret_cast<void**>(&real_cl_set_compute_const)},
+        {"SetComputeRoot32BitConstants",      35, vt[35], reinterpret_cast<void*>(&hk_cl_set_compute_consts), reinterpret_cast<void**>(&real_cl_set_compute_consts)},
+        {"SetComputeRootConstantBufferView",  37, vt[37], reinterpret_cast<void*>(&hk_cl_set_compute_cbv),    reinterpret_cast<void**>(&real_cl_set_compute_cbv)},
+        {"SetComputeRootShaderResourceView",  39, vt[39], reinterpret_cast<void*>(&hk_cl_set_compute_srv),    reinterpret_cast<void**>(&real_cl_set_compute_srv)},
+        {"SetComputeRootUnorderedAccessView", 41, vt[41], reinterpret_cast<void*>(&hk_cl_set_compute_uav),    reinterpret_cast<void**>(&real_cl_set_compute_uav)},
+        {"ExecuteIndirect",                   59, vt[59], reinterpret_cast<void*>(&hk_cl_exec_indirect),      reinterpret_cast<void**>(&real_cl_exec_indirect)},
     };
 
-    std::vector<void*> known_hooked;
-    if (g_hooked_cmd_sig_fn) known_hooked.push_back(g_hooked_cmd_sig_fn);
-    if (g_hooked_ca_reset_fn) known_hooked.push_back(g_hooked_ca_reset_fn);
-    if (g_hooked_ca_release_fn) known_hooked.push_back(g_hooked_ca_release_fn);
-
+    std::vector<void*> batch_seen;
+    batch_seen.reserve(std::size(cl_items));
     std::string mod_name;
     for (const auto& it : cl_items) {
-        if (!in_hookable_d3d12_module(vt[it.slot], &mod_name)) {
+        if (!in_hookable_d3d12_module(it.target, &mod_name)) {
             log("[openrr] Direct state hook refused: command-list %s (slot %u) is in non-hookable target (%s)",
                 it.name, it.slot, mod_name.c_str());
             g_direct_hooks_ok.store(false, std::memory_order_relaxed);
             g_direct_hooks_installed.store(true, std::memory_order_release);
             return false;
         }
-        if (std::find(known_hooked.begin(), known_hooked.end(), vt[it.slot]) != known_hooked.end()) {
+        if (std::find(g_known_direct_hook_fns.begin(), g_known_direct_hook_fns.end(), it.target) != g_known_direct_hook_fns.end() ||
+            std::find(batch_seen.begin(), batch_seen.end(), it.target) != batch_seen.end()) {
             log("[openrr] Direct state hook refused: duplicate target function on %s (slot %u) in %s",
                 it.name, it.slot, mod_name.c_str());
             g_direct_hooks_ok.store(false, std::memory_order_relaxed);
             g_direct_hooks_installed.store(true, std::memory_order_release);
             return false;
         }
-        known_hooked.push_back(vt[it.slot]);
+        batch_seen.push_back(it.target);
     }
 
-    auto rollback_cl = [&](const std::vector<void*>& enabled, const std::vector<void*>& created) {
-        for (void* ep : enabled) MH_DisableHook(ep);
-        for (void* cp : created) MH_RemoveHook(cp);
-        for (const auto& item : cl_items) *item.orig = nullptr;
+    const auto batch_res = openrr::pe::install_hook_batch(cl_items, std::size(cl_items));
+    if (batch_res.error != openrr::pe::BatchInstallError::Ok) {
+        if (batch_res.error == openrr::pe::BatchInstallError::ApplyFailed) {
+            log("[openrr] Direct state hook batch enable failed (status=%d, trampolines_retained=%d); disabling Direct",
+                int(batch_res.mh_status), int(batch_res.trampolines_retained));
+        } else {
+            const auto& fail_it = cl_items[batch_res.failed_index];
+            log("[openrr] Direct state hook failed to %s on %s (slot %u, status=%d)",
+                batch_res.error == openrr::pe::BatchInstallError::CreateFailed ? "create" : "queue",
+                fail_it.name, fail_it.slot, int(batch_res.mh_status));
+        }
+        if (batch_res.trampolines_retained) {
+            for (void* t : batch_seen) {
+                if (std::find(g_known_direct_hook_fns.begin(), g_known_direct_hook_fns.end(), t) == g_known_direct_hook_fns.end())
+                    g_known_direct_hook_fns.push_back(t);
+            }
+        }
         g_direct_hooks_ok.store(false, std::memory_order_relaxed);
         g_direct_hooks_installed.store(true, std::memory_order_release);
-    };
-
-    std::vector<void*> created;
-    created.reserve(std::size(cl_items));
-    for (const auto& it : cl_items) {
-        if (MH_CreateHook(vt[it.slot], it.detour, it.orig) != MH_OK) {
-            log("[openrr] Direct state hook failed to create on %s (slot %u)", it.name, it.slot);
-            rollback_cl({}, created);
-            return false;
-        }
-        created.push_back(vt[it.slot]);
+        return false;
     }
 
-    std::vector<void*> enabled;
-    enabled.reserve(created.size());
-    for (size_t i = 0; i < created.size(); ++i) {
-        if (MH_EnableHook(created[i]) != MH_OK) {
-            log("[openrr] Direct state hook failed to enable on %s (slot %u)", cl_items[i].name, cl_items[i].slot);
-            rollback_cl(enabled, created);
-            return false;
-        }
-        enabled.push_back(created[i]);
-    }
+    for (void* t : batch_seen) g_known_direct_hook_fns.push_back(t);
 
-    auto install_optional = [&](void* fn, void* detour, void** orig) -> bool {
+    std::vector<openrr::pe::BatchHookItem> opt_created;
+    opt_created.reserve(6);
+    auto create_optional = [&](const char* name, unsigned slot, void* fn, void* detour, void** orig) -> bool {
         if (!in_hookable_d3d12_module(fn)) return false;
-        if (std::find(known_hooked.begin(), known_hooked.end(), fn) != known_hooked.end()) return false;
+        if (std::find(g_known_direct_hook_fns.begin(), g_known_direct_hook_fns.end(), fn) != g_known_direct_hook_fns.end())
+            return false;
+        for (const auto& existing : opt_created) {
+            if (existing.target == fn) return false;
+        }
         if (MH_CreateHook(fn, detour, orig) != MH_OK) {
             *orig = nullptr;
             return false;
         }
-        if (MH_EnableHook(fn) != MH_OK) {
-            MH_RemoveHook(fn);
-            *orig = nullptr;
-            return false;
-        }
-        known_hooked.push_back(fn);
+        opt_created.push_back({name, slot, fn, detour, orig});
         return true;
     };
 
-    install_optional(vt[2], reinterpret_cast<void*>(&hk_cl_release), reinterpret_cast<void**>(&real_cl_release));
+    create_optional("Release", 2, vt[2], reinterpret_cast<void*>(&hk_cl_release), reinterpret_cast<void**>(&real_cl_release));
 
+    bool diag_enabled = false;
+    bool legacy_created = false;
+    bool enhanced_created = false;
     if (openrr::pe::d3d12_diagnostics_enabled()) {
-        const bool legacy = install_optional(vt[26], reinterpret_cast<void*>(&hk_cl_barrier),
-                                             reinterpret_cast<void**>(&real_cl_barrier));
+        diag_enabled = true;
+        legacy_created = create_optional("ResourceBarrier", 26, vt[26], reinterpret_cast<void*>(&hk_cl_barrier),
+                                         reinterpret_cast<void**>(&real_cl_barrier));
         ID3D12GraphicsCommandList7* cl7 = nullptr;
-        bool enhanced = false;
         if (SUCCEEDED(cl->QueryInterface(IID_PPV_ARGS(&cl7))) && cl7) {
             void** vt7 = *reinterpret_cast<void***>(cl7);
-            enhanced = install_optional(vt7[80], reinterpret_cast<void*>(&hk_cl_barrier7),
-                                        reinterpret_cast<void**>(&real_cl_barrier7));
+            enhanced_created = create_optional("Barrier", 80, vt7[80], reinterpret_cast<void*>(&hk_cl_barrier7),
+                                               reinterpret_cast<void**>(&real_cl_barrier7));
             cl7->Release();
         }
-        log("[d3d12 diag] host barrier hooks legacy=%d enhanced=%d", int(legacy), int(enhanced));
     }
 
     IUnknown* cl4 = nullptr;
     if (SUCCEEDED(cl->QueryInterface(kIID_List4, reinterpret_cast<void**>(&cl4))) && cl4) {
         void** vt4 = *reinterpret_cast<void***>(cl4);
-        install_optional(vt4[75], reinterpret_cast<void*>(&hk_cl_set_pso1), reinterpret_cast<void**>(&real_cl_set_pso1));
+        create_optional("SetPipelineState1", 75, vt4[75], reinterpret_cast<void*>(&hk_cl_set_pso1),
+                        reinterpret_cast<void**>(&real_cl_set_pso1));
         cl4->Release();
     }
 
     if (dev) {
         void** dvt = *reinterpret_cast<void***>(dev);
-        install_optional(dvt[12], reinterpret_cast<void*>(&hk_dev_create_cl), reinterpret_cast<void**>(&real_dev_create_cl));
+        create_optional("CreateCommandList", 12, dvt[12], reinterpret_cast<void*>(&hk_dev_create_cl),
+                        reinterpret_cast<void**>(&real_dev_create_cl));
         IUnknown* dev4 = nullptr;
         if (SUCCEEDED(dev->QueryInterface(kIID_Dev4, reinterpret_cast<void**>(&dev4))) && dev4) {
             void** dvt4 = *reinterpret_cast<void***>(dev4);
-            install_optional(dvt4[51], reinterpret_cast<void*>(&hk_dev4_create_cl1),
-                             reinterpret_cast<void**>(&real_dev4_create_cl1));
+            create_optional("CreateCommandList1", 51, dvt4[51], reinterpret_cast<void*>(&hk_dev4_create_cl1),
+                            reinterpret_cast<void**>(&real_dev4_create_cl1));
             dev4->Release();
         }
+    }
+
+    bool opt_ok = true;
+    if (!opt_created.empty()) {
+        const auto opt_res = openrr::pe::enable_created_hook_batch(opt_created.data(), opt_created.size());
+        opt_ok = (opt_res.error == openrr::pe::BatchInstallError::Ok);
+        if (opt_ok || opt_res.trampolines_retained) {
+            for (const auto& item : opt_created) g_known_direct_hook_fns.push_back(item.target);
+        }
+        if (!opt_ok) {
+            log("[openrr] Direct optional hook batch enable failed (phase=%d, status=%d, retained=%d)",
+                int(opt_res.error), int(opt_res.mh_status), int(opt_res.trampolines_retained));
+        }
+    }
+    if (diag_enabled) {
+        log("[d3d12 diag] host barrier hooks legacy=%d enhanced=%d",
+            int(legacy_created && opt_ok), int(enhanced_created && opt_ok));
     }
 
     g_direct_hooks_ok.store(true, std::memory_order_relaxed);
@@ -4198,6 +4271,7 @@ extern "C" __declspec(dllexport) void InitializeASI() {
 BOOL WINAPI DllMain(HINSTANCE module, DWORD reason, LPVOID reserved) {
     if (reason == DLL_PROCESS_ATTACH) {
         g_self = module;
+        openrr::pe::split::set_self_module(module);
         DisableThreadLibraryCalls(module);
     } else if (reason == DLL_PROCESS_DETACH && reserved) {
         g_exiting = true;

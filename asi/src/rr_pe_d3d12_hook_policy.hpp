@@ -46,4 +46,25 @@ inline bool is_hookable_d3d12_target(const void* fn, HMODULE disallow_self, std:
     return true;
 }
 
+// Validates the command-list vtable slots that split patching inspects/replaces (Release, Close, Reset,
+// SetDescriptorHeaps, SetComputeRootSignature). Returns false on the first non-hookable slot.
+inline bool validate_split_list_vtable(void* const* vt, HMODULE disallow_self,
+                                       unsigned* out_bad_slot = nullptr, std::string* out_bad_mod = nullptr) {
+    if (!vt) {
+        if (out_bad_slot) *out_bad_slot = 0;
+        if (out_bad_mod) *out_bad_mod = "<null>";
+        return false;
+    }
+    constexpr unsigned kCheckedSlots[] = {2u, 9u, 10u, 28u, 29u};
+    for (const unsigned slot : kCheckedSlots) {
+        std::string mod;
+        if (!is_hookable_d3d12_target(vt[slot], disallow_self, &mod)) {
+            if (out_bad_slot) *out_bad_slot = slot;
+            if (out_bad_mod) *out_bad_mod = std::move(mod);
+            return false;
+        }
+    }
+    return true;
+}
+
 }  // namespace openrr::pe

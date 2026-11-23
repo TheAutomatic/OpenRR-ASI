@@ -23,6 +23,11 @@
 namespace openrr::pe::split {
 
 #if !defined(_M_X64) && !defined(__x86_64__)
+void set_self_module(HMODULE) {}
+bool is_target_allowed(const void*, std::string* out_mod) {
+    if (out_mod) *out_mod = "unsupported arch";
+    return false;
+}
 bool prepare(ID3D12GraphicsCommandList*, std::string* why) {
     *why = "the command-list cut is x86-64 only";
     return false;
@@ -1314,10 +1319,25 @@ bool write_vtable(void** vt, unsigned slot, void* fn) {
     return true;
 }
 
+std::atomic<bool> g_self_module_override{false};
+std::atomic<HMODULE> g_self_module{nullptr};
+
+HMODULE current_self_module() {
+    if (g_self_module_override.load(std::memory_order_acquire))
+        return g_self_module.load(std::memory_order_acquire);
+    static HMODULE auto_self = []() -> HMODULE {
+        HMODULE m = nullptr;
+        GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           reinterpret_cast<LPCWSTR>(&current_self_module), &m);
+        return m;
+    }();
+    return auto_self;
+}
+
 // Coexistence check: accept real D3D12 / vkd3d modules and genuine D3D12 wrappers (such as ReShade64.asi),
-// while refusing private memory (e.g. another splitter's JIT stubs) and other OpenRR / DLSSNR-AMD modules.
+// while refusing private memory (e.g. another splitter's JIT stubs), self module, and other OpenRR / DLSSNR-AMD modules.
 bool can_patch_vtable_fn(const void* p, std::string* out_mod = nullptr) {
-    return openrr::pe::is_hookable_d3d12_target(p, nullptr, out_mod);
+    return openrr::pe::is_hookable_d3d12_target(p, current_self_module(), out_mod);
 }
 
 // Where an address lives, for the log: a module's file name, or private memory (a heap).
@@ -1379,17 +1399,17 @@ bool patch_list_class(List* list, std::string* why) {
         for (unsigned k = 0; same && k < slots; ++k) same = vt[k] == c->orig[k];
         if (same) return add_vtable(vt, g_classes[i], false, why);
     }
+    unsigned bad_slot = 0;
     std::string bad_mod;
-    for (const unsigned slot : {unsigned(kClose), unsigned(kReset), unsigned(kSetDescriptorHeaps), unsigned(kSetComputeRootSignature)}) {
-        if (!can_patch_vtable_fn(vt[slot], &bad_mod)) {
-            *why = "command list class vtable is already hooked by another module (" + bad_mod + ")";
-            static bool logged_ext = false;
-            if (!logged_ext) {
-                logged_ext = true;
-                log("[openrr] split: %s; not installing OpenRR split hooks", why->c_str());
-            }
-            return false;
+    if (!openrr::pe::validate_split_list_vtable(vt, current_self_module(), &bad_slot, &bad_mod)) {
+        *why = "command list class vtable slot " + std::to_string(bad_slot) +
+               " is already hooked by another module (" + bad_mod + ")";
+        static bool logged_ext = false;
+        if (!logged_ext) {
+            logged_ext = true;
+            log("[openrr] split: %s; not installing OpenRR split hooks", why->c_str());
         }
+        return false;
     }
     if (n >= 32) { *why = "too many command list classes"; return false; }
     auto* cls = new ListClass();
@@ -1636,6 +1656,15 @@ bool patch_queue_classes(ID3D12Device* device, D3D12_COMMAND_LIST_TYPE type, std
 struct Snapshot {
     ListState state;
 };
+
+void set_self_module(HMODULE mod) {
+    g_self_module.store(mod, std::memory_order_relaxed);
+    g_self_module_override.store(true, std::memory_order_release);
+}
+
+bool is_target_allowed(const void* fn, std::string* out_mod) {
+    return can_patch_vtable_fn(fn, out_mod);
+}
 
 bool prepare(List* list, std::string* why) {
     std::lock_guard<std::recursive_mutex> guard(g_mutex);
