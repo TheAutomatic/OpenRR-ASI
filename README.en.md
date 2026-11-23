@@ -8,7 +8,7 @@ For details about the OpenRR network reimplementation, RDNA4 shader architecture
 
 ---
 
-This release (**v0.1.7plus**) integrates upstream **v0.1.7** (including fixed RDNA4 ACO routing, RX 7000 / RDNA3 `shaders-gfx11` support, and a unified Windows + Linux Wine / Proton Mesa RADV >= 26.3 release), while retaining its ASI integration, menu, and GPU resource lifetime protections. See **[v017plus-speed-quality-eval.en.md](docs/test-evidence/v017plus-speed-quality-eval.en.md)** ([简体中文](docs/test-evidence/v017plus-speed-quality-eval.md)) for the full v0.1.7plus speed, image quality, and VRAM evaluation, and [v017-stage10-audit.md](docs/test-evidence/v017-stage10-audit.md) for Stage 10 validation evidence; historical figures for earlier versions are retained at the bottom.
+This release (**v0.1.7plus2**) builds on **v0.1.7plus** with **ReShade + RenoDX D3D12 wrapper compatibility** (creating the carrier root signature on the native `ID3D12Device` resolved via `ID3D12Heap::GetDevice` to bypass RenoDX layout rewrites, and allowing D3D12 Direct state hooks / Vulkan Bridge split hooks on genuine D3D12 wrapper modules such as `ReShade64.asi`). It continues to integrate upstream **v0.1.7** (including fixed RDNA4 ACO routing, RX 7000 / RDNA3 `shaders-gfx11` support, and a unified Windows + Linux Wine / Proton Mesa RADV >= 26.3 release), while retaining ASI integration, in-game menu, and GPU resource lifetime protections. See **[v017plus-speed-quality-eval.en.md](docs/test-evidence/v017plus-speed-quality-eval.en.md)** ([简体中文](docs/test-evidence/v017plus-speed-quality-eval.md)) for the full v0.1.7plus speed, image quality, and VRAM evaluation, and [v017-stage10-audit.md](docs/test-evidence/v017-stage10-audit.md) for Stage 10 validation evidence; historical figures for earlier versions are retained at the bottom.
 
 ## What this fork adds
 
@@ -84,7 +84,7 @@ Use the **[dlss-5-amd-project](https://github.com/TheAutomatic/dlss-5-amd-projec
 
 ### Option 2: Manual installation with official OptiScaler (unified Windows / Linux package)
 
-Place the build artifacts (the 392-file unified `stage/` package, or extract `dist/OpenRR-v0.1.7plus-OptiScaler.zip`) directly into the game directory containing OptiScaler's `dxgi.dll` / `OptiScaler.ini`:
+Place the build artifacts (the 392-file unified `stage/` package, or extract `dist/OpenRR-v0.1.7plus2-OptiScaler.zip`) directly into the game directory containing OptiScaler's `dxgi.dll` / `OptiScaler.ini`:
 
 | File / directory | Destination relative to `OptiScaler.ini` |
 |---|---|
