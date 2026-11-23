@@ -8,7 +8,7 @@
 
 ---
 
-当前发行版本 **v0.1.7plus2** 基于 **v0.1.7plus** 新增 **ReShade + RenoDX D3D12 包装层兼容性修复**（通过临时 `ID3D12Heap::GetDevice` 原生创建 carrier 根签名以绕过 RenoDX 布局改写，并放行 `ReShade64.asi` 等 D3D12 包装类的 Direct 状态监控 / Vulkan 桥接拆单 hook），继续完整整合上游 **v0.1.7**（含 RDNA4 固定 ACO 路线、RX 7000 / RDNA3 `shaders-gfx11` 路径，以及通用 Windows + Linux Wine / Proton 系统 Mesa RADV >= 26.3 原生支持），并保留本分支的 ASI 集成、菜单和 GPU 资源生命周期保护。v0.1.7plus 完整速度、画质与显存实测对比见 **[v017plus-speed-quality-eval.md](docs/test-evidence/v017plus-speed-quality-eval.md)**（[English](docs/test-evidence/v017plus-speed-quality-eval.en.md)），Stage 10 审计与复测证据见 [v017-stage10-audit.md](docs/test-evidence/v017-stage10-audit.md)，旧版本历史验证记录保留于文末表格。
+当前发行版本 **v0.1.7plus3** 基于 **v0.1.7plus2**（ReShade + RenoDX D3D12 包装层兼容性修复：通过临时 `ID3D12Heap::GetDevice` 原生创建 carrier 根签名以绕过 RenoDX 布局改写，并放行 `ReShade64.asi` 等 D3D12 包装类的 Direct 状态监控 / Vulkan 桥接拆单 hook）进一步加固 D3D12 装钩安全与稳定性（Direct 钩子改用单次冻线程批量启用并在应用失败时保留跳板、`CreateCommandSignature` / `CommandAllocator` 支持多入口覆盖与按入口重试、拆单层补传真实自模块句柄并校验 `kRelease` 槽位），继续完整整合上游 **v0.1.7**（含 RDNA4 固定 ACO 路线、RX 7000 / RDNA3 `shaders-gfx11` 路径，以及通用 Windows + Linux Wine / Proton 系统 Mesa RADV >= 26.3 原生支持），并保留本分支的 ASI 集成、菜单和 GPU 资源生命周期保护。v0.1.7plus 完整速度、画质与显存实测对比见 **[v017plus-speed-quality-eval.md](docs/test-evidence/v017plus-speed-quality-eval.md)**（[English](docs/test-evidence/v017plus-speed-quality-eval.en.md)），Stage 10 审计与复测证据见 [v017-stage10-audit.md](docs/test-evidence/v017-stage10-audit.md)，旧版本历史验证记录保留于文末表格。
 
 ## 本仓库做了什么
 
@@ -77,7 +77,7 @@
 
 ### 方式二：手动配合官方原版 OptiScaler（Windows / Linux 通用发行包）
 
-将构建产物（共 `392` 个文件的通用 `stage/` 包，或直接解压 `dist/OpenRR-v0.1.7plus2-OptiScaler.zip`）放入游戏目录（即 OptiScaler 的 `dxgi.dll` / `OptiScaler.ini` 所在目录）：
+将构建产物（共 `392` 个文件的通用 `stage/` 包，或直接解压 `dist/OpenRR-v0.1.7plus3-OptiScaler.zip`）放入游戏目录（即 OptiScaler 的 `dxgi.dll` / `OptiScaler.ini` 所在目录）：
 
 | 文件 / 目录 | 放置位置（相对于 `OptiScaler.ini` 所在目录） |
 |---|---|
