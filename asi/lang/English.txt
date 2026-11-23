@@ -129,8 +129,8 @@ msgstr "Shader Read Optimal"
 msgid "General"
 msgstr "General"
 
-msgid "OptiFG Host Bridge (experimental)"
-msgstr "OptiFG Host Bridge (experimental)"
+msgid "OptiFG Frame Gen Compat (experimental)"
+msgstr "OptiFG Frame Gen Compat (experimental)"
 
 msgid "Restart required. Set OptiScaler's [Libraries] NvngxPath to load openrr-ngx-host.dll."
 msgstr "Restart required. Set OptiScaler's [Libraries] NvngxPath to load openrr-ngx-host.dll."

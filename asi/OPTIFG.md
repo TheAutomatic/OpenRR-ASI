@@ -1,4 +1,4 @@
-# OptiFG 宿主桥接（实验功能）
+# OptiFG 帧生成兼容（实验功能）
 
 让 OptiScaler 的 DLSSD 宿主调用 OpenRR 执行 RR，并复用 Upscaler 输入驱动 OptiFG。
 用户已报告鸣潮中 Streamline 启动、超分、RR 和 XeFG 同时生效；不代表所有游戏或 OptiScaler 版本均已验证。

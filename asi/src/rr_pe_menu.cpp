@@ -574,7 +574,7 @@ struct Menu {
                 ini.set("OpenRR", "VkInputLayout", vkl_idx == 1 ? "general" : "shader_read");
             }
 #ifdef OPENRR_EXPERIMENTAL_OPTIFG_HOST
-            checkbox_ini(openrr::lang::tr("OptiFG Host Bridge (experimental)"), "OptiFGHost", false);
+            checkbox_ini(openrr::lang::tr("OptiFG Frame Gen Compat (experimental)"), "OptiFGHost", false);
             ImGui::SetItemTooltip("%s", openrr::lang::tr("Restart required. Set OptiScaler's [Libraries] NvngxPath to load openrr-ngx-host.dll."));
 #endif
         }

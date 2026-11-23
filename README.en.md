@@ -12,7 +12,7 @@ This release (**v0.1.7plus2**) builds on **v0.1.7plus** with **ReShade + RenoDX 
 
 ## What this fork adds
 
-### Optional OptiFG host mode
+### Optional OptiFG frame generation compatibility
 
 The general release configuration keeps `[OpenRR] OptiFGHost=false` in `openrr-amd.ini`, using the standalone RR path by default. For **frame generation with upscaler input** (for example, `FGInput=upscaler` and `FGOutput=xefg`), follow the [OptiFG installation guide](asi/OPTIFG.md) (in Chinese) to configure the additional `openrr-ngx-host.dll`, then set `OptiFGHost=true` and restart the game. Do not use `_nvngx.dll` from older test packages.
 

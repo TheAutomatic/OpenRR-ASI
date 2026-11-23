@@ -134,8 +134,8 @@ msgstr "着色器只读最优（Shader Read Optimal）"
 msgid "General"
 msgstr "通用（General）"
 
-msgid "OptiFG Host Bridge (experimental)"
-msgstr "OptiFG 宿主桥接（实验性）"
+msgid "OptiFG Frame Gen Compat (experimental)"
+msgstr "OptiFG 帧生成兼容（实验性）"
 
 msgid "Restart required. Set OptiScaler's [Libraries] NvngxPath to load openrr-ngx-host.dll."
 msgstr "需要重启游戏。请在 OptiScaler 的 [Libraries] NvngxPath 中设置加载 openrr-ngx-host.dll。"

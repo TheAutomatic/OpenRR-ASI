@@ -134,8 +134,8 @@ msgstr "셰이더 읽기 최적 (Shader Read Optimal)"
 msgid "General"
 msgstr "일반 (General)"
 
-msgid "OptiFG Host Bridge (experimental)"
-msgstr "OptiFG 호스트 브리지 (실험적)"
+msgid "OptiFG Frame Gen Compat (experimental)"
+msgstr "OptiFG 프레임 생성 호환 (실험적)"
 
 msgid "Restart required. Set OptiScaler's [Libraries] NvngxPath to load openrr-ngx-host.dll."
 msgstr "재시작이 필요합니다. openrr-ngx-host.dll을 로드하려면 OptiScaler의 [Libraries] NvngxPath를 설정하세요."
