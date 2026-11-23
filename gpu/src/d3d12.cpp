@@ -185,6 +185,61 @@ void root_constants(const void* push, uint32_t size, uint32_t* rc) {
     rc[61] = 0;
 }
 
+bool create_carrier_root_signature(ID3D12Device* dev, uint32_t dwords, ID3D12RootSignature** out_rs, std::string* err) {
+    if (out_rs) *out_rs = nullptr;
+    if (err) err->clear();
+    auto fail = [&](const char* what, HRESULT hr) {
+        if (err) {
+            char b[160];
+            snprintf(b, sizeof b, "%s failed (0x%08lx)", what, static_cast<unsigned long>(hr));
+            *err = b;
+        }
+        return false;
+    };
+    if (!dev || !out_rs || dwords == 0) {
+        return fail("create_carrier_root_signature: invalid argument", E_INVALIDARG);
+    }
+
+    struct ComRel {
+        IUnknown* p = nullptr;
+        ~ComRel() {
+            if (p) p->Release();
+        }
+    };
+
+    D3D12_ROOT_PARAMETER rp{};
+    rp.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+    rp.Constants.Num32BitValues = dwords;
+    D3D12_ROOT_SIGNATURE_DESC rsd{1, &rp};
+    ID3DBlob* blob = nullptr;
+    ID3DBlob* msg = nullptr;
+    HRESULT hr = D3D12SerializeRootSignature(&rsd, D3D_ROOT_SIGNATURE_VERSION_1, &blob, &msg);
+    ComRel hold_blob{blob}, hold_msg{msg};
+    if (FAILED(hr) || !blob) return fail("D3D12SerializeRootSignature", FAILED(hr) ? hr : E_FAIL);
+
+    D3D12_HEAP_DESC hd{};
+    hd.SizeInBytes = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
+    hd.Properties.Type = D3D12_HEAP_TYPE_DEFAULT;
+    hd.Alignment = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
+    hd.Flags = D3D12_HEAP_FLAG_ALLOW_ONLY_BUFFERS;
+    ID3D12Heap* heap = nullptr;
+    hr = dev->CreateHeap(&hd, IID_PPV_ARGS(&heap));
+    ComRel hold_heap{heap};
+    if (FAILED(hr) || !heap) return fail("CreateHeap", FAILED(hr) ? hr : E_FAIL);
+
+    ID3D12Device* native = nullptr;
+    hr = heap->GetDevice(IID_PPV_ARGS(&native));
+    ComRel hold_native{native};
+    if (FAILED(hr) || !native) return fail("ID3D12Heap::GetDevice", FAILED(hr) ? hr : E_FAIL);
+
+    hr = native->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(out_rs));
+    if (FAILED(hr) || !*out_rs) {
+        *out_rs = nullptr;
+        return fail("CreateRootSignature", FAILED(hr) ? hr : E_FAIL);
+    }
+    return true;
+}
+
 namespace {
 struct AllocTrack {
     uint64_t epoch = 0;
@@ -305,16 +360,9 @@ bool D3dDevice::init(ID3D12Device* dev, Device* compiler, const std::wstring& ca
                       std::to_string(umd_ver.QuadPart) + "|patch 2";
         if (!cache_dir.empty()) cache_ = cache_dir + L"\\elf-" + std::filesystem::path(hex(fnv(driver_key_.data(), driver_key_.size()))).wstring();
 
-        D3D12_ROOT_PARAMETER rp{};
-        rp.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-        rp.Constants.Num32BitValues = kRootDwords;
-        D3D12_ROOT_SIGNATURE_DESC rsd{1, &rp};
-        ID3DBlob *blob = nullptr, *msg = nullptr;
-        check(D3D12SerializeRootSignature(&rsd, D3D_ROOT_SIGNATURE_VERSION_1, &blob, &msg), "D3D12SerializeRootSignature");
-        hr = dev_->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(&rs_));
-        blob->Release();
-        if (msg) msg->Release();
-        check(hr, "CreateRootSignature");
+        std::string rs_err;
+        if (!create_carrier_root_signature(dev_, kRootDwords, &rs_, &rs_err))
+            throw std::runtime_error(rs_err);
         D3D12_INDIRECT_ARGUMENT_DESC ia{D3D12_INDIRECT_ARGUMENT_TYPE_DISPATCH};
         D3D12_COMMAND_SIGNATURE_DESC cs{12, 1, &ia, 0};
         check(dev_->CreateCommandSignature(&cs, nullptr, IID_PPV_ARGS(&dispatch_sig_)), "CreateCommandSignature");

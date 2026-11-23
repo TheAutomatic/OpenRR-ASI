@@ -38,6 +38,12 @@ void elf_threads(const std::vector<uint8_t>& elf, uint32_t t[3]);
 // push constants -> the kRootDwords root constants
 void root_constants(const void* push, uint32_t size, uint32_t* rc);
 
+// Creates a root-constants carrier root signature directly on the native ID3D12Device obtained via a
+// temporary ID3D12Heap::GetDevice(), bypassing device wrappers (e.g. ReShade + RenoDX) that rewrite
+// CreateRootSignature layouts. Never falls back to dev->CreateRootSignature().
+bool create_carrier_root_signature(ID3D12Device* dev, uint32_t dwords, ID3D12RootSignature** out_rs,
+                                   std::string* err = nullptr);
+
 // Game-side command allocator reset retirement tracking (Item #3 & #4)
 void d3d12_note_list_reset(ID3D12GraphicsCommandList* cl, ID3D12CommandAllocator* alloc);
 void d3d12_note_list_released(ID3D12GraphicsCommandList* cl);

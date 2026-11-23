@@ -8,6 +8,7 @@
 #include "rr_pe_config.hpp"
 #include "rr_lang.hpp"
 #include "rr_ini_edit.hpp"
+#include "rr_pe_d3d12_hook_policy.hpp"
 #include "rr_pe_d3d12split.hpp"
 #include "rr_pe_vkdevice.hpp"
 #include "rr_pe_vkreset.hpp"
@@ -4531,6 +4532,264 @@ static int test_stage10_r2_fixes() {
     return 0;
 }
 
+namespace wrap_test {
+
+struct ComObj {
+    void** vt;
+};
+
+void* g_device_vt[56]{};
+void* g_native_vt[44]{};
+void* g_heap_vt[9]{};
+void* g_list_vt[60]{};
+void* g_priv_list_vt[60]{};
+void* g_queue_vt[19]{};
+
+ComObj g_device{g_device_vt};
+ComObj g_native{g_native_vt};
+ComObj g_heap{g_heap_vt};
+ComObj g_list{g_list_vt};
+ComObj g_priv_list{g_priv_list_vt};
+ComObj g_queue{g_queue_vt};
+
+int g_wrapper_roots = 0;
+int g_native_roots = 0;
+int g_heap_releases = 0;
+int g_native_releases = 0;
+SIZE_T g_seen_blob_size = 0;
+D3D12_HEAP_DESC g_seen_heap_desc{};
+HRESULT g_heap_result = S_OK;
+HRESULT g_get_device_result = S_OK;
+HRESULT g_root_result = S_OK;
+
+ULONG STDMETHODCALLTYPE wt_release(ComObj* obj) {
+    if (obj == &g_heap) ++g_heap_releases;
+    if (obj == &g_native) ++g_native_releases;
+    return 1;
+}
+
+HRESULT STDMETHODCALLTYPE wt_query(ComObj*, REFIID, void** out) {
+    *out = nullptr;
+    return E_NOINTERFACE;
+}
+
+HRESULT STDMETHODCALLTYPE wt_get_device(ComObj* obj, REFIID, void** out) {
+    *out = nullptr;
+    if (obj == &g_heap && FAILED(g_get_device_result)) return g_get_device_result;
+    *out = (obj == &g_heap) ? &g_native : &g_device;
+    return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE wt_create_heap(ComObj*, const D3D12_HEAP_DESC* desc, REFIID, void** out) {
+    *out = nullptr;
+    if (FAILED(g_heap_result)) return g_heap_result;
+    if (!desc) return E_INVALIDARG;
+    g_seen_heap_desc = *desc;
+    if (desc->SizeInBytes != D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT ||
+        desc->Properties.Type != D3D12_HEAP_TYPE_DEFAULT ||
+        desc->Flags != D3D12_HEAP_FLAG_ALLOW_ONLY_BUFFERS) {
+        return E_INVALIDARG;
+    }
+    *out = &g_heap;
+    return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE wt_create_root(ComObj* obj, UINT, const void*, SIZE_T len, REFIID, void** out) {
+    if (obj == &g_device) ++g_wrapper_roots;
+    else ++g_native_roots;
+    g_seen_blob_size = len;
+    *out = nullptr;
+    if (FAILED(g_root_result)) return g_root_result;
+    *out = &g_heap;
+    return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE wt_create_queue(ComObj*, const D3D12_COMMAND_QUEUE_DESC*, REFIID, void** out) {
+    *out = &g_queue;
+    return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE wt_reset(ComObj*, ID3D12CommandAllocator*, ID3D12PipelineState*) { return S_OK; }
+HRESULT STDMETHODCALLTYPE wt_close(ComObj*) { return S_OK; }
+void STDMETHODCALLTYPE wt_noop() {}
+
+template <class T>
+void* fn_ptr(T f) {
+    return reinterpret_cast<void*>(f);
+}
+
+}  // namespace wrap_test
+
+static int test_d3d12_wrapper_compat() {
+    std::printf("[INFO] Wrapper compat regression tests\n");
+
+    // 1. Shared D3D12 hook policy tests
+    if (!openrr::pe::is_conflicting_d3d12_hook_module(L"dlssnr-amd.asi") ||
+        !openrr::pe::is_conflicting_d3d12_hook_module(L"DLSSNR-AMD-LOADLATE.ASI") ||
+        !openrr::pe::is_conflicting_d3d12_hook_module(L"openrr-amd.asi")) {
+        std::fprintf(stderr, "FAIL: conflicting D3D12 hook module check failed\n");
+        return 1;
+    }
+    if (openrr::pe::is_conflicting_d3d12_hook_module(L"ReShade64.asi") ||
+        openrr::pe::is_conflicting_d3d12_hook_module(L"ReShade64.dll") ||
+        openrr::pe::is_conflicting_d3d12_hook_module(L"D3D12Core.dll") ||
+        openrr::pe::is_conflicting_d3d12_hook_module(L"libvkd3d-1.dll")) {
+        std::fprintf(stderr, "FAIL: non-conflicting D3D12 wrapper/core module rejected\n");
+        return 1;
+    }
+
+    std::string mod;
+    if (openrr::pe::is_hookable_d3d12_target(nullptr, nullptr, &mod)) {
+        std::fprintf(stderr, "FAIL: null function pointer marked hookable\n");
+        return 1;
+    }
+
+    void* priv_mem = VirtualAlloc(nullptr, 4096, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    if (!priv_mem) {
+        std::fprintf(stderr, "FAIL: VirtualAlloc failed in wrapper compat test\n");
+        return 1;
+    }
+    if (openrr::pe::is_hookable_d3d12_target(priv_mem, nullptr, &mod) || mod != "private memory") {
+        std::fprintf(stderr, "FAIL: private memory allowed or misreported (%s)\n", mod.c_str());
+        VirtualFree(priv_mem, 0, MEM_RELEASE);
+        return 1;
+    }
+
+    const void* local_fn = wrap_test::fn_ptr(wrap_test::wt_close);
+    HMODULE self_exe = GetModuleHandleW(nullptr);
+    if (openrr::pe::is_hookable_d3d12_target(local_fn, self_exe, &mod)) {
+        std::fprintf(stderr, "FAIL: self module target was not rejected\n");
+        VirtualFree(priv_mem, 0, MEM_RELEASE);
+        return 1;
+    }
+    if (!openrr::pe::is_hookable_d3d12_target(local_fn, nullptr, &mod) || mod.empty()) {
+        std::fprintf(stderr, "FAIL: non-conflicting PE module target rejected (%s)\n", mod.c_str());
+        VirtualFree(priv_mem, 0, MEM_RELEASE);
+        return 1;
+    }
+    std::printf("[PASS] D3D12 hook policy: wrapper PE allowed, self/coexist/private-memory rejected\n");
+
+    // Populate COM-ABI doubles
+    for (auto& slot : wrap_test::g_list_vt) slot = wrap_test::fn_ptr(wrap_test::wt_noop);
+    wrap_test::g_list_vt[0] = wrap_test::fn_ptr(wrap_test::wt_query);
+    wrap_test::g_list_vt[2] = wrap_test::fn_ptr(wrap_test::wt_release);
+    wrap_test::g_list_vt[7] = wrap_test::fn_ptr(wrap_test::wt_get_device);
+    wrap_test::g_list_vt[9] = wrap_test::fn_ptr(wrap_test::wt_close);
+    wrap_test::g_list_vt[10] = wrap_test::fn_ptr(wrap_test::wt_reset);
+    for (size_t i = 0; i < 60; ++i) wrap_test::g_priv_list_vt[i] = wrap_test::g_list_vt[i];
+    wrap_test::g_priv_list_vt[9] = priv_mem; // slot 9 (Close) in private memory -> coexistence refusal
+
+    wrap_test::g_device_vt[0] = wrap_test::fn_ptr(wrap_test::wt_query);
+    wrap_test::g_device_vt[2] = wrap_test::fn_ptr(wrap_test::wt_release);
+    wrap_test::g_device_vt[8] = wrap_test::fn_ptr(wrap_test::wt_create_queue);
+    wrap_test::g_device_vt[12] = wrap_test::fn_ptr(wrap_test::wt_noop);
+    wrap_test::g_device_vt[16] = wrap_test::fn_ptr(wrap_test::wt_create_root);
+    wrap_test::g_device_vt[28] = wrap_test::fn_ptr(wrap_test::wt_create_heap);
+
+    wrap_test::g_native_vt[2] = wrap_test::fn_ptr(wrap_test::wt_release);
+    wrap_test::g_native_vt[16] = wrap_test::fn_ptr(wrap_test::wt_create_root);
+
+    wrap_test::g_heap_vt[2] = wrap_test::fn_ptr(wrap_test::wt_release);
+    wrap_test::g_heap_vt[7] = wrap_test::fn_ptr(wrap_test::wt_get_device);
+
+    wrap_test::g_queue_vt[2] = wrap_test::fn_ptr(wrap_test::wt_release);
+    wrap_test::g_queue_vt[10] = wrap_test::fn_ptr(wrap_test::wt_noop);
+
+    // 2. Carrier root signature tests
+    auto* dev = reinterpret_cast<ID3D12Device*>(&wrap_test::g_device);
+    ID3D12RootSignature* rs = nullptr;
+    std::string why;
+
+    if (onr::create_carrier_root_signature(nullptr, onr::kRootDwords, &rs, &why) ||
+        why.find("invalid argument") == std::string::npos || rs != nullptr) {
+        std::fprintf(stderr, "FAIL: null device not rejected (%s)\n", why.c_str());
+        VirtualFree(priv_mem, 0, MEM_RELEASE);
+        return 1;
+    }
+    if (onr::create_carrier_root_signature(dev, 0, &rs, &why) ||
+        why.find("invalid argument") == std::string::npos || rs != nullptr) {
+        std::fprintf(stderr, "FAIL: zero dwords not rejected (%s)\n", why.c_str());
+        VirtualFree(priv_mem, 0, MEM_RELEASE);
+        return 1;
+    }
+    if (!onr::create_carrier_root_signature(dev, onr::kRootDwords, &rs, &why) || !rs) {
+        std::fprintf(stderr, "FAIL: create_carrier_root_signature failed: %s\n", why.c_str());
+        VirtualFree(priv_mem, 0, MEM_RELEASE);
+        return 1;
+    }
+    if (wrap_test::g_wrapper_roots != 0 || wrap_test::g_native_roots != 1 ||
+        wrap_test::g_heap_releases != 1 || wrap_test::g_native_releases != 1 ||
+        wrap_test::g_seen_blob_size == 0 ||
+        wrap_test::g_seen_heap_desc.Properties.Type != D3D12_HEAP_TYPE_DEFAULT ||
+        wrap_test::g_seen_heap_desc.Flags != D3D12_HEAP_FLAG_ALLOW_ONLY_BUFFERS ||
+        wrap_test::g_seen_heap_desc.SizeInBytes != D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT) {
+        std::fprintf(stderr, "FAIL: carrier root signature bypassed/refcount/heap check failed\n");
+        VirtualFree(priv_mem, 0, MEM_RELEASE);
+        return 1;
+    }
+
+    wrap_test::g_heap_result = E_OUTOFMEMORY;
+    if (onr::create_carrier_root_signature(dev, onr::kRootDwords, &rs, &why) || rs || why.find("CreateHeap") != 0) {
+        std::fprintf(stderr, "FAIL: CreateHeap failure fell back or wrong error: %s\n", why.c_str());
+        VirtualFree(priv_mem, 0, MEM_RELEASE);
+        return 1;
+    }
+    wrap_test::g_heap_result = S_OK;
+
+    wrap_test::g_get_device_result = E_NOINTERFACE;
+    if (onr::create_carrier_root_signature(dev, onr::kRootDwords, &rs, &why) || rs ||
+        why.find("GetDevice") == std::string::npos || wrap_test::g_heap_releases != 2) {
+        std::fprintf(stderr, "FAIL: GetDevice failure wrong error/refcount (%s, rel=%d)\n",
+                     why.c_str(), wrap_test::g_heap_releases);
+        VirtualFree(priv_mem, 0, MEM_RELEASE);
+        return 1;
+    }
+    wrap_test::g_get_device_result = S_OK;
+
+    wrap_test::g_root_result = E_FAIL;
+    if (onr::create_carrier_root_signature(dev, onr::kRootDwords, &rs, &why) || rs ||
+        why.find("CreateRootSignature") != 0 ||
+        wrap_test::g_heap_releases != 3 || wrap_test::g_native_releases != 2 || wrap_test::g_wrapper_roots != 0) {
+        std::fprintf(stderr, "FAIL: CreateRootSignature failure wrong error/refcount/fallback\n");
+        VirtualFree(priv_mem, 0, MEM_RELEASE);
+        return 1;
+    }
+    wrap_test::g_root_result = S_OK;
+    std::printf("[PASS] onr::create_carrier_root_signature bypasses wrapper without fallback and releases refs\n");
+
+    // 3. openrr::pe::split::prepare wrapped COM-ABI double tests
+    auto* cmd = reinterpret_cast<ID3D12GraphicsCommandList*>(&wrap_test::g_list);
+    if (openrr::pe::split::prepare(cmd, &why) || why.find("next Reset") == std::string::npos) {
+        std::fprintf(stderr, "FAIL: wrapped split::prepare initial call expected next Reset, got: %s\n", why.c_str());
+        VirtualFree(priv_mem, 0, MEM_RELEASE);
+        return 1;
+    }
+    cmd->Reset(nullptr, nullptr);
+    if (!openrr::pe::split::prepare(cmd, &why)) {
+        std::fprintf(stderr, "FAIL: wrapped split::prepare failed after Reset: %s\n", why.c_str());
+        VirtualFree(priv_mem, 0, MEM_RELEASE);
+        return 1;
+    }
+    if (wrap_test::g_device_vt[12] == wrap_test::fn_ptr(wrap_test::wt_noop) ||
+        wrap_test::g_queue_vt[10] == wrap_test::fn_ptr(wrap_test::wt_noop)) {
+        std::fprintf(stderr, "FAIL: wrapped device or queue vtable was not patched\n");
+        VirtualFree(priv_mem, 0, MEM_RELEASE);
+        return 1;
+    }
+    std::printf("[PASS] openrr::pe::split::prepare accepts wrapped list/device/queue outside d3d12*.dll\n");
+
+    // 4. Coexistence refusal test LAST (sets split::g_disabled = true)
+    auto* priv_cmd = reinterpret_cast<ID3D12GraphicsCommandList*>(&wrap_test::g_priv_list);
+    if (openrr::pe::split::prepare(priv_cmd, &why) || why.find("private memory") == std::string::npos) {
+        std::fprintf(stderr, "FAIL: private memory vtable slot was not refused (why=%s)\n", why.c_str());
+        VirtualFree(priv_mem, 0, MEM_RELEASE);
+        return 1;
+    }
+    VirtualFree(priv_mem, 0, MEM_RELEASE);
+    std::printf("[PASS] openrr::pe::split::prepare refuses private memory vtable slot for coexistence safety\n");
+    return 0;
+}
+
 int main() {
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
     std::set_terminate([] {
@@ -4558,6 +4817,7 @@ int main() {
     if (test_d3d12_gpu_and_engine() != 0) return 1;
     if (test_stage10_final_audit() != 0) return 1;
     if (test_stage10_r2_fixes() != 0) return 1;
+    if (test_d3d12_wrapper_compat() != 0) return 1;
     std::printf("ALL ASI UNIT TESTS PASSED\n");
     return 0;
 }

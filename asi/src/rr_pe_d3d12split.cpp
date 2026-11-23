@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Adapted from mochi / DLSSNR-AMD (MIT, Copyright (c) 2026 mochizuki0323).
 #include "rr_path_win.hpp"
+#include "rr_pe_d3d12_hook_policy.hpp"
 #include "rr_pe_d3d12split.hpp"
 
 #include "rr_pe_log.hpp"
@@ -1313,20 +1314,10 @@ bool write_vtable(void** vt, unsigned slot, void* fn) {
     return true;
 }
 
-// Coexistence check: true only when the vtable method pointer resides inside a system/Agility D3D12 module
-// (d3d12.dll, D3D12Core.dll, or vkd3d-proton's d3d12). If another ASI (such as dlssnr-amd.asi) has already patched
-// the class vtable, the slot points outside d3d12 and OpenRR must not stack a second vtable patch on top.
-bool in_d3d12_module(const void* p) {
-    if (!p) return false;
-    HMODULE m = nullptr;
-    wchar_t path[MAX_PATH] = {};
-    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                            reinterpret_cast<LPCWSTR>(p), &m) ||
-        !m || !GetModuleFileNameW(m, path, MAX_PATH))
-        return false;
-    const wchar_t* base = std::wcsrchr(path, L'\\');
-    base = base ? base + 1 : path;
-    return _wcsnicmp(base, L"d3d12", 5) == 0 || _wcsnicmp(base, L"libvkd3d", 8) == 0 || _wcsnicmp(base, L"vkd3d", 5) == 0;
+// Coexistence check: accept real D3D12 / vkd3d modules and genuine D3D12 wrappers (such as ReShade64.asi),
+// while refusing private memory (e.g. another splitter's JIT stubs) and other OpenRR / DLSSNR-AMD modules.
+bool can_patch_vtable_fn(const void* p, std::string* out_mod = nullptr) {
+    return openrr::pe::is_hookable_d3d12_target(p, nullptr, out_mod);
 }
 
 // Where an address lives, for the log: a module's file name, or private memory (a heap).
@@ -1388,15 +1379,17 @@ bool patch_list_class(List* list, std::string* why) {
         for (unsigned k = 0; same && k < slots; ++k) same = vt[k] == c->orig[k];
         if (same) return add_vtable(vt, g_classes[i], false, why);
     }
-    if (!in_d3d12_module(vt[kClose]) || !in_d3d12_module(vt[kReset]) ||
-        !in_d3d12_module(vt[kSetDescriptorHeaps]) || !in_d3d12_module(vt[kSetComputeRootSignature])) {
-        *why = "command list class vtable is already hooked by another module (" + where_is(vt[kClose]) + ")";
-        static bool logged_ext = false;
-        if (!logged_ext) {
-            logged_ext = true;
-            log("[openrr] split: %s; not installing OpenRR split hooks", why->c_str());
+    std::string bad_mod;
+    for (const unsigned slot : {unsigned(kClose), unsigned(kReset), unsigned(kSetDescriptorHeaps), unsigned(kSetComputeRootSignature)}) {
+        if (!can_patch_vtable_fn(vt[slot], &bad_mod)) {
+            *why = "command list class vtable is already hooked by another module (" + bad_mod + ")";
+            static bool logged_ext = false;
+            if (!logged_ext) {
+                logged_ext = true;
+                log("[openrr] split: %s; not installing OpenRR split hooks", why->c_str());
+            }
+            return false;
         }
-        return false;
     }
     if (n >= 32) { *why = "too many command list classes"; return false; }
     auto* cls = new ListClass();
@@ -1570,8 +1563,11 @@ bool patch_device_class(ID3D12Device* device, std::string* why) {
     void** vt = *reinterpret_cast<void***>(device);
     const int n = g_device_count.load();
     for (int i = 0; i < n; ++i) if (g_device_classes[i].vtable == vt) return true;
-    if (!in_d3d12_module(vt[kDeviceCreateCommandList])) {
-        *why = "device vtable is already hooked by another module (" + where_is(vt[kDeviceCreateCommandList]) + ")";
+    std::string bad_mod;
+    if (vt[kDeviceCreateCommandList] == reinterpret_cast<void*>(&hk_CreateCommandList) ||
+        !can_patch_vtable_fn(vt[kDeviceCreateCommandList], &bad_mod)) {
+        *why = "device vtable is already hooked by another module (" +
+               (bad_mod.empty() ? where_is(vt[kDeviceCreateCommandList]) : bad_mod) + ")";
         return false;
     }
     if (n >= 8) { *why = "too many device classes"; return false; }
@@ -1580,7 +1576,8 @@ bool patch_device_class(ID3D12Device* device, std::string* why) {
     IUnknown* dev4 = nullptr;
     if (SUCCEEDED(device->QueryInterface(kIIDDevice4, reinterpret_cast<void**>(&dev4))) && dev4) {
         vt4 = *reinterpret_cast<void***>(dev4);
-        if (in_d3d12_module(vt4[kDevice4CreateCommandList1]))
+        if (vt4[kDevice4CreateCommandList1] != reinterpret_cast<void*>(&hk_CreateCommandList1) &&
+            can_patch_vtable_fn(vt4[kDevice4CreateCommandList1]))
             orig_create1 = vt4[kDevice4CreateCommandList1];
         else
             vt4 = nullptr;
@@ -1616,9 +1613,12 @@ bool patch_queue_classes(ID3D12Device* device, D3D12_COMMAND_LIST_TYPE type, std
     const int n = g_queue_count.load();
     for (int i = 0; i < n; ++i) known = known || g_queue_classes[i].vtable == vt;
     bool ok = true;
-    if (!known && !in_d3d12_module(vt[kQueueExecute])) {
+    std::string bad_mod;
+    if (!known && (vt[kQueueExecute] == reinterpret_cast<void*>(&hk_Execute) ||
+                   !can_patch_vtable_fn(vt[kQueueExecute], &bad_mod))) {
         ok = false;
-        *why = "command queue vtable is already hooked by another module (" + where_is(vt[kQueueExecute]) + ")";
+        *why = "command queue vtable is already hooked by another module (" +
+               (bad_mod.empty() ? where_is(vt[kQueueExecute]) : bad_mod) + ")";
     } else if (!known && n >= 8) { ok = false; *why = "too many command queue classes"; }
     else if (!known) {
         g_queue_classes[n] = {vt, vt[kQueueExecute]};

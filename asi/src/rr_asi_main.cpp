@@ -7,6 +7,7 @@
 #include "rr_pe_config.hpp"
 #include "rr_pe_control.hpp"
 #include "rr_pe_crash.hpp"
+#include "rr_pe_d3d12_hook_policy.hpp"
 #include "rr_pe_d3d12split.hpp"
 #include "rr_d3d12_record.hpp"
 #include "rr_data_paths.hpp"
@@ -125,22 +126,9 @@ bool split_allowed_by_config() {
     return true;
 }
 
-// ---- D3D12Core MinHook compute-state tracker for Direct mode (Item #1) & Allocator Reset (Item #3) ----
-bool in_d3d12_core_module(const void* fn, std::string* out_mod = nullptr) {
-    if (!fn) return false;
-    HMODULE mod = nullptr;
-    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                            reinterpret_cast<LPCWSTR>(fn), &mod) || !mod)
-        return false;
-    wchar_t path[MAX_PATH]{};
-    if (!GetModuleFileNameW(mod, path, MAX_PATH)) return false;
-    const wchar_t* base = std::wcsrchr(path, L'\\');
-    base = base ? base + 1 : path;
-    if (out_mod) *out_mod = utf8_from_wide(base);
-    if (_wcsnicmp(base, L"d3d12", 5) == 0) return true;
-    for (const wchar_t* p = base; *p; ++p)
-        if (_wcsnicmp(p, L"vkd3d", 5) == 0) return true;
-    return false;
+// ---- D3D12 MinHook compute-state tracker for Direct mode (Item #1) & Allocator Reset (Item #3) ----
+bool in_hookable_d3d12_module(const void* fn, std::string* out_mod = nullptr) {
+    return openrr::pe::is_hookable_d3d12_target(fn, g_self, out_mod);
 }
 
 struct DirectRootArgs {
@@ -470,6 +458,8 @@ PFN_Dev4_CreateCommandList1 real_dev4_create_cl1 = nullptr;
 PFN_CA_Reset real_ca_reset = nullptr;
 PFN_COM_Release real_ca_release = nullptr;
 PFN_COM_Release real_cl_release = nullptr;
+void* g_hooked_cmd_sig_fn = nullptr;
+void* g_hooked_ca_reset_fn = nullptr;
 void* g_hooked_ca_release_fn = nullptr;
 
 HRESULT STDMETHODCALLTYPE hk_ca_reset(ID3D12CommandAllocator* alloc) {
@@ -736,11 +726,23 @@ bool ensure_cmd_sig_hook(ID3D12Device* dev) {
         return g_cmd_sig_hook_ok.load(std::memory_order_relaxed);
     void** dvt = *reinterpret_cast<void***>(dev);
     bool ok = false;
-    if (in_d3d12_core_module(dvt[41])) {
-        if (MH_CreateHook(dvt[41], reinterpret_cast<void*>(&hk_dev_create_cmd_sig), reinterpret_cast<void**>(&real_dev_create_cmd_sig)) == MH_OK &&
-            MH_EnableHook(dvt[41]) == MH_OK) {
-            ok = true;
+    std::string mod;
+    if (in_hookable_d3d12_module(dvt[41], &mod)) {
+        if (MH_CreateHook(dvt[41], reinterpret_cast<void*>(&hk_dev_create_cmd_sig),
+                          reinterpret_cast<void**>(&real_dev_create_cmd_sig)) == MH_OK) {
+            if (MH_EnableHook(dvt[41]) == MH_OK) {
+                g_hooked_cmd_sig_fn = dvt[41];
+                ok = true;
+            } else {
+                MH_RemoveHook(dvt[41]);
+                real_dev_create_cmd_sig = nullptr;
+                log("[openrr] CreateCommandSignature hook enable failed in %s", mod.c_str());
+            }
+        } else {
+            log("[openrr] CreateCommandSignature hook create failed in %s", mod.c_str());
         }
+    } else {
+        log("[openrr] CreateCommandSignature slot 41 refused (%s)", mod.c_str());
     }
     g_cmd_sig_hook_ok.store(ok, std::memory_order_relaxed);
     g_cmd_sig_hook_installed.store(true, std::memory_order_release);
@@ -758,16 +760,27 @@ void ensure_allocator_reset_hook(ID3D12Device* dev) {
         void* fn_ca_release = vt[2]; // IUnknown::Release on CommandAllocator
         void* fn_ca_reset = vt[8];   // ID3D12CommandAllocator::Reset
         std::string mod;
-        if (in_d3d12_core_module(fn_ca_reset, &mod)) {
-            if (MH_CreateHook(fn_ca_reset, reinterpret_cast<void*>(&hk_ca_reset), reinterpret_cast<void**>(&real_ca_reset)) == MH_OK)
-                MH_EnableHook(fn_ca_reset);
+        if (in_hookable_d3d12_module(fn_ca_reset, &mod) && fn_ca_reset != g_hooked_cmd_sig_fn) {
+            if (MH_CreateHook(fn_ca_reset, reinterpret_cast<void*>(&hk_ca_reset), reinterpret_cast<void**>(&real_ca_reset)) == MH_OK) {
+                if (MH_EnableHook(fn_ca_reset) == MH_OK) {
+                    g_hooked_ca_reset_fn = fn_ca_reset;
+                } else {
+                    MH_RemoveHook(fn_ca_reset);
+                    real_ca_reset = nullptr;
+                }
+            }
         } else {
-            log("[openrr] allocator Reset slot 8 is outside D3D12 module (%s); not hooking", mod.c_str());
+            log("[openrr] allocator Reset slot 8 refused (%s); not hooking", mod.c_str());
         }
-        if (in_d3d12_core_module(fn_ca_release)) {
-            if (MH_CreateHook(fn_ca_release, reinterpret_cast<void*>(&hk_ca_release), reinterpret_cast<void**>(&real_ca_release)) == MH_OK &&
-                MH_EnableHook(fn_ca_release) == MH_OK) {
-                g_hooked_ca_release_fn = fn_ca_release;
+        if (fn_ca_release != g_hooked_cmd_sig_fn && fn_ca_release != g_hooked_ca_reset_fn &&
+            in_hookable_d3d12_module(fn_ca_release)) {
+            if (MH_CreateHook(fn_ca_release, reinterpret_cast<void*>(&hk_ca_release), reinterpret_cast<void**>(&real_ca_release)) == MH_OK) {
+                if (MH_EnableHook(fn_ca_release) == MH_OK) {
+                    g_hooked_ca_release_fn = fn_ca_release;
+                } else {
+                    MH_RemoveHook(fn_ca_release);
+                    real_ca_release = nullptr;
+                }
             }
         }
         probe->Release();
@@ -777,6 +790,7 @@ void ensure_allocator_reset_hook(ID3D12Device* dev) {
 
 bool ensure_direct_state_hooks(ID3D12Device* dev, ID3D12GraphicsCommandList* cl = nullptr) {
     ensure_allocator_reset_hook(dev);
+    const bool cmd_sig_ok = (!dev) || g_cmd_sig_hook_ok.load(std::memory_order_acquire);
     if (g_direct_hooks_installed.load(std::memory_order_acquire))
         return g_direct_hooks_ok.load(std::memory_order_relaxed);
     std::lock_guard<std::mutex> lock(g_direct_hook_install_mutex);
@@ -804,6 +818,13 @@ bool ensure_direct_state_hooks(ID3D12Device* dev, ID3D12GraphicsCommandList* cl 
 
     if (!cl) return false;
 
+    if (dev && !cmd_sig_ok) {
+        log("[openrr] Direct state hook failed: CreateCommandSignature (slot 41) unavailable");
+        g_direct_hooks_ok.store(false, std::memory_order_relaxed);
+        g_direct_hooks_installed.store(true, std::memory_order_release);
+        return false;
+    }
+
     void** vt = *reinterpret_cast<void***>(cl);
     struct HookItem { const char* name; unsigned slot; void* detour; void** orig; };
     const HookItem cl_items[] = {
@@ -822,42 +843,87 @@ bool ensure_direct_state_hooks(ID3D12Device* dev, ID3D12GraphicsCommandList* cl 
         {"ExecuteIndirect",                   59, reinterpret_cast<void*>(&hk_cl_exec_indirect),      reinterpret_cast<void**>(&real_cl_exec_indirect)},
     };
 
+    std::vector<void*> known_hooked;
+    if (g_hooked_cmd_sig_fn) known_hooked.push_back(g_hooked_cmd_sig_fn);
+    if (g_hooked_ca_reset_fn) known_hooked.push_back(g_hooked_ca_reset_fn);
+    if (g_hooked_ca_release_fn) known_hooked.push_back(g_hooked_ca_release_fn);
+
     std::string mod_name;
     for (const auto& it : cl_items) {
-        if (!in_d3d12_core_module(vt[it.slot], &mod_name)) {
-            log("[openrr] Direct state hook refused: command-list %s (slot %u) is outside D3D12 module (%s)",
+        if (!in_hookable_d3d12_module(vt[it.slot], &mod_name)) {
+            log("[openrr] Direct state hook refused: command-list %s (slot %u) is in non-hookable target (%s)",
                 it.name, it.slot, mod_name.c_str());
             g_direct_hooks_ok.store(false, std::memory_order_relaxed);
             g_direct_hooks_installed.store(true, std::memory_order_release);
             return false;
         }
+        if (std::find(known_hooked.begin(), known_hooked.end(), vt[it.slot]) != known_hooked.end()) {
+            log("[openrr] Direct state hook refused: duplicate target function on %s (slot %u) in %s",
+                it.name, it.slot, mod_name.c_str());
+            g_direct_hooks_ok.store(false, std::memory_order_relaxed);
+            g_direct_hooks_installed.store(true, std::memory_order_release);
+            return false;
+        }
+        known_hooked.push_back(vt[it.slot]);
     }
 
-    bool all_ok = true;
+    auto rollback_cl = [&](const std::vector<void*>& enabled, const std::vector<void*>& created) {
+        for (void* ep : enabled) MH_DisableHook(ep);
+        for (void* cp : created) MH_RemoveHook(cp);
+        for (const auto& item : cl_items) *item.orig = nullptr;
+        g_direct_hooks_ok.store(false, std::memory_order_relaxed);
+        g_direct_hooks_installed.store(true, std::memory_order_release);
+    };
+
+    std::vector<void*> created;
+    created.reserve(std::size(cl_items));
     for (const auto& it : cl_items) {
-        if (MH_CreateHook(vt[it.slot], it.detour, it.orig) != MH_OK || MH_EnableHook(vt[it.slot]) != MH_OK) {
-            log("[openrr] Direct state hook failed on %s (slot %u)", it.name, it.slot);
-            all_ok = false;
+        if (MH_CreateHook(vt[it.slot], it.detour, it.orig) != MH_OK) {
+            log("[openrr] Direct state hook failed to create on %s (slot %u)", it.name, it.slot);
+            rollback_cl({}, created);
+            return false;
         }
+        created.push_back(vt[it.slot]);
     }
-    if (vt[2] != g_hooked_ca_release_fn && in_d3d12_core_module(vt[2])) {
-        if (MH_CreateHook(vt[2], reinterpret_cast<void*>(&hk_cl_release), reinterpret_cast<void**>(&real_cl_release)) == MH_OK)
-            MH_EnableHook(vt[2]);
+
+    std::vector<void*> enabled;
+    enabled.reserve(created.size());
+    for (size_t i = 0; i < created.size(); ++i) {
+        if (MH_EnableHook(created[i]) != MH_OK) {
+            log("[openrr] Direct state hook failed to enable on %s (slot %u)", cl_items[i].name, cl_items[i].slot);
+            rollback_cl(enabled, created);
+            return false;
+        }
+        enabled.push_back(created[i]);
     }
+
+    auto install_optional = [&](void* fn, void* detour, void** orig) -> bool {
+        if (!in_hookable_d3d12_module(fn)) return false;
+        if (std::find(known_hooked.begin(), known_hooked.end(), fn) != known_hooked.end()) return false;
+        if (MH_CreateHook(fn, detour, orig) != MH_OK) {
+            *orig = nullptr;
+            return false;
+        }
+        if (MH_EnableHook(fn) != MH_OK) {
+            MH_RemoveHook(fn);
+            *orig = nullptr;
+            return false;
+        }
+        known_hooked.push_back(fn);
+        return true;
+    };
+
+    install_optional(vt[2], reinterpret_cast<void*>(&hk_cl_release), reinterpret_cast<void**>(&real_cl_release));
 
     if (openrr::pe::d3d12_diagnostics_enabled()) {
-        auto install_barrier = [](void* fn, void* detour, void** original) {
-            return in_d3d12_core_module(fn) && MH_CreateHook(fn, detour, original) == MH_OK &&
-                   MH_EnableHook(fn) == MH_OK;
-        };
-        const bool legacy = install_barrier(vt[26], reinterpret_cast<void*>(&hk_cl_barrier),
-                                            reinterpret_cast<void**>(&real_cl_barrier));
+        const bool legacy = install_optional(vt[26], reinterpret_cast<void*>(&hk_cl_barrier),
+                                             reinterpret_cast<void**>(&real_cl_barrier));
         ID3D12GraphicsCommandList7* cl7 = nullptr;
         bool enhanced = false;
-        if (SUCCEEDED(cl->QueryInterface(IID_PPV_ARGS(&cl7)))) {
+        if (SUCCEEDED(cl->QueryInterface(IID_PPV_ARGS(&cl7))) && cl7) {
             void** vt7 = *reinterpret_cast<void***>(cl7);
-            enhanced = install_barrier(vt7[80], reinterpret_cast<void*>(&hk_cl_barrier7),
-                                       reinterpret_cast<void**>(&real_cl_barrier7));
+            enhanced = install_optional(vt7[80], reinterpret_cast<void*>(&hk_cl_barrier7),
+                                        reinterpret_cast<void**>(&real_cl_barrier7));
             cl7->Release();
         }
         log("[d3d12 diag] host barrier hooks legacy=%d enhanced=%d", int(legacy), int(enhanced));
@@ -866,42 +932,27 @@ bool ensure_direct_state_hooks(ID3D12Device* dev, ID3D12GraphicsCommandList* cl 
     IUnknown* cl4 = nullptr;
     if (SUCCEEDED(cl->QueryInterface(kIID_List4, reinterpret_cast<void**>(&cl4))) && cl4) {
         void** vt4 = *reinterpret_cast<void***>(cl4);
-        if (in_d3d12_core_module(vt4[75])) {
-            if (MH_CreateHook(vt4[75], reinterpret_cast<void*>(&hk_cl_set_pso1), reinterpret_cast<void**>(&real_cl_set_pso1)) == MH_OK)
-                MH_EnableHook(vt4[75]);
-        }
+        install_optional(vt4[75], reinterpret_cast<void*>(&hk_cl_set_pso1), reinterpret_cast<void**>(&real_cl_set_pso1));
         cl4->Release();
     }
 
     if (dev) {
         void** dvt = *reinterpret_cast<void***>(dev);
-        if (in_d3d12_core_module(dvt[12])) {
-            if (MH_CreateHook(dvt[12], reinterpret_cast<void*>(&hk_dev_create_cl), reinterpret_cast<void**>(&real_dev_create_cl)) == MH_OK)
-                MH_EnableHook(dvt[12]);
-        }
+        install_optional(dvt[12], reinterpret_cast<void*>(&hk_dev_create_cl), reinterpret_cast<void**>(&real_dev_create_cl));
         IUnknown* dev4 = nullptr;
         if (SUCCEEDED(dev->QueryInterface(kIID_Dev4, reinterpret_cast<void**>(&dev4))) && dev4) {
             void** dvt4 = *reinterpret_cast<void***>(dev4);
-            if (in_d3d12_core_module(dvt4[51])) {
-                if (MH_CreateHook(dvt4[51], reinterpret_cast<void*>(&hk_dev4_create_cl1), reinterpret_cast<void**>(&real_dev4_create_cl1)) == MH_OK)
-                    MH_EnableHook(dvt4[51]);
-            }
+            install_optional(dvt4[51], reinterpret_cast<void*>(&hk_dev4_create_cl1),
+                             reinterpret_cast<void**>(&real_dev4_create_cl1));
             dev4->Release();
         }
     }
 
-    if (dev && !ensure_cmd_sig_hook(dev)) {
-        log("[openrr] Direct state hook failed on CreateCommandSignature (slot 41)");
-        all_ok = false;
-    }
-
-    g_direct_hooks_ok.store(all_ok, std::memory_order_relaxed);
+    g_direct_hooks_ok.store(true, std::memory_order_relaxed);
     g_direct_hooks_installed.store(true, std::memory_order_release);
-    if (all_ok) {
-        log("[openrr] Direct compute-state hooks installed in %s (13 list methods + CreateCommandList + Allocator::Reset)",
-            mod_name.c_str());
-    }
-    return all_ok;
+    log("[openrr] Direct compute-state hooks installed in %s (13 list methods + CreateCommandList + Allocator::Reset)",
+        mod_name.c_str());
+    return true;
 }
 
 void log_direct_texture_barriers(ID3D12GraphicsCommandList* cmd, const OnrRrFrame& frame) {
