@@ -150,47 +150,55 @@ inline bool probe_and_open(ID3D12Device* dev, InteropSession& out, std::string& 
         return false;
     }
 
-    // Verify required extensions on vkd3d-proton's VkDevice (added via winevulkan vkCreateDevice hook).
-    UINT ext_count = 0;
-    bool has_cm = false, has_wl = false, has_f8 = false;
-    if (SUCCEEDED(interop->GetDeviceExtensions(&ext_count, nullptr)) && ext_count > 0) {
-        std::vector<const char*> exts(ext_count, nullptr);
-        if (SUCCEEDED(interop->GetDeviceExtensions(&ext_count, exts.data()))) {
-            for (const char* e : exts) {
-                if (!e) continue;
-                if (std::strcmp(e, VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME) == 0) has_cm = true;
-                else if (std::strcmp(e, VK_KHR_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_EXTENSION_NAME) == 0) has_wl = true;
-                else if (std::strcmp(e, VK_EXT_SHADER_FLOAT8_EXTENSION_NAME) == 0) has_f8 = true;
-            }
-        }
-    }
-
     openrr::pe::vkdevice::DeviceInfo prepared{};
     const bool has_prepared = openrr::pe::vkdevice::get_device_info(vk_dev, &prepared) && prepared.prepared;
-    if (!has_cm || !has_wl) {
-        interop->Release();
-        why = "vkd3d-proton VkDevice lacks VK_KHR_cooperative_matrix/workgroup_memory_explicit_layout; load OptiScaler early (e.g. dxgi.dll) so OpenRR prepares the Vulkan device at vkCreateDevice";
-        return false;
-    }
 
-    if (!has_f8) {
-        uint32_t pext_count = 0;
-        bool phys_has_f8 = false;
-        if (vkEnumerateDeviceExtensionProperties(phys, nullptr, &pext_count, nullptr) == VK_SUCCESS && pext_count > 0) {
-            std::vector<VkExtensionProperties> pexts(pext_count);
-            if (vkEnumerateDeviceExtensionProperties(phys, nullptr, &pext_count, pexts.data()) == VK_SUCCESS) {
-                for (uint32_t i = 0; i < pext_count; ++i) {
-                    if (std::strcmp(pexts[i].extensionName, VK_EXT_SHADER_FLOAT8_EXTENSION_NAME) == 0) {
-                        phys_has_f8 = true;
-                        break;
-                    }
+    // Verify required extensions on vkd3d-proton's VkDevice (added via winevulkan vkCreateDevice hook).
+    // vkd3d-proton's GetDeviceExtensions() returns the extension list captured before vkCreateDevice,
+    // so it never contains what our own vkCreateDevice hook injects through PrepareVkDevice
+    // (workgroup_memory_explicit_layout and shader_float8 in particular are not enabled by vkd3d itself).
+    // A prepared device already has those extensions by construction; the stale list is only meaningful
+    // for a device we did not prepare.
+    bool has_cm = false, has_wl = false, has_f8 = has_prepared && prepared.has_fp8_ext;
+    if (!has_prepared) {
+        UINT ext_count = 0;
+        if (SUCCEEDED(interop->GetDeviceExtensions(&ext_count, nullptr)) && ext_count > 0) {
+            std::vector<const char*> exts(ext_count, nullptr);
+            if (SUCCEEDED(interop->GetDeviceExtensions(&ext_count, exts.data()))) {
+                for (const char* e : exts) {
+                    if (!e) continue;
+                    if (std::strcmp(e, VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME) == 0) has_cm = true;
+                    else if (std::strcmp(e, VK_KHR_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_EXTENSION_NAME) == 0) has_wl = true;
+                    else if (std::strcmp(e, VK_EXT_SHADER_FLOAT8_EXTENSION_NAME) == 0) has_f8 = true;
                 }
             }
         }
-        if (phys_has_f8) {
+
+        if (!has_cm || !has_wl) {
             interop->Release();
-            why = "vkd3d-proton VkDevice lacks VK_EXT_shader_float8; load OptiScaler early (e.g. dxgi.dll with WINEDLLOVERRIDES=\"dxgi=n,b\") so OpenRR prepares the Vulkan device at vkCreateDevice";
+            why = "vkd3d-proton VkDevice lacks VK_KHR_cooperative_matrix/workgroup_memory_explicit_layout; load OptiScaler early (e.g. dxgi.dll) so OpenRR prepares the Vulkan device at vkCreateDevice";
             return false;
+        }
+
+        if (!has_f8) {
+            uint32_t pext_count = 0;
+            bool phys_has_f8 = false;
+            if (vkEnumerateDeviceExtensionProperties(phys, nullptr, &pext_count, nullptr) == VK_SUCCESS && pext_count > 0) {
+                std::vector<VkExtensionProperties> pexts(pext_count);
+                if (vkEnumerateDeviceExtensionProperties(phys, nullptr, &pext_count, pexts.data()) == VK_SUCCESS) {
+                    for (uint32_t i = 0; i < pext_count; ++i) {
+                        if (std::strcmp(pexts[i].extensionName, VK_EXT_SHADER_FLOAT8_EXTENSION_NAME) == 0) {
+                            phys_has_f8 = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (phys_has_f8) {
+                interop->Release();
+                why = "vkd3d-proton VkDevice lacks VK_EXT_shader_float8; load OptiScaler early (e.g. dxgi.dll with WINEDLLOVERRIDES=\"dxgi=n,b\") so OpenRR prepares the Vulkan device at vkCreateDevice";
+                return false;
+            }
         }
     }
 

@@ -21,6 +21,7 @@ struct DeviceInfo {
     uint32_t queue_family = 0;
     uint32_t queue_index = 0;
     bool prepared = false;
+    bool has_fp8_ext = false;
 };
 
 // Called inside hooked vkCreateDevice: runs OnrRrApi5::PrepareVkDevice + create + OnrRrApi5::FinishVkDevice.

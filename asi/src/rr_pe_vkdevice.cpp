@@ -69,13 +69,25 @@ VkResult create_with_runtime(PFN_vkCreateDevice create, VkInstance instance, uin
         }
     }
 
+    auto has_ext_in_create_info = [](const VkDeviceCreateInfo* ci, const char* name) {
+        if (!ci || !ci->ppEnabledExtensionNames) return false;
+        for (uint32_t i = 0; i < ci->enabledExtensionCount; ++i) {
+            if (ci->ppEnabledExtensionNames[i] && std::strcmp(ci->ppEnabledExtensionNames[i], name) == 0)
+                return true;
+        }
+        return false;
+    };
+
+    const bool patched_has_fp8 = prepared && has_ext_in_create_info(&patched, VK_EXT_SHADER_FLOAT8_EXTENSION_NAME);
     VkResult r = create(physical, prepared ? &patched : info, allocator, out);
     uint32_t qfam = 0, qidx = 0;
+    bool has_fp8_ext = prepared ? patched_has_fp8 : has_ext_in_create_info(info, VK_EXT_SHADER_FLOAT8_EXTENSION_NAME);
     if (prepared) {
         if (r != VK_SUCCESS) {
             api5.FinishVkDevice(setup, nullptr, nullptr, nullptr);
             setup = nullptr;
             prepared = false;
+            has_fp8_ext = has_ext_in_create_info(info, VK_EXT_SHADER_FLOAT8_EXTENSION_NAME);
             log("[openrr] Vulkan: vkCreateDevice with runtime features failed (%d); retrying as the game asked", int(r));
             r = create(physical, info, allocator, out);
         } else {
@@ -96,6 +108,7 @@ VkResult create_with_runtime(PFN_vkCreateDevice create, VkInstance instance, uin
         di.queue_family = qfam;
         di.queue_index = qidx;
         di.prepared = prepared;
+        di.has_fp8_ext = has_fp8_ext;
         {
             std::lock_guard<std::mutex> lock(g_mutex);
             g_devices.erase(std::remove_if(g_devices.begin(), g_devices.end(),
