@@ -8,7 +8,7 @@ For details about the OpenRR network reimplementation, RDNA4 shader architecture
 
 ---
 
-This release (**v0.1.7plus3**) builds on **v0.1.7plus2**'s **ReShade + RenoDX D3D12 wrapper compatibility** (creating the carrier root signature on the native `ID3D12Device` resolved via `ID3D12Heap::GetDevice` to bypass RenoDX layout rewrites, and allowing D3D12 Direct state hooks / Vulkan Bridge split hooks on genuine D3D12 wrapper modules such as `ReShade64.asi`) with **D3D12 hook hardening** (batch Direct hook enable with trampoline-retaining failure rollback, multi-entry retryable `CreateCommandSignature`/`CommandAllocator` coverage, and split self-module `HMODULE` + `kRelease` validation). It continues to integrate upstream **v0.1.7** (including fixed RDNA4 ACO routing, RX 7000 / RDNA3 `shaders-gfx11` support, and a unified Windows + Linux Wine / Proton Mesa RADV >= 26.3 release), while retaining ASI integration, in-game menu, and GPU resource lifetime protections. See **[v017plus-speed-quality-eval.en.md](docs/test-evidence/v017plus-speed-quality-eval.en.md)** ([简体中文](docs/test-evidence/v017plus-speed-quality-eval.md)) for the full v0.1.7plus speed, image quality, and VRAM evaluation, and [v017-stage10-audit.md](docs/test-evidence/v017-stage10-audit.md) for Stage 10 validation evidence; historical figures for earlier versions are retained at the bottom.
+This release (**v0.1.7plus4**) builds on **v0.1.7plus3** (ReShade + RenoDX D3D12 wrapper compatibility and D3D12 hook hardening) by adding a generic **`NvAPI_GPU_GetGPUInfo` (`0xafd1b02c`) missing-function fallback**: when a game under DXGI NVIDIA spoofing queries `NvAPI_GPU_GetGPUInfo` (such as *007 First Light* v1.3.2.0 checking `NV_GPU_INFO_V2.rayTracingCores`) and `fakenvapi` / `nvapi64.dll` returns `nullptr`, OpenRR supplies non-zero RT / Tensor core counts on demand so the game's RT capability gate can pass (passthrough whenever an existing implementation is present; queried only during initialization with zero per-frame render overhead). It continues to integrate upstream **v0.1.7** (including fixed RDNA4 ACO routing, RX 7000 / RDNA3 `shaders-gfx11` support, and a unified Windows + Linux Wine / Proton Mesa RADV >= 26.3 release), while retaining ASI integration, in-game menu, and GPU resource lifetime protections. See **[v017plus-speed-quality-eval.en.md](docs/test-evidence/v017plus-speed-quality-eval.en.md)** ([简体中文](docs/test-evidence/v017plus-speed-quality-eval.md)) for the full v0.1.7plus speed, image quality, and VRAM evaluation, and [v017-stage10-audit.md](docs/test-evidence/v017-stage10-audit.md) for Stage 10 validation evidence; historical figures for earlier versions are retained at the bottom.
 
 ## What this fork adds
 
@@ -84,7 +84,7 @@ Use the **[dlss-5-amd-project](https://github.com/TheAutomatic/dlss-5-amd-projec
 
 ### Option 2: Manual installation with official OptiScaler (unified Windows / Linux package)
 
-Place the build artifacts (the 392-file unified `stage/` package, or extract `dist/OpenRR-v0.1.7plus3-OptiScaler.zip`) directly into the game directory containing OptiScaler's `dxgi.dll` / `OptiScaler.ini`:
+Place the build artifacts (the 392-file unified `stage/` package, or extract `dist/OpenRR-v0.1.7plus4-OptiScaler.zip`) directly into the game directory containing OptiScaler's `dxgi.dll` / `OptiScaler.ini`:
 
 | File / directory | Destination relative to `OptiScaler.ini` |
 |---|---|
