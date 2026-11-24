@@ -4279,7 +4279,9 @@ extern "C" __declspec(dllexport) void InitializeASI() {
     register_vulkan_dll_notification();
     hook_sl_dlssd(GetModuleHandleW(L"sl.dlss_d.dll")); // Normally loaded later by slInit (notification path).
     g_nvapi_hooks.set_callbacks(&nvapi_can_provide, &nvapi_log_msg);
-    g_nvapi_hooks.hook_module(g_opti);
+    if (g_opti && GetProcAddress(g_opti, "nvapi_QueryInterface") && !g_nvapi_hooks.hook_module(g_opti)) {
+        log("[openrr] nvapi_QueryInterface could not be hooked in host module");
+    }
     g_nvapi_hooks.hook_module(GetModuleHandleW(L"nvapi64.dll"));
     // No CreateDXGIFactory* export hooks: on OptiScaler 10 they sit on OptiScaler's own exports (which decide by
     // caller module) and make the game's swapchain creation fail. Present is reached through the menu's
