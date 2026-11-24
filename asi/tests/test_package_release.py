@@ -114,7 +114,7 @@ class PackageReleaseTests(unittest.TestCase):
             self.assertEqual(s1.read_text(encoding="utf-8"), f"{h1}  OpenRR-test.zip\n")
             with zipfile.ZipFile(z1, "r") as zf:
                 names = zf.namelist()
-            self.assertEqual(package_release._read_version_header(Path(__file__).resolve().parents[2]), "0.1.7plus4")
+            self.assertEqual(package_release._read_version_header(Path(__file__).resolve().parents[2]), "0.1.7plus5")
             self.assertEqual(len(names), 392)
             self.assertIn("OptiScaler/plugins/openrr-amd.asi", names)
             self.assertIn("openrr-amd/OpenRR_LICENSE.txt", names)
