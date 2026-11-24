@@ -11,6 +11,7 @@
 #include "rr_pe_d3d12_hook_policy.hpp"
 #include "rr_pe_d3d12_direct_hooks.hpp"
 #include "rr_pe_d3d12split.hpp"
+#include "rr_pe_nvapi_compat.hpp"
 #include "rr_pe_vkdevice.hpp"
 #include "rr_pe_vkreset.hpp"
 #include "rr_radv_spirv.hpp"
@@ -5170,6 +5171,162 @@ static int test_d3d12_wrapper_compat() {
     return 0;
 }
 
+namespace nvapi_test {
+struct Tag {};
+std::atomic<bool> g_can_provide{false};
+std::atomic<bool> g_return_existing{false};
+std::atomic<int> g_logs{0};
+void* g_existing_fn = reinterpret_cast<void*>(uintptr_t(0x12345678));
+void* g_other_fn = reinterpret_cast<void*>(uintptr_t(0x23456789));
+void* g_other_fn2 = reinterpret_cast<void*>(uintptr_t(0x3456789a));
+
+bool can_provide_cb() {
+    return g_can_provide.load(std::memory_order_acquire);
+}
+void log_cb(const char* msg) {
+    if (msg && msg[0]) ++g_logs;
+}
+
+OPENRR_NVAPI_NOINLINE void* OPENRR_NVAPI_MSABI mock_qi(uint32_t id) {
+    if (id == openrr::pe::nvapi::kInterfaceIdGpuGetGpuInfo) {
+        return g_return_existing.load(std::memory_order_acquire) ? g_existing_fn : nullptr;
+    }
+    if (id == 0x0150e828u) return g_other_fn;
+    return nullptr;
+}
+
+OPENRR_NVAPI_NOINLINE void* OPENRR_NVAPI_MSABI mock_qi_second(uint32_t id) {
+    if (id == 0x0150e828u) return g_other_fn2;
+    return nullptr;
+}
+} // namespace nvapi_test
+
+static int test_nvapi_gpu_info_fallback() {
+    namespace nv = openrr::pe::nvapi;
+    if (nv::kGpuInfoVer1 != 0x00010008u || nv::kGpuInfoVer2 != 0x00020050u ||
+        sizeof(nv::GpuInfoV1) != 8 || sizeof(nv::GpuInfoV2) != 0x50) {
+        std::fprintf(stderr, "FAIL: NV_GPU_INFO struct sizes or version constants mismatch\n");
+        return 1;
+    }
+
+    int dummy_gpu = 1;
+    if (nv::fill_gpu_info(&dummy_gpu, nullptr) != nv::kStatusInvalidArgument) {
+        std::fprintf(stderr, "FAIL: null gpu_info did not return INVALID_ARGUMENT\n");
+        return 1;
+    }
+    nv::GpuInfoV2 v2{};
+    v2.version = nv::kGpuInfoVer2;
+    if (nv::fill_gpu_info(nullptr, &v2) != nv::kStatusExpectedPhysicalGpuHandle) {
+        std::fprintf(stderr, "FAIL: null physical_gpu did not return EXPECTED_PHYSICAL_GPU_HANDLE\n");
+        return 1;
+    }
+    v2.version = 0x12345678u;
+    if (nv::fill_gpu_info(&dummy_gpu, &v2) != nv::kStatusIncompatibleStructVersion) {
+        std::fprintf(stderr, "FAIL: bad struct version did not return INCOMPATIBLE_STRUCT_VERSION\n");
+        return 1;
+    }
+
+    nv::GpuInfoV1 v1{};
+    std::memset(&v1, 0xAA, sizeof(v1));
+    v1.version = nv::kGpuInfoVer1;
+    if (nv::fill_gpu_info(&dummy_gpu, &v1) != nv::kStatusOk ||
+        v1.version != nv::kGpuInfoVer1 || v1.flags != 0) {
+        std::fprintf(stderr, "FAIL: VER1 fill_gpu_info mismatch\n");
+        return 1;
+    }
+
+    std::memset(&v2, 0xAA, sizeof(v2));
+    v2.version = nv::kGpuInfoVer2;
+    if (nv::fill_gpu_info(&dummy_gpu, &v2) != nv::kStatusOk ||
+        v2.version != nv::kGpuInfoVer2 || v2.flags != 0 || v2.reserved1 != 0 ||
+        v2.ray_tracing_cores != nv::kDefaultRayTracingCores ||
+        v2.tensor_cores != nv::kDefaultTensorCores) {
+        std::fprintf(stderr, "FAIL: VER2 fill_gpu_info mismatch\n");
+        return 1;
+    }
+    for (uint32_t r : v2.reserved2) {
+        if (r != 0) {
+            std::fprintf(stderr, "FAIL: VER2 reserved2 not zeroed\n");
+            return 1;
+        }
+    }
+
+    nv::QueryInterfaceHooks<4, nvapi_test::Tag> hooks;
+    hooks.set_callbacks(&nvapi_test::can_provide_cb, &nvapi_test::log_cb);
+    if (!hooks.hook_function(reinterpret_cast<void*>(&nvapi_test::mock_qi)) ||
+        !hooks.hook_function(reinterpret_cast<void*>(&nvapi_test::mock_qi)) ||
+        !hooks.hook_function(reinterpret_cast<void*>(&nvapi_test::mock_qi_second))) {
+        std::fprintf(stderr, "FAIL: nvapi QueryInterface hook_function failed\n");
+        return 1;
+    }
+
+    auto call_qi = [](nv::PFN_NvApiQueryInterface fn, uint32_t id) -> void* {
+        volatile nv::PFN_NvApiQueryInterface p = fn;
+        return p(id);
+    };
+    const nv::PFN_NvApiQueryInterface qi = &nvapi_test::mock_qi;
+    const nv::PFN_NvApiQueryInterface qi2 = &nvapi_test::mock_qi_second;
+
+    if (call_qi(qi, 0x0150e828u) != nvapi_test::g_other_fn ||
+        call_qi(qi2, 0x0150e828u) != nvapi_test::g_other_fn2 ||
+        call_qi(qi, 0xdeadbeefu) != nullptr) {
+        std::fprintf(stderr, "FAIL: unrelated NVAPI IDs did not pass through multi-slot hooks\n");
+        return 1;
+    }
+
+    nvapi_test::g_can_provide.store(true, std::memory_order_release);
+    nvapi_test::g_return_existing.store(true, std::memory_order_release);
+    if (call_qi(qi, nv::kInterfaceIdGpuGetGpuInfo) != nvapi_test::g_existing_fn) {
+        std::fprintf(stderr, "FAIL: existing GetGPUInfo pointer was overridden\n");
+        return 1;
+    }
+
+    nvapi_test::g_return_existing.store(false, std::memory_order_release);
+    nvapi_test::g_can_provide.store(false, std::memory_order_release);
+    if (call_qi(qi, nv::kInterfaceIdGpuGetGpuInfo) != nullptr ||
+        nvapi_test::g_logs.load(std::memory_order_acquire) != 0) {
+        std::fprintf(stderr, "FAIL: GetGPUInfo provided when can_provide=false\n");
+        return 1;
+    }
+
+    nvapi_test::g_can_provide.store(true, std::memory_order_release);
+    void* stub_ptr = call_qi(qi, nv::kInterfaceIdGpuGetGpuInfo);
+    void* stub_ptr2 = call_qi(qi2, nv::kInterfaceIdGpuGetGpuInfo);
+    if (stub_ptr != reinterpret_cast<void*>(&nv::gpu_get_gpu_info_stub) ||
+        stub_ptr2 != stub_ptr ||
+        nvapi_test::g_logs.load(std::memory_order_acquire) != 1) {
+        std::fprintf(stderr, "FAIL: GetGPUInfo fallback pointer or log-once check failed (logs=%d)\n",
+                     nvapi_test::g_logs.load(std::memory_order_acquire));
+        return 1;
+    }
+
+    using PFN_GetGPUInfo = int(OPENRR_NVAPI_MSABI*)(const void*, void*);
+    auto get_gpu_info = reinterpret_cast<PFN_GetGPUInfo>(stub_ptr);
+    std::memset(&v2, 0x55, sizeof(v2));
+    v2.version = nv::kGpuInfoVer2;
+    if (get_gpu_info(&dummy_gpu, &v2) != nv::kStatusOk ||
+        v2.flags != 0 || v2.reserved1 != 0 ||
+        v2.ray_tracing_cores != nv::kDefaultRayTracingCores ||
+        v2.tensor_cores != nv::kDefaultTensorCores) {
+        std::fprintf(stderr, "FAIL: invoked GetGPUInfo fallback stub populated wrong fields\n");
+        return 1;
+    }
+
+    HMODULE self_exe = GetModuleHandleW(nullptr);
+    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(self_exe);
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(
+        reinterpret_cast<const uint8_t*>(self_exe) + dos->e_lfanew);
+    hooks.unhook_module(self_exe, nt->OptionalHeader.SizeOfImage);
+    if (call_qi(qi, nv::kInterfaceIdGpuGetGpuInfo) != nullptr ||
+        call_qi(qi, 0x0150e828u) != nvapi_test::g_other_fn) {
+        std::fprintf(stderr, "FAIL: unhook_module did not restore direct mock_qi\n");
+        return 1;
+    }
+
+    std::printf("[PASS] openrr::pe::nvapi NvAPI_GPU_GetGPUInfo (0xafd1b02c) fallback and multi-slot hook\n");
+    return 0;
+}
+
 int main() {
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
     std::set_terminate([] {
@@ -5199,6 +5356,7 @@ int main() {
     if (test_stage10_r2_fixes() != 0) return 1;
     if (test_d3d12_direct_hook_safety() != 0) return 1;
     if (test_d3d12_wrapper_compat() != 0) return 1;
+    if (test_nvapi_gpu_info_fallback() != 0) return 1;
     std::printf("ALL ASI UNIT TESTS PASSED\n");
     return 0;
 }

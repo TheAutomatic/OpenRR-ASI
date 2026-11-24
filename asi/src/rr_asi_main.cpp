@@ -14,6 +14,7 @@
 #include "rr_data_paths.hpp"
 #include "rr_pe_log.hpp"
 #include "rr_pe_menu.hpp"
+#include "rr_pe_nvapi_compat.hpp"
 #include "rr_pe_vkdevice.hpp"
 #include "rr_pe_vkd3d_interop.hpp"
 #include "rr_pe_vkreset.hpp"
@@ -4007,6 +4008,18 @@ void unhook_sl_dlssd(const void* base, ULONG size) {
     g_dlssd_hook_target.store(nullptr, std::memory_order_release);
 }
 
+openrr::pe::nvapi::QueryInterfaceHooks<4> g_nvapi_hooks;
+
+bool nvapi_can_provide() {
+    if (!openrr::pe::current_config().enabled) return false;
+    ensure_deferred_init();
+    return check_usable(nullptr);
+}
+
+void nvapi_log_msg(const char* msg) {
+    if (msg) log("[openrr] %s", msg);
+}
+
 // Late vulkan-1.dll / d3d12.dll load notification via LdrRegisterDllNotification (Item #9)
 struct UNICODE_STRING_LDR {
     USHORT Length;
@@ -4034,6 +4047,11 @@ VOID NTAPI on_dll_loaded_notification(ULONG reason, const LDR_DLL_NOTIFICATION_D
     if (chars == 13 && _wcsnicmp(data->Loaded.BaseDllName->Buffer, L"sl.dlss_d.dll", 13) == 0) {
         if (reason == 1) hook_sl_dlssd(static_cast<HMODULE>(data->Loaded.DllBase));
         else unhook_sl_dlssd(data->Loaded.DllBase, data->Loaded.SizeOfImage);
+        return;
+    }
+    if (chars == 11 && _wcsnicmp(data->Loaded.BaseDllName->Buffer, L"nvapi64.dll", 11) == 0) {
+        if (reason == 1) g_nvapi_hooks.hook_module(static_cast<HMODULE>(data->Loaded.DllBase));
+        else g_nvapi_hooks.unhook_module(data->Loaded.DllBase, data->Loaded.SizeOfImage);
         return;
     }
     if (reason != 1) return;
@@ -4260,6 +4278,9 @@ extern "C" __declspec(dllexport) void InitializeASI() {
     hook_present_beat();
     register_vulkan_dll_notification();
     hook_sl_dlssd(GetModuleHandleW(L"sl.dlss_d.dll")); // Normally loaded later by slInit (notification path).
+    g_nvapi_hooks.set_callbacks(&nvapi_can_provide, &nvapi_log_msg);
+    g_nvapi_hooks.hook_module(g_opti);
+    g_nvapi_hooks.hook_module(GetModuleHandleW(L"nvapi64.dll"));
     // No CreateDXGIFactory* export hooks: on OptiScaler 10 they sit on OptiScaler's own exports (which decide by
     // caller module) and make the game's swapchain creation fail. Present is reached through the menu's
     // swapchain methods; system factory methods retain the actual present queue.
