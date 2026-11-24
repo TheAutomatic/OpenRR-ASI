@@ -1,12 +1,28 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 # Compiles RUNTIME_SPVS and LITE_SPVS (reading gpu/shaders.list + gpu/CMakeLists.txt + gpu/fastmode.cmake) into the target directory.
+import argparse
 import concurrent.futures
 import glob
 import os
 import re
 import subprocess
 import sys
+
+
+def _resolve_jobs(cli_jobs):
+    if cli_jobs is not None:
+        return cli_jobs
+    env_val = os.environ.get("OPENRR_BUILD_JOBS", "").strip()
+    if env_val:
+        try:
+            n = int(env_val)
+            if n >= 1:
+                return n
+        except ValueError:
+            pass
+    return os.cpu_count() or 1
+
 
 def parse_fastmode(cmake_path):
     lt_defs = {}
@@ -16,6 +32,7 @@ def parse_fastmode(cmake_path):
         defs = m.group(2).split()
         lt_defs[key] = defs
     return lt_defs
+
 
 def parse_shader_lists(gpu_dir):
     list_path = os.path.join(gpu_dir, "shaders.list")
@@ -51,12 +68,23 @@ def parse_shader_lists(gpu_dir):
 
     return set(plain_from_list), flow_kernels
 
+
 def main():
-    if len(sys.argv) < 4:
-        print("usage: build_shaders.py <glslangValidator> <gpu_dir> <out_shaders_dir> [--gfx11]", file=sys.stderr)
-        return 2
-    glslang, gpu_dir, out_dir = sys.argv[1], sys.argv[2], sys.argv[3]
-    gfx11 = "--gfx11" in sys.argv[4:]
+    ap = argparse.ArgumentParser(
+        usage="build_shaders.py <glslangValidator> <gpu_dir> <out_shaders_dir> [--gfx11] [--jobs N]"
+    )
+    ap.add_argument("glslang")
+    ap.add_argument("gpu_dir")
+    ap.add_argument("out_dir")
+    ap.add_argument("--gfx11", action="store_true")
+    ap.add_argument("--jobs", "-j", type=int, default=None)
+    ns = ap.parse_args()
+    if ns.jobs is not None and ns.jobs < 1:
+        ap.error("--jobs must be >= 1")
+    job_limit = _resolve_jobs(ns.jobs)
+
+    glslang, gpu_dir, out_dir = ns.glslang, ns.gpu_dir, ns.out_dir
+    gfx11 = ns.gfx11
     os.makedirs(out_dir, exist_ok=True)
 
     shaders_dir = os.path.join(gpu_dir, "shaders")
@@ -74,16 +102,20 @@ def main():
         lx_defs = {k: [x for x in v if x not in strip_defs] for k, v in lx_defs.items()}
     plain_runtime, flow_kernels = parse_shader_lists(gpu_dir)
 
+    comp_files = sorted(glob.glob(os.path.join(shaders_dir, "*.comp")))
+    comp_sizes = {src: os.path.getsize(src) for src in comp_files}
+
     jobs = []
+
     def add_spv(out_name, src, extra_args):
         out_path = os.path.join(out_dir, f"{out_name}.spv")
         cmd = [glslang, "-V", "--target-env", "vulkan1.3"] + glsl_extra + extra_args + [f"-I{inc_dir}", "-o", out_path, src]
-        jobs.append((out_name, cmd))
+        jobs.append((out_name, comp_sizes.get(src, 0), cmd))
 
     def lite_spv(out_name, src, extra_args):
         add_spv(f"{out_name}_lt", src, extra_args)
 
-    for src in sorted(glob.glob(os.path.join(shaders_dir, "*.comp"))):
+    for src in comp_files:
         name = os.path.splitext(os.path.basename(src))[0]
 
         if name in lt_defs:
@@ -141,22 +173,35 @@ def main():
             if name == "enc0_attr":
                 add_spv("d3d_enc0_attr_f_w", src, ["-DD3D_GUIDES=1", "-DENC_F32=1", "-DATTR_WIDE=1"])
 
+    # Longest-job-first: compile largest .comp sources first to prevent tail stalls.
+    jobs.sort(key=lambda item: (-item[1], item[0]))
+
     def run_job(item):
-        name, cmd = item
+        name, _, cmd = item
         res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         if res.returncode != 0:
             raise RuntimeError(f"shader {name} failed:\n{res.stdout}")
 
-    with concurrent.futures.ThreadPoolExecutor() as ex:
-        list(ex.map(run_job, jobs))
+    if jobs:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(job_limit, len(jobs))) as ex:
+            futs = [ex.submit(run_job, item) for item in jobs]
+            try:
+                for fut in concurrent.futures.as_completed(futs):
+                    fut.result()
+            except BaseException:
+                for f in futs:
+                    f.cancel()
+                concurrent.futures.wait(futs)
+                raise
 
-    expected = {f"{name}.spv" for name, _ in jobs}
+    expected = {f"{name}.spv" for name, _, _ in jobs}
     for spv in glob.glob(os.path.join(out_dir, "*.spv")):
         if os.path.basename(spv) not in expected:
             os.remove(spv)
 
     print(f"built {len(jobs)} runtime SPIR-V shaders in {out_dir}")
     return 0
+
 
 if __name__ == "__main__":
     sys.exit(main())

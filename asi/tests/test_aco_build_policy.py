@@ -12,6 +12,8 @@ import struct
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from unittest.mock import patch
 
@@ -495,6 +497,64 @@ class BuildPolicyTests(unittest.TestCase):
                 self.assertTrue((sh / f'{s}_lt.spv').is_file(), f'missing {s}_lt.spv')
             for s in lx_stems:
                 self.assertTrue((sh / f'{s}_lx.spv').is_file(), f'missing {s}_lx.spv')
+
+    def test_parallel_jobs_deterministic_and_bounded(self):
+        for i, name in enumerate(('extra_a', 'extra_b')):
+            words = [0x07230203, 0x00010300, 0, 50 + i, 0, (6 << 16) | 16, 1, 17, 32, 1, 1]
+            (self.inputs / f'{name}.spv').write_bytes(struct.pack('<11I', *words))
+
+        lock = threading.Lock()
+        in_flight = 0
+        max_in_flight = 0
+
+        def timed_capture(args, **kwargs):
+            nonlocal in_flight, max_in_flight
+            with lock:
+                in_flight += 1
+                if in_flight > max_in_flight:
+                    max_in_flight = in_flight
+            try:
+                time.sleep(0.03)
+                return self.fake_capture(args, **kwargs)
+            finally:
+                with lock:
+                    in_flight -= 1
+
+        out_j1 = self.root / 'records_j1'
+        out_j2 = self.root / 'records_j2'
+        args_j1 = ['records', str(self.inputs), '--out', str(out_j1), '--toolchain', str(self.cfg),
+                   '--capture', str(self.capture), '--capture-dir', str(self.root / 'raw_j1'),
+                   '--precision', 'global', '--matrix-loads', 'vector8', '--jobs', '1']
+        args_j2 = ['records', str(self.inputs), '--out', str(out_j2), '--toolchain', str(self.cfg),
+                   '--capture', str(self.capture), '--capture-dir', str(self.root / 'raw_j2'),
+                   '--precision', 'global', '--matrix-loads', 'vector8', '--jobs', '2']
+
+        with patch.object(sys, 'argv', args_j1), patch.object(producer.subprocess, 'run', self.fake_capture), \
+             contextlib.redirect_stdout(io.StringIO()):
+            producer.main()
+
+        with patch.object(sys, 'argv', args_j2), patch.object(producer.subprocess, 'run', timed_capture), \
+             contextlib.redirect_stdout(io.StringIO()):
+            producer.main()
+
+        self.assertLessEqual(max_in_flight, 2)
+        self.assertEqual(max_in_flight, 2)
+
+        pkg1 = out_j1 / 'gfx1201/openrr-d3d12-v1'
+        pkg2 = out_j2 / 'gfx1201/openrr-d3d12-v1'
+        self.assertEqual((pkg1 / 'manifest.json').read_bytes(), (pkg2 / 'manifest.json').read_bytes())
+        self.assertEqual((pkg1 / 'manifest.msgpack').read_bytes(), (pkg2 / 'manifest.msgpack').read_bytes())
+        nrps1 = sorted(p.name for p in pkg1.glob('*.nrp'))
+        nrps2 = sorted(p.name for p in pkg2.glob('*.nrp'))
+        self.assertEqual(nrps1, nrps2)
+        for name in nrps1:
+            self.assertEqual((pkg1 / name).read_bytes(), (pkg2 / name).read_bytes())
+
+        args_bad = ['records', str(self.inputs), '--out', str(self.root / 'records_bad'), '--toolchain', str(self.cfg),
+                    '--capture', str(self.capture), '--jobs', '0']
+        with patch.object(sys, 'argv', args_bad), contextlib.redirect_stderr(io.StringIO()), \
+             self.assertRaises(SystemExit):
+            producer.main()
 
 if __name__ == '__main__':
     unittest.main()

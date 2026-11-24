@@ -183,6 +183,44 @@ class PackageReleaseTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "NRPAL002"):
                 package_release.validate_stage(stage)
 
+    def test_parallel_zip_matches_stdlib_zipfile_byte_for_byte(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            stage = _build_valid_stage(root)
+            entries = package_release.validate_stage(stage)
+
+            z_ref = root / "ref.zip"
+            with zipfile.ZipFile(z_ref, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
+                for rel_posix, src in entries:
+                    zi = zipfile.ZipInfo(filename=rel_posix, date_time=(2026, 1, 1, 0, 0, 0))
+                    zi.compress_type = zipfile.ZIP_DEFLATED
+                    zi.create_system = 3
+                    mode = 0o100755 if src.suffix.lower() in (".asi", ".dll") else 0o100644
+                    zi.external_attr = mode << 16
+                    zf.writestr(zi, src.read_bytes())
+            ref_bytes = z_ref.read_bytes()
+            ref_sha = hashlib.sha256(ref_bytes).hexdigest()
+
+            z1 = root / "j1.zip"
+            z4 = root / "j4.zip"
+            h1 = package_release.write_deterministic_zip(entries, z1, jobs=1)
+            h4 = package_release.write_deterministic_zip(entries, z4, jobs=4)
+
+            self.assertEqual(h1, ref_sha)
+            self.assertEqual(h4, ref_sha)
+            self.assertEqual(z1.read_bytes(), ref_bytes)
+            self.assertEqual(z4.read_bytes(), ref_bytes)
+            self.assertEqual(z4.with_name("j4.zip.sha256").read_text(encoding="utf-8"), f"{ref_sha}  j4.zip\n")
+
+            with zipfile.ZipFile(z4, "r") as zf:
+                self.assertIsNone(zf.testzip())
+                for info in zf.infolist():
+                    self.assertFalse(info.filename.startswith("./"))
+                    self.assertNotIn("\\", info.filename)
+                    self.assertEqual(info.date_time, (2026, 1, 1, 0, 0, 0))
+                    expected_mode = 0o100755 if info.filename.endswith((".asi", ".dll")) else 0o100644
+                    self.assertEqual(info.external_attr >> 16, expected_mode)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -15,6 +15,12 @@ MESA_DEPS_PREFIX="${OPENRR_MESA_DEPS_PREFIX:-$HOME/src/mesa-deps}"
 LIBDRM_VER="2.4.134"
 LIBDRM_COMMIT="e984d448b8b17aab853369e6c203e53719f46de1"
 
+jobs="${OPENRR_BUILD_JOBS:-$(nproc 2>/dev/null || echo 8)}"
+if ! [[ "$jobs" =~ ^[1-9][0-9]*$ ]]; then
+    echo "invalid OPENRR_BUILD_JOBS: $jobs" >&2
+    exit 1
+fi
+
 mkdir -p "$CI_CACHE_DIR" "$MESA_WORK"
 
 verify_sha256() {
@@ -71,20 +77,27 @@ if [[ ! -f "$MESA_DEPS_PREFIX/lib/x86_64-linux-gnu/pkgconfig/libdrm_amdgpu.pc" ]
         --buildtype=release \
         -Damdgpu=enabled -Dintel=disabled -Dradeon=disabled -Dnouveau=disabled \
         -Dudev=false -Dtests=false -Dcairo-tests=disabled -Dvalgrind=disabled
-    ninja -C "$DRM_BUILD" -j "${OPENRR_BUILD_JOBS:-8}" install
+    ninja -C "$DRM_BUILD" -j "$jobs" install
     rm -rf "$DRM_WORK" "$DRM_BUILD"
 fi
 
-# 3. CJK font (NotoSansCJKsc-Regular.ttf)
+# 3. CJK font (NotoSansCJKsc-Regular.ttf, cached in $CI_CACHE_DIR across CI runs)
 FONT_OUT="asi/lang/fonts/NotoSansCJKsc-Regular.ttf"
+FONT_CACHE="$CI_CACHE_DIR/NotoSansCJKsc-Regular.ttf"
 if [[ ! -f "$FONT_OUT" ]]; then
-    if [[ -n "${OPENRR_CJK_FONT_URL:-}" ]]; then
-        echo "[ci-deps] Downloading CJK font from OPENRR_CJK_FONT_URL..."
-        curl -fsSL --retry 3 "$OPENRR_CJK_FONT_URL" -o "$FONT_OUT.tmp"
-        mv "$FONT_OUT.tmp" "$FONT_OUT"
-    else
-        echo "[ci-deps] Extracting Noto Sans CJK SC from system NotoSansCJK TTC..."
-        python3 - "$FONT_OUT" <<'PY'
+    if [[ ! -f "$FONT_CACHE" ]] || [[ "$(wc -c < "$FONT_CACHE")" -le 5242880 ]]; then
+        if [[ -n "${OPENRR_CJK_FONT_URL:-}" ]]; then
+            echo "[ci-deps] Downloading CJK font from OPENRR_CJK_FONT_URL..."
+            curl -fsSL --retry 3 "$OPENRR_CJK_FONT_URL" -o "$FONT_CACHE.tmp.$$"
+            if [[ "$(wc -c < "$FONT_CACHE.tmp.$$")" -le 5242880 ]]; then
+                rm -f "$FONT_CACHE.tmp.$$"
+                echo "FATAL: Downloaded font unexpectedly small" >&2
+                exit 1
+            fi
+            mv -f "$FONT_CACHE.tmp.$$" "$FONT_CACHE"
+        else
+            echo "[ci-deps] Extracting Noto Sans CJK SC from system NotoSansCJK TTC..."
+            python3 - "$FONT_CACHE" <<'PY'
 import pathlib, sys
 from fontTools.ttLib import TTCollection
 
@@ -117,7 +130,12 @@ if tmp.stat().st_size <= 5 * 1024 * 1024:
 tmp.replace(out_path)
 print(f"Extracted {out_path} ({out_path.stat().st_size:,} bytes) from {ttc_path}")
 PY
+        fi
+    else
+        echo "[ci-deps] Using cached CJK font $FONT_CACHE..."
     fi
+    mkdir -p "$(dirname -- "$FONT_OUT")"
+    cp -- "$FONT_CACHE" "$FONT_OUT"
 fi
 
 echo "[ci-deps] Ready: MESA_TARBALL=$MESA_TARBALL MESA_DEPS=$MESA_DEPS_PREFIX FONT=$FONT_OUT"

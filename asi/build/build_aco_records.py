@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Capture OpenRR SPIR-V with the pinned RADV and pack NRPAL002 records."""
 import argparse
+import concurrent.futures
 import hashlib
 import json
 import os
@@ -228,6 +229,51 @@ def _is_consistent_package(pkg_dir: Path, expected_target=None) -> bool:
     except (OSError, ValueError, KeyError, TypeError, UnicodeDecodeError):
         return False
 
+def _resolve_jobs(cli_jobs: int | None) -> int:
+    if cli_jobs is not None:
+        return cli_jobs
+    env_val = os.environ.get('OPENRR_BUILD_JOBS', '').strip()
+    if env_val:
+        try:
+            n = int(env_val)
+            if n >= 1:
+                return n
+        except ValueError:
+            pass
+    return os.cpu_count() or 1
+
+
+def _run_capture_pair(capture_bin: str, spv_str: str, env_pair: dict, pair_prefix: Path):
+    """Execute one sentinel capture subprocess and read its generated artifacts."""
+    for ext in ('.code', '.json', '.layouts'):
+        pair_prefix.with_suffix(ext).unlink(missing_ok=True)
+    result = subprocess.run([capture_bin, spv_str], env=env_pair, text=True, capture_output=True)
+    log = result.stdout + result.stderr
+    pair_prefix.with_suffix('.log').write_text(log)
+    result.check_returncode()
+    return (
+        json.loads(pair_prefix.with_suffix('.json').read_text()),
+        pair_prefix.with_suffix('.code').read_bytes(),
+        log,
+        pair_prefix.with_suffix('.layouts').read_bytes(),
+    )
+
+
+def _run_serial_captures_for_key(capture_bin: str, jobs_for_key: list[tuple[int, str, dict, Path, Path]]):
+    """Run captures sequentially for duplicate-key inputs so shared raw prefixes never race."""
+    out = {}
+    for idx, spv_str, env_base, prefix_a, prefix_b in jobs_for_key:
+        try:
+            env_a = dict(env_base, ONR_ACO_CAPTURE=str(prefix_a.resolve()), ONR_ACO_ADDR32_HI='0x13579bdf')
+            cap_a = _run_capture_pair(capture_bin, spv_str, env_a, prefix_a)
+            env_b = dict(env_base, ONR_ACO_CAPTURE=str(prefix_b.resolve()), ONR_ACO_ADDR32_HI='0x2468ace1')
+            cap_b = _run_capture_pair(capture_bin, spv_str, env_b, prefix_b)
+            out[idx] = (cap_a, cap_b, None)
+        except (ValueError, KeyError, OSError, subprocess.SubprocessError) as exc:
+            out[idx] = (None, None, exc)
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('inputs', nargs='+', type=Path)
@@ -256,7 +302,12 @@ def main():
                     help='Restrict --shared-cmat to these exact stems (empty: every shader, like before)')
     ap.add_argument('--target', choices=tuple(TARGETS), default='gfx1201',
                     help='AMDGPU capture target family (gfx1201=0x4e, gfx1200=0x48)')
+    ap.add_argument('--jobs', '-j', type=int, default=None,
+                    help='Maximum parallel aco_capture worker count (default: OPENRR_BUILD_JOBS or cpu count)')
     ns = ap.parse_args()
+    if ns.jobs is not None and ns.jobs < 1:
+        ap.error('--jobs must be >= 1')
+    jobs = _resolve_jobs(ns.jobs)
     cfg = json.loads(ns.toolchain.read_text())
     expected_mach = TARGETS[ns.target]
     root = ns.out / ns.target / LAYOUT
@@ -290,12 +341,16 @@ def main():
         ap.error('selected toolchain does not declare the bounded cmat address patch')
     if ns.shared_cmat_shaders and ns.shared_cmat == 'off':
         ap.error('--shared-cmat-shaders needs --shared-cmat load or loadstore')
+    # Read each input SPIR-V once up front so policy, split-precision, cache, and dimension checks share bytes.
+    spv_items = []
+    for idx, spv in enumerate(files):
+        data = spv.read_bytes()
+        spv_items.append((idx, spv, data, f'{fnv(data):016x}'))
     # Records are addressed by SPIR-V hash, so identical input bytes cannot
     # safely request conflicting per-stem policies. Reject instead of choosing
     # whichever path happens to be visited last.
     input_policies = {}
-    for spv in files:
-        key = f'{fnv(spv.read_bytes()):016x}'
+    for _, spv, _, key in spv_items:
         stem_pol = (spv.stem in ns.cmat_address_shaders, spv.stem in ns.cu_mode_shaders,
                     spv.stem in ns.wgp_mode_shaders, spv.stem in ns.sample_wait_zero_shaders,
                     spv.stem in ns.shared_cmat_shaders)
@@ -311,9 +366,8 @@ def main():
         def _is_fast(stem):
             return stem.endswith('_lt') or stem.endswith('_lx')
         native_only = set(ns.precision_native_only)
-        legacy_keys = {f'{fnv(p.read_bytes()):016x}' for p in files if not _is_fast(p.stem)}
-        for spv in files:
-            key = f'{fnv(spv.read_bytes()):016x}'
+        legacy_keys = {key for _, spv, _, key in spv_items if not _is_fast(spv.stem)}
+        for _, spv, _, key in spv_items:
             is_native = (spv.stem in native_only) if native_only else _is_fast(spv.stem)
             if not is_native or key in legacy_keys:
                 precision_by_stem[spv.stem] = ns.precision
@@ -346,9 +400,19 @@ def main():
     raw = ns.capture_dir if ns.capture_dir else (stage_root / 'capture')
     raw.mkdir(parents=True, exist_ok=True)
     try:
-        for spv in files:
-            data = spv.read_bytes()
-            key = f'{fnv(data):016x}'
+        hit_records = {}
+        miss_items = []
+        base_env = dict(os.environ, VK_ICD_FILENAMES=cfg['icd'], LD_PRELOAD=cfg['shim'],
+                        AMDGPU_GPU_ID=ns.target, MESA_SHADER_CACHE_DISABLE='true',
+                        LD_LIBRARY_PATH=cfg['library_path'])
+        base_env.pop('ONR_ACO_VECTOR_LOADS', None)
+        base_env.pop('ONR_ACO_SHARED_CMAT', None)
+        if ns.matrix_loads == 'vector8':
+            base_env['ONR_ACO_VECTOR_LOADS'] = '1'
+        for env_k in ('ONR_ACO_CMAT_ADDRESS', 'ONR_ACO_CU_MODE', 'ONR_ACO_WGP_MODE', 'ONR_ACO_SAMPLE_WAIT_ZERO'):
+            base_env.pop(env_k, None)
+
+        for idx, spv, data, key in spv_items:
             previous = manifest.get('records', {}).get(key)
             record_path = root/(key+'.nrp')
             stage_record_path = stage_root/(key+'.nrp')
@@ -358,47 +422,116 @@ def main():
                         and len(cached_bytes) >= 96
                         and struct.unpack_from('<I', cached_bytes, 76)[0] == expected_mach):
                     stage_record_path.write_bytes(cached_bytes)
-                    records[key] = previous
+                    hit_records[idx] = previous
                     continue
+            env = dict(base_env, ONR_ACO_PRECISION=precision_by_stem.get(spv.stem, ns.precision))
+            for env_k, flag_set in (('ONR_ACO_CMAT_ADDRESS', ns.cmat_address_shaders),
+                                    ('ONR_ACO_CU_MODE', ns.cu_mode_shaders),
+                                    ('ONR_ACO_WGP_MODE', ns.wgp_mode_shaders),
+                                    ('ONR_ACO_SAMPLE_WAIT_ZERO', ns.sample_wait_zero_shaders)):
+                if spv.stem in flag_set:
+                    env[env_k] = '1'
+            if ns.shared_cmat != 'off' and (not ns.shared_cmat_shaders or spv.stem in ns.shared_cmat_shaders):
+                env['ONR_ACO_SHARED_CMAT'] = ns.shared_cmat
+            miss_items.append((idx, spv, data, key, env))
+
+        key_counts = {}
+        for _, _, _, key, _ in miss_items:
+            key_counts[key] = key_counts.get(key, 0) + 1
+
+        capture_bin = str(ns.capture.resolve())
+        captured_by_idx = {}
+        capture_errors = {}
+
+        if miss_items:
+            unique_misses = [m for m in miss_items if key_counts[m[3]] == 1]
+            # Longest-job-first: heavy shaders start at t=0 across both sentinels.
+            unique_misses.sort(key=lambda m: (-len(m[2]), m[0]))
+
+            dup_groups = {}
+            for m in miss_items:
+                idx, spv, data, key, env = m
+                if key_counts[key] > 1:
+                    dup_groups.setdefault(key, []).append((idx, str(spv), env, raw / (key + '-a'), raw / (key + '-b')))
+
+            pair_results = {}
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(jobs, max(1, len(unique_misses) * 2 + len(dup_groups)))) as ex:
+                all_futures = []
+                pair_fut_meta = {}
+                siblings = {}
+                dup_futs = {}
+                try:
+                    for idx, spv, data, key, env in unique_misses:
+                        spv_str = str(spv)
+                        prefix_a = raw / (key + '-a')
+                        prefix_b = raw / (key + '-b')
+                        env_a = dict(env, ONR_ACO_CAPTURE=str(prefix_a.resolve()), ONR_ACO_ADDR32_HI='0x13579bdf')
+                        env_b = dict(env, ONR_ACO_CAPTURE=str(prefix_b.resolve()), ONR_ACO_ADDR32_HI='0x2468ace1')
+                        fa = ex.submit(_run_capture_pair, capture_bin, spv_str, env_a, prefix_a)
+                        fb = ex.submit(_run_capture_pair, capture_bin, spv_str, env_b, prefix_b)
+                        pair_fut_meta[fa] = (idx, 0)
+                        pair_fut_meta[fb] = (idx, 1)
+                        siblings[fa] = fb
+                        siblings[fb] = fa
+                        all_futures.extend((fa, fb))
+
+                    dup_items = sorted(dup_groups.values(), key=lambda g: -len(g[0]))
+                    for grp in dup_items:
+                        fg = ex.submit(_run_serial_captures_for_key, capture_bin, grp)
+                        dup_futs[fg] = grp
+                        all_futures.append(fg)
+
+                    pending = set(all_futures)
+                    while pending:
+                        done, pending = concurrent.futures.wait(pending, return_when=concurrent.futures.FIRST_COMPLETED)
+                        for f in done:
+                            if f in dup_futs:
+                                grp_out = f.result()
+                                for idx, (cap_a, cap_b, exc) in grp_out.items():
+                                    if exc is not None:
+                                        capture_errors[idx] = exc
+                                    else:
+                                        captured_by_idx[idx] = (cap_a, cap_b)
+                            else:
+                                idx, pair_idx = pair_fut_meta[f]
+                                try:
+                                    res = f.result()
+                                except (ValueError, KeyError, OSError, subprocess.SubprocessError) as exc:
+                                    if idx not in capture_errors:
+                                        capture_errors[idx] = exc
+                                    sib = siblings[f]
+                                    if sib.cancel():
+                                        pending.discard(sib)
+                                else:
+                                    pair_results.setdefault(idx, {})[pair_idx] = res
+                                    if 0 in pair_results[idx] and 1 in pair_results[idx]:
+                                        captured_by_idx[idx] = (pair_results[idx][0], pair_results[idx][1])
+                except BaseException:
+                    for f in all_futures:
+                        f.cancel()
+                    concurrent.futures.wait(all_futures)
+                    raise
+
+        for idx, spv, data, key in spv_items:
+            if idx in hit_records:
+                records[key] = hit_records[idx]
+                continue
+            if idx in capture_errors:
+                err = capture_errors[idx]
+                failures.append(dict(spv=str(spv), error=str(err)))
+                print(f'{spv.name}: FAILED: {err}', flush=True)
+                continue
             try:
-                env = dict(os.environ, VK_ICD_FILENAMES=cfg['icd'], LD_PRELOAD=cfg['shim'],
-                           AMDGPU_GPU_ID=ns.target, MESA_SHADER_CACHE_DISABLE='true',
-                           LD_LIBRARY_PATH=cfg['library_path'], ONR_ACO_PRECISION=precision_by_stem.get(spv.stem, ns.precision))
-                env.pop('ONR_ACO_VECTOR_LOADS', None)
-                # Never inherit a global experimental setting into unrelated shaders.
-                for env_k, flag_set in (('ONR_ACO_CMAT_ADDRESS', ns.cmat_address_shaders),
-                                        ('ONR_ACO_CU_MODE', ns.cu_mode_shaders),
-                                        ('ONR_ACO_WGP_MODE', ns.wgp_mode_shaders),
-                                        ('ONR_ACO_SAMPLE_WAIT_ZERO', ns.sample_wait_zero_shaders)):
-                    env.pop(env_k, None)
-                    if spv.stem in flag_set:
-                        env[env_k] = '1'
-                if ns.matrix_loads == 'vector8': env['ONR_ACO_VECTOR_LOADS'] = '1'
-                env.pop('ONR_ACO_SHARED_CMAT', None)   # never leak a parent-env global into non-listed shaders
-                if ns.shared_cmat != 'off' and (not ns.shared_cmat_shaders or spv.stem in ns.shared_cmat_shaders):
-                    env['ONR_ACO_SHARED_CMAT'] = ns.shared_cmat
-                captures=[]
-                for suffix,sentinel in (('a', '0x13579bdf'), ('b', '0x2468ace1')):
-                    pair_prefix=raw/(key+'-'+suffix)
-                    for ext in ('.code','.json','.layouts'):
-                        pair_prefix.with_suffix(ext).unlink(missing_ok=True)
-                    env.update(ONR_ACO_CAPTURE=str(pair_prefix.resolve()), ONR_ACO_ADDR32_HI=sentinel)
-                    result=subprocess.run([str(ns.capture.resolve()),str(spv)],env=env,text=True,capture_output=True)
-                    log=result.stdout+result.stderr
-                    pair_prefix.with_suffix('.log').write_text(log)
-                    result.check_returncode()
-                    captures.append((json.loads(pair_prefix.with_suffix('.json').read_text()),pair_prefix.with_suffix('.code').read_bytes(),log,pair_prefix.with_suffix('.layouts').read_bytes()))
-                info,code,log,layouts=captures[0]
-                other_info,other,other_log,other_layouts=captures[1]
+                (info, code, log, layouts), (other_info, other, other_log, other_layouts) = captured_by_idx[idx]
                 if layouts != other_layouts: raise ValueError('descriptor layouts differ between sentinel captures')
                 if info['wave_size'] != 32 or info['push_bytes'] > 244:
                     raise ValueError('unsupported wave size or push range')
                 dims = dimensions(data)
                 if dims[0]*dims[1]*dims[2] != info['workgroup_size']:
                     raise ValueError('workgroup mismatch')
-                code, address_report = adapt_code(code, other, info['exec_bytes'], info, other_info, (log,other_log))
+                code, address_report = adapt_code(code, other, info['exec_bytes'], info, other_info, (log, other_log))
                 record_data = pack(info, code, fnv(data), expected_mach)
-                stage_record_path.write_bytes(record_data)
+                (stage_root/(key+'.nrp')).write_bytes(record_data)
                 records[key] = dict(info, spv=spv.name, spv_hash=key, code_hash=f'{fnv(code):016x}',
                                     workgroup=list(dims), layout='views' if spv.stem.startswith('d3d_') else 'sampled',
                                     cmat_address=spv.stem in ns.cmat_address_shaders,
