@@ -108,18 +108,20 @@ class PackageReleaseTests(unittest.TestCase):
             out2 = root / "out2"
             z1, s1, h1, count, _ = package_release.package_release(stage, out1, "OpenRR-test")
             z2, s2, h2, _, _ = package_release.package_release(stage, out2, "OpenRR-test")
-            self.assertEqual(count, 392)
+            self.assertEqual(count, 393)
             self.assertEqual(h1, h2)
             self.assertEqual(z1.read_bytes(), z2.read_bytes())
             self.assertEqual(s1.read_text(encoding="utf-8"), f"{h1}  OpenRR-test.zip\n")
             with zipfile.ZipFile(z1, "r") as zf:
                 names = zf.namelist()
             self.assertEqual(package_release._read_version_header(Path(__file__).resolve().parents[2]), "0.1.7plus6")
-            self.assertEqual(len(names), 392)
+            self.assertEqual(len(names), 393)
             self.assertIn("OptiScaler/plugins/openrr-amd.asi", names)
             self.assertIn("openrr-amd/OpenRR_LICENSE.txt", names)
+            self.assertIn("openrr-amd/OpenRR_NOTICE.txt", names)
             self.assertIn("openrr-amd/OpenRR_THIRD_PARTY.md", names)
             self.assertNotIn("LICENSE", names)
+            self.assertNotIn("NOTICE", names)
             self.assertNotIn("THIRD_PARTY.md", names)
             self.assertNotIn("plugins/openrr-amd.asi", names)
             self.assertTrue(all("\\" not in n for n in names))
@@ -136,6 +138,11 @@ class PackageReleaseTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "Legacy root license/notice file"):
                 package_release.validate_stage(stage)
             (stage / "LICENSE").unlink()
+
+            (stage / "NOTICE").write_text("legacy\n", encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "Legacy root license/notice file"):
+                package_release.validate_stage(stage)
+            (stage / "NOTICE").unlink()
 
             tmp_doc = stage / "openrr-amd" / "_tmp_tp.md"
             (stage / "openrr-amd" / "OpenRR_THIRD_PARTY.md").rename(tmp_doc)

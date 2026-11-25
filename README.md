@@ -2,6 +2,9 @@
 
 简体中文 | [English](README.en.md)
 
+> [!IMPORTANT]
+> **源码公开 · 完全免费 · 严禁倒卖与抹除署名**：本仓库由 `TheAutomatic` 编写/修改的独立 ASI 插件代码、构建打包工具及编译发行产物基于 **[PolyForm Noncommercial License 1.0.0](LICENSE)** 公开授权，仅限个人非商业使用，严禁有偿售卖、收费整合包/网盘/群分发及收费代安装。**二次修改/衍生分发须严格遵守 [NOTICE](NOTICE)**：允许署二改作者名，但必须完整保留原始作者（`TheAutomatic`）与全部上游作者（[OpenNeuralRendering/OpenRR](https://github.com/OpenNeuralRendering/OpenRR)、[mochizuki0323/DLSSNR-AMD](https://gitlab.com/mochizuki0323/DLSSNR-AMD) 等）署名、官方仓库链接及 `Required Notice:` 声明，严禁移除署名或篡改二进制信息/版本号冒充原创。如付费购买请立即申请退款并举报卖家！详见[许可证、免费声明与署名要求](#许可证)。
+
 本仓库是基于上游 [OpenNeuralRendering/OpenRR](https://github.com/OpenNeuralRendering/OpenRR) 构建的**独立 OptiScaler `.asi` 插件分支**，用于在 AMD Radeon RX 9000 系列（RDNA4）及实验性支持的 RX 7000 / RDNA3 / RDNA3.5 显卡上运行 NVIDIA DLSS Ray Reconstruction（光线重建，`nvngx_dlssd.dll` 310.9.1）。
 
 关于 OpenRR 的网络重实现原理、RDNA4 着色器架构、Clean-room 验证方法与基准数据，请直接参阅上游主仓库 **[OpenNeuralRendering/OpenRR](https://github.com/OpenNeuralRendering/OpenRR)**，本文不再赘述。
@@ -77,7 +80,7 @@
 
 ### 方式二：手动配合官方原版 OptiScaler（Windows / Linux 通用发行包）
 
-将构建产物（共 `392` 个文件的通用 `stage/` 包，或直接解压 `dist/OpenRR-v0.1.7plus6-OptiScaler.zip`）放入游戏目录（即 OptiScaler 的 `dxgi.dll` / `OptiScaler.ini` 所在目录）：
+将构建产物（共 `393` 个文件的通用 `stage/` 包，或直接解压 `dist/OpenRR-v0.1.7plus6-OptiScaler.zip`）放入游戏目录（即 OptiScaler 的 `dxgi.dll` / `OptiScaler.ini` 所在目录）：
 
 | 文件 / 目录 | 放置位置（相对于 `OptiScaler.ini` 所在目录） |
 |---|---|
@@ -86,7 +89,7 @@
 | `openrr-amd\shaders\*.spv` | `openrr-amd\shaders\*.spv`（共 `94` 个 `.spv`） |
 | `openrr-amd\shaders-gfx11\*.spv` | `openrr-amd\shaders-gfx11\*.spv`（共 `94` 个 `.spv`，RDNA3 / RDNA3.5 必需） |
 | `openrr-amd\aco\gfx1201\openrr-d3d12-v1\`、`openrr-amd\aco\gfx1200\openrr-d3d12-v1\` | 保持相同目录结构，每目标含 `94` 份 `.nrp`、`manifest.json` 和 `manifest.msgpack`；Windows RDNA4 严格 ACO 必需，Linux Mesa RADV 自动忽略 |
-| `openrr-amd\lang\`、`openrr-amd\OpenRR_*.{txt,md}` | `openrr-amd\lang\`（多语言与 `fonts\`），以及包内随附的 `OpenRR_LICENSE.txt`、`OpenRR_THIRD_PARTY.md` |
+| `openrr-amd\lang\`、`openrr-amd\OpenRR_*.{txt,md}` | `openrr-amd\lang\`（多语言与 `fonts\`），以及包内随附的 `OpenRR_LICENSE.txt`、`OpenRR_NOTICE.txt`、`OpenRR_THIRD_PARTY.md` |
 | `nvngx_dlssd.dll`（**310.9.1**） | 游戏目录或 `openrr-amd\nvngx_dlssd.dll` |
 
 在 `OptiScaler.ini` 中开启 ASI 插件加载（OptiScaler 默认关闭该项）：
@@ -116,7 +119,7 @@ LoadAsiPlugins=true
 bash asi/build/build_asi.sh
 ```
 
-构建完成后，打包目录位于 `build/asi/stage/`（分离出的调试符号保存在 `build/asi/openrr-amd.debug`，单元测试与命令列表切分验证套件位于 `build/asi/test_asi_units.exe`）；当存在双目标离线 ACO 清单或设置 `OPENRR_PACKAGE_ZIP=1` 时，会自动校验包结构、大小写与文件哈希并在 `dist/` 生成通用发行包 `dist/OpenRR-v<version>-OptiScaler.zip` 及 `.sha256` 校验文件（Windows 下也可直接运行 `python asi/build/package_release.py` 或 `asi/build/PACKAGE_LOCAL_RELEASE.cmd` 单独打包）。默认离线构建固定版本 Mesa 的 global/vector8 ACO 记录需要现有 WSL Mesa 源码与依赖，详见 [ACO 构建说明](asi/build/mesa/README.md)；云端 CI 通过 [`.github/workflows/package.yml`](.github/workflows/package.yml) 在 Ubuntu 26.04 容器中自动拉取 Mesa 26.3.0 / `libdrm` / Noto CJK 字体、完成完整构建与单测校验并上传或发布 Release 压缩包。stage 同时在 `openrr-amd/` 下包含 `OpenRR_LICENSE.txt` 和 `OpenRR_THIRD_PARTY.md`，不包含 OptiScaler 或外部权重 DLL。
+构建完成后，打包目录位于 `build/asi/stage/`（分离出的调试符号保存在 `build/asi/openrr-amd.debug`，单元测试与命令列表切分验证套件位于 `build/asi/test_asi_units.exe`）；当存在双目标离线 ACO 清单或设置 `OPENRR_PACKAGE_ZIP=1` 时，会自动校验包结构、大小写与文件哈希并在 `dist/` 生成通用发行包 `dist/OpenRR-v<version>-OptiScaler.zip` 及 `.sha256` 校验文件（Windows 下也可直接运行 `python asi/build/package_release.py` 或 `asi/build/PACKAGE_LOCAL_RELEASE.cmd` 单独打包）。默认离线构建固定版本 Mesa 的 global/vector8 ACO 记录需要现有 WSL Mesa 源码与依赖，详见 [ACO 构建说明](asi/build/mesa/README.md)；云端 CI 通过 [`.github/workflows/package.yml`](.github/workflows/package.yml) 在 Ubuntu 26.04 容器中自动拉取 Mesa 26.3.0 / `libdrm` / Noto CJK 字体、完成完整构建与单测校验并上传或发布 Release 压缩包。stage 同时在 `openrr-amd/` 下包含 `OpenRR_LICENSE.txt`、`OpenRR_NOTICE.txt` 和 `OpenRR_THIRD_PARTY.md`，不包含 OptiScaler 或外部权重 DLL。
 
 ---
 
@@ -136,4 +139,14 @@ bash asi/build/build_asi.sh
 
 ## 许可证
 
-MIT License（详见 [LICENSE](LICENSE) 与 [THIRD_PARTY.md](THIRD_PARTY.md)）。
+### 免费、禁止倒卖与二次开发署名要求
+本项目**永久免费分发**，仅限个人、学习与科研等非商业用途。**严禁任何人在闲鱼、淘宝、QQ 群、付费网盘、收费整合包中售卖本插件或其编译产物，或以“付费远程代安装 / 付费调试 / 付费优化包”名义向他人收费提供。如果您是付费买到的，请立即申请退款并举报卖家！**
+
+基于本项目的**非商业二次修改、重打包与衍生作品必须遵守 [NOTICE](NOTICE)**：二改作者可以署上自己的名字，但必须完整保留原始作者（`TheAutomatic`）署名、所有上游开源项目作者的版权声明、官方仓库链接以及全部 `Required Notice:` 行，**严禁抹除署名或仅修改二进制信息/版本号冒充原创**。
+
+### 许可范围与上游归属
+- **[本项目 (TheAutomatic / OpenRR-ASI)](https://github.com/TheAutomatic/OpenRR-ASI)** — **[PolyForm Noncommercial License 1.0.0](LICENSE)**（见 [NOTICE](NOTICE)）：本分支的新增实现、独立 ASI 插件、宿主桥接、构建/打包脚本与编译发行产物（`openrr-amd.asi`、`openrr-ngx-host.dll`、预编译着色器/ACO 记录）。
+- **[上游 OpenRR (OpenNeuralRendering/OpenRR)](https://github.com/OpenNeuralRendering/OpenRR)** — **MIT License**（© 2026 OpenNR）：核心 GPU 着色器、引擎、运行时与验证器（完整上游 MIT 许可正文保留于 [THIRD_PARTY.md](THIRD_PARTY.md)）。
+- **其他上游与第三方组件**（`mochizuki0323/DLSSNR-AMD`、Dear ImGui、MinHook、Inter 字体、Vulkan-Headers、Mesa RADV/ACO、Noto Sans CJK SC 等）各自保留原有开源许可，详见 [NOTICE](NOTICE) 与 [THIRD_PARTY.md](THIRD_PARTY.md)。
+
+> 本仓库与发布包**不包含**任何 NVIDIA 专有二进制文件（如 `nvngx_dlssd.dll`）、提取的模型权重或 OptiScaler 二进制文件。用户需自行提供合法持有的 `nvngx_dlssd.dll`（`310.9.1`）。

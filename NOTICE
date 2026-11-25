@@ -1,0 +1,54 @@
+Required Notice: Copyright (c) 2026 TheAutomatic (https://github.com/TheAutomatic/OpenRR-ASI)
+Required Notice: This software (original works, modifications, standalone ASI plugin, packaging tooling, and compiled binaries by TheAutomatic in this repository) is completely free for noncommercial use under PolyForm Noncommercial License 1.0.0 (https://polyformproject.org/licenses/noncommercial/1.0.0). Commercial resale, paid redistribution, paid bundles, paid downloads/groups, and paid installation, tuning, or setup services are strictly prohibited. If you paid for this software, request a refund immediately!
+Required Notice: Noncommercial modifications and derivative works may credit their own authors, but MUST keep original author attribution (TheAutomatic), the official repository URL, all upstream copyright notices (including OpenNeuralRendering/OpenRR and mochizuki0323/DLSSNR-AMD), and all "Required Notice:" lines intact. Stripping attribution or altering binary metadata/version numbers to claim original authorship is strictly prohibited.
+
+================================================================================
+License Scope & Upstream / Third-Party Attributions
+================================================================================
+
+1. OpenRR-ASI Modifications, Standalone ASI Plugin, Host Bridge, Build/Packaging
+   Tooling & Compiled Release Binaries (openrr-amd.asi, openrr-ngx-host.dll,
+   precompiled shader/ACO records)
+   Copyright (c) 2026 TheAutomatic (https://github.com/TheAutomatic/OpenRR-ASI)
+   License: PolyForm Noncommercial License 1.0.0 (see LICENSE)
+
+2. Upstream OpenRR (core GPU kernels, engine, runtime & validators under gpu/, runtime/)
+   Source: https://github.com/OpenNeuralRendering/OpenRR (Matheus Ferreira / OpenNR)
+   Copyright (c) 2026 OpenNR
+   License: MIT License (full upstream text preserved in THIRD_PARTY.md)
+
+3. DLSSNR-AMD ASI Shell & PAL Binary Parser (asi/src/rr_*.cpp, asi/src/rr_*.hpp,
+   asi/build/, gpu/src/rr_pal_binary.hpp)
+   Upstream: https://gitlab.com/mochizuki0323/DLSSNR-AMD
+   Copyright (c) 2026 mochizuki0323
+   License: MIT License (full text preserved in THIRD_PARTY.md)
+
+4. Offline ACO Capture Build-Tool Adaptations (asi/build/mesa/prepare_capture.py,
+   asi/build/build_aco_records.py)
+   Adapted from neural-amd-opti-reference (GPL-3.0). Offline build tools only;
+   not linked into the distributed Windows runtime (see THIRD_PARTY.md).
+
+5. Bundled & Referenced Third-Party Components
+   - Dear ImGui (asi/third_party/imgui/) — MIT License (Copyright (c) 2014-2025 Omar Cornut)
+   - MinHook (asi/third_party/minhook/) — BSD 2-Clause License (Copyright (C) 2009-2017 Tsuda Kageyu)
+   - Inter Font (asi/third_party/inter/) — SIL Open Font License 1.1
+   - Khronos Vulkan-Headers (asi/third_party/vulkan/) — Apache License 2.0
+   - Mesa RADV / ACO 26.3.0 (offline build tool, asi/build/mesa/) — MIT License
+   - Google Noto Sans CJK SC (openrr-amd/lang/fonts/NotoSansCJKsc-Regular.ttf) — SIL OFL 1.1
+   Full license texts and notices are preserved in THIRD_PARTY.md.
+
+6. Proprietary Exclusions
+   This repository and its release archives exclude proprietary NVIDIA binaries
+   (such as nvngx_dlssd.dll), extracted NVIDIA neural network weights, and
+   OptiScaler binaries. Users supply required third-party files (such as
+   nvngx_dlssd.dll 310.9.1) separately from their own legitimate copies under
+   their applicable licenses.
+
+7. Upstream Contributions & Relicensing Note
+   Contributions submitted directly by TheAutomatic via pull requests to
+   upstream open-source projects (such as OpenNeuralRendering/OpenRR or
+   mochizuki0323/DLSSNR-AMD), or explicitly relicensed in writing by
+   TheAutomatic for upstream integration, may be incorporated under those
+   upstream projects' original MIT License. This exception applies solely to
+   such direct upstream submissions or written grants and does not grant MIT
+   or commercial rights to any other third party.

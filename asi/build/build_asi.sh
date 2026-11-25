@@ -10,7 +10,7 @@ stage="$out/stage"
 if [[ "${OPENRR_CLEAN_STAGE:-0}" == "1" ]]; then
     rm -rf -- "$stage"
 fi
-rm -rf -- "$stage/plugins" "$stage/LICENSE" "$stage/THIRD_PARTY.md" "$stage/OptiScaler/plugins/"*.log "$stage/"*.log "$out"/bench-* "$out/occ_ab" "$out/occ_nopad" "$out/occ_pad16k" "$out/b2_base" "$out/b2_post_exp" "$out/b2_post_log" "$out/b2_attr_rcp" "$out/b2_attr_same" "$out/b2_c64_far3"
+rm -rf -- "$stage/plugins" "$stage/LICENSE" "$stage/NOTICE" "$stage/THIRD_PARTY.md" "$stage/OptiScaler/plugins/"*.log "$stage/"*.log "$out"/bench-* "$out/occ_ab" "$out/occ_nopad" "$out/occ_pad16k" "$out/b2_base" "$out/b2_post_exp" "$out/b2_post_log" "$out/b2_attr_rcp" "$out/b2_attr_same" "$out/b2_c64_far3"
 mkdir -p -- "$out" "$stage/OptiScaler/plugins" "$stage/openrr-amd/shaders" "$stage/openrr-amd/shaders-gfx11"
 
 jobs=${OPENRR_BUILD_JOBS:-$(nproc 2>/dev/null || echo 4)}
@@ -238,6 +238,7 @@ elif [[ -f "$cjk_font" ]]; then
     cp -- "$cjk_font" "$stage/openrr-amd/lang/fonts/"
 fi
 cp -- LICENSE "$stage/openrr-amd/OpenRR_LICENSE.txt"
+cp -- NOTICE "$stage/openrr-amd/OpenRR_NOTICE.txt"
 cp -- THIRD_PARTY.md "$stage/openrr-amd/OpenRR_THIRD_PARTY.md"
 
 # Offline ACO packaging. Native Mesa stays outside the Windows package.

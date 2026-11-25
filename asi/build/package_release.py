@@ -27,7 +27,7 @@ ACO_TARGETS = ("gfx1201", "gfx1200")
 LANG_FILES = ("English.txt", "zh-CN.txt", "ja.txt", "ko.txt")
 FONT_FILES = ("Noto-CJK-LICENSE.txt", "README.txt", "NotoSansCJKsc-Regular.ttf")
 ROOT_FILES = ("openrr-amd.ini", "openrr-ngx-host.dll")
-DATA_DOC_FILES = ("OpenRR_LICENSE.txt", "OpenRR_THIRD_PARTY.md")
+DATA_DOC_FILES = ("OpenRR_LICENSE.txt", "OpenRR_NOTICE.txt", "OpenRR_THIRD_PARTY.md")
 
 _FIXED_DATE_TIME = (2026, 1, 1, 0, 0, 0)
 _ZIP_CD_STRUCT = struct.Struct("<4s4B4HL2L5H2L")
@@ -122,7 +122,7 @@ def _validate_stage_with_cache(stage: Path, jobs: int = 1) -> tuple[list[tuple[s
 
     if any(name.lower() == "plugins" for name in stage_entries):
         raise RuntimeError(f"Legacy root plugins/ directory must not exist in stage: {stage / 'plugins'}")
-    for legacy_root in ("license", "third_party.md"):
+    for legacy_root in ("license", "notice", "third_party.md"):
         hit = next((p for name, p in stage_entries.items() if name.lower() == legacy_root), None)
         if hit is not None:
             raise RuntimeError(f"Legacy root license/notice file must not exist at stage root: {hit}")

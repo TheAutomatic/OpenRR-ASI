@@ -2,6 +2,9 @@
 
 [简体中文](README.md) | English
 
+> [!IMPORTANT]
+> **Source-Available · Completely Free · No Resale or Stripped Attribution**: Original works, modifications, the standalone ASI plugin, packaging tools, and compiled release binaries by `TheAutomatic` in this repository are licensed under **[PolyForm Noncommercial License 1.0.0](LICENSE)** for personal, noncommercial use only—commercial resale, paid bundles/groups/downloads, and paid installation services are strictly prohibited. **Noncommercial forks and derivative works must comply with [NOTICE](NOTICE)**: you may credit your own modifications, but MUST preserve attribution for the original author (`TheAutomatic`), all upstream authors (including [OpenNeuralRendering/OpenRR](https://github.com/OpenNeuralRendering/OpenRR) and [mochizuki0323/DLSSNR-AMD](https://gitlab.com/mochizuki0323/DLSSNR-AMD)), the official repository URL, and all `Required Notice:` lines; stripping attribution or altering binary metadata/version numbers to claim original authorship is prohibited. If you paid for this tool, request a refund immediately! See [License](#license).
+
 This repository is a **standalone OptiScaler `.asi` plugin fork** based on [OpenNeuralRendering/OpenRR](https://github.com/OpenNeuralRendering/OpenRR). It runs NVIDIA DLSS Ray Reconstruction (`nvngx_dlssd.dll` 310.9.1) on AMD Radeon RX 9000 series (RDNA4) and, experimentally, RX 7000 / RDNA3 / RDNA3.5 GPUs.
 
 For details about the OpenRR network reimplementation, RDNA4 shader architecture, clean-room validation methodology, and benchmarks, see the upstream **[OpenNeuralRendering/OpenRR](https://github.com/OpenNeuralRendering/OpenRR)** repository.
@@ -84,7 +87,7 @@ Use the **[dlss-5-amd-project](https://github.com/TheAutomatic/dlss-5-amd-projec
 
 ### Option 2: Manual installation with official OptiScaler (unified Windows / Linux package)
 
-Place the build artifacts (the 392-file unified `stage/` package, or extract `dist/OpenRR-v0.1.7plus6-OptiScaler.zip`) directly into the game directory containing OptiScaler's `dxgi.dll` / `OptiScaler.ini`:
+Place the build artifacts (the 393-file unified `stage/` package, or extract `dist/OpenRR-v0.1.7plus6-OptiScaler.zip`) directly into the game directory containing OptiScaler's `dxgi.dll` / `OptiScaler.ini`:
 
 | File / directory | Destination relative to `OptiScaler.ini` |
 |---|---|
@@ -93,7 +96,7 @@ Place the build artifacts (the 392-file unified `stage/` package, or extract `di
 | `openrr-amd/shaders/*.spv` | `openrr-amd/shaders/*.spv` (`94` `.spv` files) |
 | `openrr-amd/shaders-gfx11/*.spv` | `openrr-amd/shaders-gfx11/*.spv` (`94` `.spv` files, required for RDNA3 / RDNA3.5) |
 | `openrr-amd/aco/gfx1201/openrr-d3d12-v1/`, `openrr-amd/aco/gfx1200/openrr-d3d12-v1/` | Keep directory structure; `94` `.nrp`, `manifest.json`, and `manifest.msgpack` per target (required on Windows RDNA4, ignored automatically on Linux Mesa RADV) |
-| `openrr-amd/lang/`, `openrr-amd/OpenRR_*.{txt,md}` | `openrr-amd/lang/` (translations & `fonts/`) plus `OpenRR_LICENSE.txt` and `OpenRR_THIRD_PARTY.md` inside `openrr-amd/` |
+| `openrr-amd/lang/`, `openrr-amd/OpenRR_*.{txt,md}` | `openrr-amd/lang/` (translations & `fonts/`) plus `OpenRR_LICENSE.txt`, `OpenRR_NOTICE.txt`, and `OpenRR_THIRD_PARTY.md` inside `openrr-amd/` |
 | `nvngx_dlssd.dll` (**310.9.1**) | Game directory or `openrr-amd/nvngx_dlssd.dll` |
 
 Enable ASI plugin loading in `OptiScaler.ini` (disabled by default in OptiScaler):
@@ -143,4 +146,14 @@ Hardware: **AMD Radeon RX 9070 XT (RDNA4, gfx1201)**, driver **26.10.1 (LLPC)**,
 
 ## License
 
-MIT License. See [LICENSE](LICENSE) and [THIRD_PARTY.md](THIRD_PARTY.md).
+### Free Software, Anti-Resale & Derivative Attribution Notice
+This software is distributed **free of charge** for personal, noncommercial use. **Selling this plugin or its release packages, bundling it in paid modpacks or paywalled groups/downloads, or charging for "remote installation / setup / tuning" services is strictly prohibited.** If you paid for this package, request a refund immediately!
+
+**Noncommercial forks, modifications, repackaged builds, and derivative works MUST comply with [NOTICE](NOTICE)**: derivative authors may credit their own changes, but MUST keep original author attribution (`TheAutomatic`), all upstream copyright notices, the official repository URL, and all `Required Notice:` lines intact. **Stripping attribution or altering binary metadata/version numbers to claim original authorship is strictly prohibited.**
+
+### License Scope & Upstream Attributions
+- **[This Repository (TheAutomatic / OpenRR-ASI)](https://github.com/TheAutomatic/OpenRR-ASI)** — **[PolyForm Noncommercial License 1.0.0](LICENSE)** (see [NOTICE](NOTICE)): Original additions, modifications, standalone ASI plugin, host bridge, build/packaging tooling, and compiled release binaries (`openrr-amd.asi`, `openrr-ngx-host.dll`, precompiled shader/ACO records).
+- **[Upstream OpenRR (OpenNeuralRendering/OpenRR)](https://github.com/OpenNeuralRendering/OpenRR)** — **MIT License** (Copyright (c) 2026 OpenNR): Core GPU kernels, engine, runtime, and validators (full upstream MIT text preserved in [THIRD_PARTY.md](THIRD_PARTY.md)).
+- **Other Upstream & Third-Party Components** (`mochizuki0323/DLSSNR-AMD`, Dear ImGui, MinHook, Inter Font, Vulkan-Headers, Mesa RADV/ACO, Noto Sans CJK SC, etc.) retain their respective open-source licenses; see [NOTICE](NOTICE) and [THIRD_PARTY.md](THIRD_PARTY.md).
+
+> This repository and its release packages contain **no** proprietary NVIDIA binaries (such as `nvngx_dlssd.dll`), extracted neural network weights, or OptiScaler binaries. Users supply their own `nvngx_dlssd.dll` (`310.9.1`).
