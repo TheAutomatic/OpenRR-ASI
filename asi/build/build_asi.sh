@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: MIT
 # Builds standalone openrr-amd.asi (OptiScaler plugin with embedded OpenRR runtime + GPU engine) via MinGW-w64.
 # Usage: bash asi/build/build_asi.sh [build_dir]
 set -euo pipefail

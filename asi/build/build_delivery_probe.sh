@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: MIT
 # Build-only ABI fixtures; never add them to a package stage.
 set -euo pipefail
 cd -- "$(dirname -- "$0")/../.."

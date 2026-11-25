@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: MIT
 set -euo pipefail
 cd -- "$(dirname -- "$0")/../../.."
 repo=$PWD

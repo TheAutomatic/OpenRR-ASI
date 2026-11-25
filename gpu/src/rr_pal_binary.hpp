@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 // Adapted from DLSSNR-AMD, Copyright (c) 2026 mochizuki0323. See THIRD_PARTY.md.
 // CPU-only gfx1200/gfx1201 PAL code-object adapter. No Vulkan or driver dependency.
 #pragma once

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 // Adapted from mochi / DLSSNR-AMD (MIT, Copyright (c) 2026 mochizuki0323).
 #pragma once
 // Cutting a D3D12 command list in two, so that work on another API can run between the halves.

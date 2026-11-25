@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 // Diagnostic only: compare intermediate buffers from independent, identical frames.
 #include "rr_pal_binary.hpp"
 #include <immintrin.h>

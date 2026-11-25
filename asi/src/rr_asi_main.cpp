@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 // openrr-amd.asi: Standalone OpenRR (DLSS Ray Reconstruction on AMD RDNA4) ASI plugin for upstream OptiScaler.
 // Shell adapted from mochi / DLSSNR-AMD (MIT, Copyright (c) 2026 mochizuki0323).
 #include "rr_path_win.hpp"

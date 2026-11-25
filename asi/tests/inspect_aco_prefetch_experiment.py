@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: MIT
 """Offline compiler representations; never measures Linux GPU performance."""
 from pathlib import Path
 from collections import Counter

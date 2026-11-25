@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 // Adapted from mochi / DLSSNR-AMD (MIT, Copyright (c) 2026 mochizuki0323).
 // Included by rr_pe_menu.cpp: Vulkan drawing of the same Menu used by the DXGI backends.
 // The render passes and HDR composition follow the earlier Linux Vulkan layer's; no second set of pages or input handling.

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 #pragma once
 
 #include "rr_path_u8.hpp"

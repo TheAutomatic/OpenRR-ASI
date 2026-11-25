@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: MIT
 # The Vulkan entry points of a DLL of ours, resolved at run time instead of imported: a static import of vulkan-1.dll
 # loads the Vulkan loader into every game before its own graphics stack. Every vk* call goes through a pointer filled
 # by rr_vk_load() from vulkan-1.dll (one tail jump per entry point).

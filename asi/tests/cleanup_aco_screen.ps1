@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: MIT
 # Run only after correctness hashes and logs have been archived.
 param([string[]]$Cases=@('w2-up64','w2-dfn64','address-enc128','address-dec96','address-dec96-confirm'),[string]$Prefix='cleanup-screen')
 $ErrorActionPreference='Stop'

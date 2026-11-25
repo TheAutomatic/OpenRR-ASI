@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: MIT
 """Summarize the isolated projection-prefetch experiment and archive small evidence."""
 from pathlib import Path
 import json,hashlib,statistics,shutil

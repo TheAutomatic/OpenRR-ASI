@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 // Adapted from mochi / DLSSNR-AMD (MIT, Copyright (c) 2026 mochizuki0323).
 #pragma once
 // Numbers in openrr-amd.ini, whatever the process's C locale: a game that sets LC_NUMERIC to one with a decimal comma

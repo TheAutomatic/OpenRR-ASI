@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: MIT
 """
 Automated validation & evidence archiver for OpenRR-ASI (openrr-amd.asi).
 Runs test_asi_units.exe + 3-run same-process A/B openrr_bench.exe (1080p, 1440p, 4K + 4K Legacy),

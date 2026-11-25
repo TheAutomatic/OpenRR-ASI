@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 #include "rr_present_scope.hpp"
 #include <cstdio>
 #include <thread>

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: MIT
 # ACO versus ACO, no intermediate tracing or per-frame readbacks.
 param([string]$Output='build/aco-runtime-trace/runs-approved-2026-11-10/prefetch-timing')
 $ErrorActionPreference='Stop'

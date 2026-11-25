@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: MIT
 """Generate an isolated full-kernel probe; never modify staged shaders/records."""
 from pathlib import Path
 import shutil

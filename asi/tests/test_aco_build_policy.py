@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: MIT
 """CPU-only tests of opt-in record policy, fingerprint and cache integrity."""
 import contextlib
 import hashlib

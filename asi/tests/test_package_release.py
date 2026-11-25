@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: MIT
 """Unit tests for asi/build/package_release.py release audit and deterministic archiving."""
 import hashlib
 import importlib.util

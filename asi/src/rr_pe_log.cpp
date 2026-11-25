@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 // Adapted from mochi / DLSSNR-AMD (MIT, Copyright (c) 2026 mochizuki0323).
 #include "rr_path_win.hpp"
 #include "rr_pe_log.hpp"

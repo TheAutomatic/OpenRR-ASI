@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 #include "rr_dxgi_queue.hpp"
 #include <cstdio>
 #include <thread>

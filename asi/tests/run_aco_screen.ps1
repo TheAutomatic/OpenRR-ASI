@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: MIT
 # Candidate must pass compile screening first. All GPU execution is Windows D3D12/PAL.
 param([Parameter(Mandatory=$true)][string]$Candidate,
       [Parameter(Mandatory=$true)][string]$Name,

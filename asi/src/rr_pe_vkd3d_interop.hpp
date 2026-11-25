@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 // vkd3d-proton direct Vulkan interop for Linux Wine/Proton + Mesa RADV (universal package, zero extra .so):
 // Queries ID3D12DXVKInteropDevice / ID3D12DXVKInteropDevice1 and ID3D12GraphicsCommandListExt from a
 // vkd3d-proton D3D12 device/command list, routing EvaluateFeature straight through OnrRrApi5::RecordVk.

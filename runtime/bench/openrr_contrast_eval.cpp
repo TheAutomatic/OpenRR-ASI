@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 // OpenRR vs RR_Contrast offline parity evaluator (anchor #2: RTX 5090 nvngx_dlssd 310.9.1.0).
 //
 // Synthesizes the exact rr_contrast_v1 / rr_contrast_v2_motion fixture frames on the CPU

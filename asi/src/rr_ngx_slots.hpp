@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 // Adapted from DLSSNR-AMD (MIT, Copyright (c) 2026 mochizuki0323).
 #pragma once
 

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 // Adapted from mochi / DLSSNR-AMD (MIT, Copyright (c) 2026 mochizuki0323).
 #pragma once
 // A stall report in openrr-amd.log: when the game's frames stop for a while (or none came at all a minute after the

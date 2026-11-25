@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 // Arithmetic diagnostic for runtime Engine frame 6, pixel (203,378), attribute 9.
 // Same FP32 blend / history decode / log / FP16 dither expressions as enc0_attr.
 // No network kernel is replaced. See the runtime diagnostic evidence report.

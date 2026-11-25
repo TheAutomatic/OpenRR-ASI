@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: MIT
 """Compare actual-runtime readbacks. Raw bytes stay authoritative; half-zero
 classification is reported only for surfaces known to contain FP16 values.
 """

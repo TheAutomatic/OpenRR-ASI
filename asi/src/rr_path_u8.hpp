@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 // Adapted from mochi / DLSSNR-AMD (MIT, Copyright (c) 2026 mochizuki0323).
 #pragma once
 // Paths inside NR are UTF-8 strings, in every file and on every route. std::filesystem::path takes narrow strings as

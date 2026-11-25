@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: MIT
 """Archive/prune/restore only the explicit delivery experiment-tool inventory."""
 import argparse
 import hashlib

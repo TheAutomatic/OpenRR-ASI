@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: MIT
 """CPU package audit: complete inputs, tested runtime records and clean stage."""
 import argparse
 import hashlib

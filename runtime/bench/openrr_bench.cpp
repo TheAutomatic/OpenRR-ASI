@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 // Standalone offline benchmark and VRAM/DRS comparator for OpenNrRrRuntime.dll and openrr-amd.asi.
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN

@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: MIT
 """Merge a diagnostic/experiment record set with immutable baseline records."""
 from pathlib import Path
 import sys,json,shutil

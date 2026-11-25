@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: MIT
 """Capture OpenRR SPIR-V with the pinned RADV and pack NRPAL002 records."""
 import argparse
 import concurrent.futures

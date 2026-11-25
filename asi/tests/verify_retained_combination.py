@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: MIT
 """Compare rebuilt production inputs/records against individually tested combination."""
 from pathlib import Path
 import json,hashlib,sys

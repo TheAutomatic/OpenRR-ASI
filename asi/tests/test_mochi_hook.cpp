@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 // Build once as a DLL (-DTEST_NR_DLL), once as an EXE, each with its own MinHook.
 #include "rr_mochi_hook.hpp"
 #include "MinHook.h"

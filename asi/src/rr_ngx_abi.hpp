@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 // Adapted from DLSSNR-AMD (MIT, Copyright (c) 2026 mochizuki0323).
 // Transcribed from NVIDIA NGX SDK headers for ABI interoperability without SDK header dependencies.
 #pragma once

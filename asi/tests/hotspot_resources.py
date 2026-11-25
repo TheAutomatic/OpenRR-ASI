@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: MIT
 """Pair Windows LLPC ELF resources with ACO records by identical SPIR-V bytes."""
 from pathlib import Path
 import struct,json,hashlib,sys,zipfile

@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: MIT
 import unittest
 from compare_runtime_trace import compare, validate_metadata, is_half_surface
 

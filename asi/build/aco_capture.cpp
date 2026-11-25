@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 // Compile only: use the runtime's exact feature chain and both pipeline layouts.
 #include "opennr_rr/vk.hpp"
 #include <cstdio>

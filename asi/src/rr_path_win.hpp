@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 // Adapted from mochi / DLSSNR-AMD (MIT, Copyright (c) 2026 mochizuki0323).
 #pragma once
 // Windows' file functions with UTF-8 paths (rr_path_u8.hpp: why): each calls the wide ("W") function. The Windows

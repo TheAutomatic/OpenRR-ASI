@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 // Correctness diagnostics on the host's actual list. Readbacks are consumed only
 // after the benchmark has waited for its fence; no replay or resource restoration.
 #pragma once

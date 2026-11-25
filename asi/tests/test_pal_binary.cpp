@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 #include "rr_pal_binary.hpp"
 #include <cstdio>
 #include <map>

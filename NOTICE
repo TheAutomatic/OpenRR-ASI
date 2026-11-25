@@ -25,14 +25,21 @@ License Scope & Upstream / Third-Party Attributions
 
 4. Offline ACO Capture Build-Tool Adaptations (asi/build/mesa/prepare_capture.py,
    asi/build/build_aco_records.py)
-   Adapted from neural-amd-opti-reference (GPL-3.0). Offline build tools only;
-   not linked into the distributed Windows runtime (see THIRD_PARTY.md).
+   The offline source-level ACO address32 capture strategy and dual-capture
+   validation in these build tools are adapted from the OpenNR record producer
+   by Matheus Ferreira (MatheusFerreiraS / OpenNR), incorporated and
+   redistributed in this repository under PolyForm Noncommercial License 1.0.0
+   (see LICENSE) pursuant to direct permissive authorization from the copyright
+   holder to TheAutomatic. That authorization applies solely to TheAutomatic /
+   this repository and does not grant any separate MIT or commercial license to
+   third parties. Offline build tools only; not linked into the distributed
+   Windows runtime.
 
 5. Bundled & Referenced Third-Party Components
    - Dear ImGui (asi/third_party/imgui/) — MIT License (Copyright (c) 2014-2025 Omar Cornut)
    - MinHook (asi/third_party/minhook/) — BSD 2-Clause License (Copyright (C) 2009-2017 Tsuda Kageyu)
    - Inter Font (asi/third_party/inter/) — SIL Open Font License 1.1
-   - Khronos Vulkan-Headers (asi/third_party/vulkan/) — Apache License 2.0
+   - Khronos Vulkan-Headers (asi/third_party/vulkan/) — Apache License 2.0 OR MIT License
    - Mesa RADV / ACO 26.3.0 (offline build tool, asi/build/mesa/) — MIT License
    - Google Noto Sans CJK SC (openrr-amd/lang/fonts/NotoSansCJKsc-Regular.ttf) — SIL OFL 1.1
    Full license texts and notices are preserved in THIRD_PARTY.md.
@@ -52,3 +59,9 @@ License Scope & Upstream / Third-Party Attributions
    upstream projects' original MIT License. This exception applies solely to
    such direct upstream submissions or written grants and does not grant MIT
    or commercial rights to any other third party.
+
+8. Trademark & Unofficial Project Notice
+   This is an independent, unofficial community plugin and is not affiliated
+   with, endorsed by, or sponsored by NVIDIA Corporation, Advanced Micro
+   Devices, Inc. (AMD), or the OptiScaler project. All trademarks belong to
+   their respective owners.

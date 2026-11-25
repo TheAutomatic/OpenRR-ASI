@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: MIT
 # Current LLPC versus strict ACO baseline; alternating execution order.
 param([string]$Output='build/aco-runtime-trace/runs-approved-2026-11-10/llpc-aco-current-timing')
 $ErrorActionPreference='Stop'

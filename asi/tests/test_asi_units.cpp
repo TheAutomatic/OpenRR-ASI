@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 // Unit and D3D12 harness tests for openrr-amd.asi components:
 // - Item #13: single-digit and numeric virtual-key parsing in openrr::pe::parse_key
 // - Item #11: split vtable fallback self-recursion guard & CreateCommandList fallback on copied vtables

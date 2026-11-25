@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 // Compile-only Windows driver capture; no dispatch or performance data.
 #include "opennr_rr/vk.hpp"
 #include <fstream>

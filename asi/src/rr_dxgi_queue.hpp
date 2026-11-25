@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 #pragma once
 #include <windows.h>
 #include <dxgi1_6.h>

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: MIT
 """Archive screened candidate correctness and timings without large readbacks."""
 from pathlib import Path
 import json,hashlib,statistics,shutil,sys

@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: MIT
 # Mesa 26.3.0-drirc capture toolchain (production).
 # Companion to build_capture.sh, which pins the 26.2.4 commit 96cb43121031…
 # from a git checkout. 26.3.0 arrives as a release tarball: provenance is the

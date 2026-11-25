@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: MIT
 """Isolated ACO experiment: shorten NT6 projection weight live ranges only."""
 from pathlib import Path
 import shutil,subprocess,sys,json,difflib

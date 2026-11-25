@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 #pragma once
 // GPU architecture identification from LLVM EF_AMDGPU_MACH (e_flags) and explicit tables.
 // Never uses overlapping hex ranges or conflates architecture identity with ACO record availability.

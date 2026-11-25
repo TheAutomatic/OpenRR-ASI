@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 // In-memory SPIR-V precision hardener for system Mesa RADV (Vulkan) without a patched Mesa binary.
 // Mirrors OpenRR's offline ACO precision split (build_asi.sh: global exact vs 37 native-only *_lt/*_lx kernels)
 // by attaching SpvDecorationNoContraction to target arithmetic and FP conversion result IDs in SPIR-V.

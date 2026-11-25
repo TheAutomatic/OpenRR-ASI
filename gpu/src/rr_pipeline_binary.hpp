@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 // Native Vulkan ACO compute pipeline loader via VK_KHR_pipeline_binary.
 #pragma once
 

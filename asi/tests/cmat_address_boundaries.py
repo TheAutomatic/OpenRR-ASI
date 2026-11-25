@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: MIT
 """Exact integer model of guarded cmat lane address construction."""
 from pathlib import Path
 import json

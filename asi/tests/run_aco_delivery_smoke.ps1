@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: MIT
 # Package integration only; printed timings are not a performance baseline.
 param([string]$Build='build/asi-delivery-candidate', [string]$Output='build/aco-delivery-review/package-smoke',
       [string]$ProbeData='build/aco-delivery-review/probe-data', [switch]$Resume)

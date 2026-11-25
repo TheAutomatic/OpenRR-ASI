@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: MIT
 """Independent opt-in experiment atop capturev4; only bounded cmat lane offsets."""
 from pathlib import Path
 import sys,difflib

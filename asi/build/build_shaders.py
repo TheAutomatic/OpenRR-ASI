@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: MIT
 # Compiles RUNTIME_SPVS and LITE_SPVS (reading gpu/shaders.list + gpu/CMakeLists.txt + gpu/fastmode.cmake) into the target directory.
 import argparse
 import concurrent.futures

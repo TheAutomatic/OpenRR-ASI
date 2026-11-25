@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: MIT
 """Validate an OpenRR-ASI staged release directory and build a deterministic release archive."""
 import argparse
 import concurrent.futures

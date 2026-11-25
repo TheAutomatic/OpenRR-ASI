@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: MIT
 """Freeze the isolated candidate, exact source/tool inventory and smoke evidence."""
 import hashlib
 import json

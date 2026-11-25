@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: MIT
 from pathlib import Path
 import json,statistics,hashlib,shutil,csv,re
 root=Path('build/aco-runtime-trace/runs-approved-2026-11-10')

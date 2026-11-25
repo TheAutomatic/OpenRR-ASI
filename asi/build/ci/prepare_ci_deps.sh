@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: MIT
 # Bootstraps external build dependencies (Mesa 26.3.0 tarball/source, libdrm_amdgpu >= 2.4.133,
 # and NotoSansCJKsc-Regular.ttf) for clean GitHub Actions / Linux builds without mutating git sources.
 set -euo pipefail

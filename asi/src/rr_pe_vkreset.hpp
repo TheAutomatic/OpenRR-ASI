@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 // Shared Vulkan command-buffer / command-pool tracking wrappers so ASI and unit tests
 // exercise the exact same driver-first, success-only retirement notification logic.
 #pragma once
