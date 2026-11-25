@@ -39,7 +39,7 @@
 
 ### 2. 完整的 NGX 拦截、状态恢复与多后端路由
 - **非阻塞能力探测**：自动改写 NGX `SuperSamplingDenoising` 能力参数；首次查询仅做同步轻量检查（校验 `nvngx_dlssd.dll` 310.9.1 版本号 + 实例级 Vulkan RDNA4 特性查询，带 30 秒失败缓存），将权重解析与管线编译全部放到 `CreateFeature` 后台线程，不阻塞游戏主线程。
-- **D3D12 Direct 无侵入 Compute 状态恢复**：录制全程不调用 `SetDescriptorHeaps`、不触碰 Graphics Root 状态（描述符通过 Root Constant 裸地址直读）；在发现 D3D12 设备时通过 MinHook 挂钩 `D3D12Core` 底层函数（不触碰对象虚表），只读观测宿主 Heap 切换以剔除失效表句柄，并在 `Record` 后完整恢复游戏的 Compute Root Signature、全部 Compute Root 实参（Descriptor Table / CBV / SRV / UAV / 32-bit Root Constants）以及 PSO / State Object。无需依赖定制版 OptiScaler 内部恢复逻辑，即可原生支持《生化危机 9 (`re9.exe`)》《怪物猎人：荒野》《龙之信条 2》《007 First Light》等游戏。
+- **D3D12 Direct 无侵入 Compute 状态恢复**：录制全程不调用 `SetDescriptorHeaps`、不触碰 Graphics Root 状态（描述符通过 Root Constant 裸地址直读）；在发现 D3D12 设备时通过 MinHook 挂钩 `D3D12Core` 底层函数（不触碰对象虚表），只读观测宿主 Heap 切换以剔除失效表句柄，并在 `Record` 后完整恢复游戏的 Compute Root Signature、全部 Compute Root 实参（Descriptor Table / CBV / SRV / UAV / 32-bit Root Constants）以及 PSO / State Object。无需依赖定制版 OptiScaler 内部恢复逻辑，即可原生支持《生化危机 9 (`re9.exe`)》《007 First Light》等游戏。
 - **D3D12 ↔ Vulkan 桥接自动回退与硬化**：在无 `amdxc64.dll` ELF 直通的环境（如 Linux vkd3d-proton，或手动指定 `Backend = vulkan`）下自动回退至命令列表切分（Split）+ Vulkan 共享资源互操作桥接；补齐防自递归回退保护以及 Split Barrier / Enhanced Barrier / RTAS / MetaCommand 拒绝规则。
 - **原生 Vulkan 游戏直通（`RecordVk`）**：通过 `LdrRegisterDllNotification` 监听晚加载的 `vulkan-1.dll`，在游戏 `vkCreateDevice` 时自动注入所需扩展、特性与独立计算队列，并在设备未就绪时自动隐藏 RR 选项避免崩溃。
 - **无全局 DXGI 伪装时的 Streamline RR**：配合 `OptiPatcher.asi`（`Dxgi=auto/false`）时，OpenRR 仅在 `sl.dlss_d.dll` 的 `slOnPluginLoad` 同步调用期间，把 OpenRR 可用的 AMD 适配器在 `sl.common` 的 SystemCaps 中临时显示为 NVIDIA，返回后逐字段恢复，并从插件返回的 JSON 中去掉两个 NVX 专用 Vulkan 扩展。已知限制：假定 slInit 加载插件期间没有其他线程读取这份 caps。
