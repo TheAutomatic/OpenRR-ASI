@@ -6,9 +6,8 @@ Required Notice: Noncommercial modifications and derivative works may credit the
 License Scope & Upstream / Third-Party Attributions
 ================================================================================
 
-1. OpenRR-ASI Modifications, Standalone ASI Plugin, Host Bridge, Build/Packaging
-   Tooling & Compiled Release Binaries (openrr-amd.asi, openrr-ngx-host.dll,
-   precompiled shader/ACO records)
+1. OpenRR-ASI Modifications, Standalone ASI Plugin, Build/Packaging Tooling &
+   Compiled Release Binaries (openrr-amd.asi, precompiled shader/ACO records)
    Copyright (c) 2026 TheAutomatic (https://github.com/TheAutomatic/OpenRR-ASI)
    License: PolyForm Noncommercial License 1.0.0 (see LICENSE)
 
@@ -36,9 +35,8 @@ License Scope & Upstream / Third-Party Attributions
    Windows runtime.
 
 5. Bundled & Referenced Third-Party Components
-   - Dear ImGui (asi/third_party/imgui/) — MIT License (Copyright (c) 2014-2025 Omar Cornut)
+   - OptiScaler Plugin SDK (asi/src/optiscaler_plugin.h) — MIT License (Copyright (c) 2026 OptiScaler contributors)
    - MinHook (asi/third_party/minhook/) — BSD 2-Clause License (Copyright (C) 2009-2017 Tsuda Kageyu)
-   - Inter Font (asi/third_party/inter/) — SIL Open Font License 1.1
    - Khronos Vulkan-Headers (asi/third_party/vulkan/) — Apache License 2.0 OR MIT License
    - Mesa RADV / ACO 26.3.0 (offline build tool, asi/build/mesa/) — MIT License
    - Google Noto Sans CJK SC (openrr-amd/lang/fonts/NotoSansCJKsc-Regular.ttf) — SIL OFL 1.1

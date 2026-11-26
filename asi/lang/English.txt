@@ -6,14 +6,17 @@
 msgid "@language"
 msgstr "English"
 
-msgid "Enable OpenRR (Ray Reconstruction)"
-msgstr "Enable OpenRR (Ray Reconstruction)"
-
-msgid "(Menu key: %s)"
-msgstr "(Menu key: %s)"
-
 msgid "Status"
 msgstr "Status"
+
+msgid "OptiScaler Plugin API v3 (RegisterProvider) is unavailable. Please update to OptiScaler v0.10 nightly."
+msgstr "OptiScaler Plugin API v3 (RegisterProvider) is unavailable. Please update to OptiScaler v0.10 nightly."
+
+msgid "OpenRR provider registration was disabled at startup ([OpenRR] Enabled = false). Enable it below and restart the game."
+msgstr "OpenRR provider registration was disabled at startup ([OpenRR] Enabled = false). Enable it below and restart the game."
+
+msgid "OpenRR could not register as an OptiScaler DLSSD provider. Check openrr-amd.log."
+msgstr "OpenRR could not register as an OptiScaler DLSSD provider. Check openrr-amd.log."
 
 msgid "Idle: waiting for the game to create a DLSS Ray Reconstruction feature."
 msgstr "Idle: waiting for the game to create a DLSS Ray Reconstruction feature."
@@ -33,6 +36,9 @@ msgstr "Failed"
 msgid "Unknown"
 msgstr "Unknown"
 
+msgid "State: %s%s%s%s"
+msgstr "State: %s%s%s%s"
+
 msgid "D3D12 Direct ELF"
 msgstr "D3D12 Direct ELF"
 
@@ -41,9 +47,6 @@ msgstr "Vulkan Host (RecordVk)"
 
 msgid "Vulkan Interop Bridge"
 msgstr "Vulkan Interop Bridge"
-
-msgid "State: %s%s%s%s"
-msgstr "State: %s%s%s%s"
 
 msgid "Backend: %s"
 msgstr "Backend: %s"
@@ -69,14 +72,17 @@ msgstr "Coexistence: dlssnr-amd.asi detected (Direct path active)"
 msgid "Execution & Backend"
 msgstr "Execution & Backend"
 
-msgid "D3D12 Backend"
-msgstr "D3D12 Backend"
+msgid "Enable OpenRR (Ray Reconstruction)"
+msgstr "Enable OpenRR (Ray Reconstruction)"
+
+msgid "Registers OpenRR as an OptiScaler Ray Reconstruction provider (restart required when toggling). Use OptiScaler's Upscalers -> RR Upscaler selector to switch providers live."
+msgstr "Registers OpenRR as an OptiScaler Ray Reconstruction provider (restart required when toggling). Use OptiScaler's Upscalers -> RR Upscaler selector to switch providers live."
 
 msgid "Auto (D3D12 Direct preferred)"
 msgstr "Auto (D3D12 Direct preferred)"
 
-msgid "Network Mode"
-msgstr "Network Mode"
+msgid "D3D12 Backend"
+msgstr "D3D12 Backend"
 
 msgid "Legacy"
 msgstr "Legacy"
@@ -86,6 +92,9 @@ msgstr "New (recommended)"
 
 msgid "Fast (experimental)"
 msgstr "Fast (experimental)"
+
+msgid "Network Mode"
+msgstr "Network Mode"
 
 msgid "New"
 msgstr "New"
@@ -99,17 +108,14 @@ msgstr "Fast kernels unavailable"
 msgid "Runtime: %s"
 msgstr "Runtime: %s"
 
-msgid "Coexist Split"
-msgstr "Coexist Split"
-
 msgid "Auto (disable split when dlssnr-amd is present)"
 msgstr "Auto (disable split when dlssnr-amd is present)"
 
 msgid "Off (never split command lists)"
 msgstr "Off (never split command lists)"
 
-msgid "Depth Type"
-msgstr "Depth Type"
+msgid "Coexist Split"
+msgstr "Coexist Split"
 
 msgid "Auto"
 msgstr "Auto"
@@ -120,8 +126,8 @@ msgstr "Hardware Depth (NDC)"
 msgid "Linear Depth"
 msgstr "Linear Depth"
 
-msgid "Vulkan Input Layout"
-msgstr "Vulkan Input Layout"
+msgid "Depth Type"
+msgstr "Depth Type"
 
 msgid "Shader Read Optimal"
 msgstr "Shader Read Optimal"
@@ -129,11 +135,17 @@ msgstr "Shader Read Optimal"
 msgid "General"
 msgstr "General"
 
-msgid "OptiFG Frame Gen Compat (experimental)"
-msgstr "OptiFG Frame Gen Compat (experimental)"
+msgid "Vulkan Input Layout"
+msgstr "Vulkan Input Layout"
 
-msgid "Restart required. Set OptiScaler's [Libraries] NvngxPath to load openrr-ngx-host.dll."
-msgstr "Restart required. Set OptiScaler's [Libraries] NvngxPath to load openrr-ngx-host.dll."
+msgid "Re-init Upscaler"
+msgstr "Re-init Upscaler"
+
+msgid "Recreates active upscalers so backend or depth changes take effect without restarting."
+msgstr "Recreates active upscalers so backend or depth changes take effect without restarting."
+
+msgid "Re-init requested"
+msgstr "Re-init requested"
 
 msgid "Guides"
 msgstr "Guides"
@@ -168,54 +180,24 @@ msgstr "Use Reflection Motion Vectors"
 msgid "Use Transparency Layer Opacity & Motion"
 msgstr "Use Transparency Layer Opacity & Motion"
 
-msgid "Menu & Hotkeys"
-msgstr "Menu & Hotkeys"
-
-msgid "Menu Key"
-msgstr "Menu Key"
-
-msgid "Enter a key such as F7 or Ctrl+F7, then press Enter."
-msgstr "Enter a key such as F7 or Ctrl+F7, then press Enter."
-
-msgid "Use OptiScaler Shortcut"
-msgstr "Use OptiScaler Shortcut"
-
-msgid "Pass OptiScaler Key (Insert) while open"
-msgstr "Pass OptiScaler Key (Insert) while open"
-
-msgid "Menu Size"
-msgstr "Menu Size"
-
-msgid "Text Size"
-msgstr "Text Size"
-
-msgid "Theme"
-msgstr "Theme"
-
-msgid "Blue"
-msgstr "Blue"
-
-msgid "Teal"
-msgstr "Teal"
-
-msgid "Violet"
-msgstr "Violet"
-
-msgid "Amber"
-msgstr "Amber"
-
-msgid "Crimson"
-msgstr "Crimson"
-
-msgid "Graphite"
-msgstr "Graphite"
-
 msgid "Language"
 msgstr "Language"
 
 msgid "openrr-amd\\lang\\<name>.txt; the file reloads when it changes."
 msgstr "openrr-amd\\lang\\<name>.txt; the file reloads when it changes."
 
-msgid "Close"
-msgstr "Close"
+msgid "Updated OptiScaler.ini ([Menu] TTFFontPath). Restart the game (without clicking OptiScaler's Save INI) to display non-Latin text."
+msgstr "Updated OptiScaler.ini ([Menu] TTFFontPath). Restart the game (without clicking OptiScaler's Save INI) to display non-Latin text."
+
+msgid "OptiScaler's built-in font has Latin glyphs only. Configure [Menu] TTFFontPath in OptiScaler.ini and restart to display this language."
+msgstr "OptiScaler's built-in font has Latin glyphs only. Configure [Menu] TTFFontPath in OptiScaler.ini and restart to display this language."
+
+msgid "Configure CJK Font in OptiScaler.ini"
+msgstr "Configure CJK Font in OptiScaler.ini"
+
+msgid "No CJK font file found in openrr-amd\\lang\\fonts or C:\\Windows\\Fonts."
+msgstr "No CJK font file found in openrr-amd\\lang\\fonts or C:\\Windows\\Fonts."
+
+msgid "Could not write OptiScaler.ini. Check file permissions."
+msgstr "Could not write OptiScaler.ini. Check file permissions."
 

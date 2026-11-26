@@ -32,9 +32,8 @@ def _build_valid_stage(root: Path, shader_count: int = 94) -> Path:
     (stage / "openrr-amd" / "lang" / "fonts").mkdir(parents=True)
 
     (stage / "OptiScaler" / "plugins" / "openrr-amd.asi").write_bytes(
-        _make_pe64(b"\0InitializeASI\0")
+        _make_pe64(b"\0InitializeASI\0OptiPluginInit\0")
     )
-    (stage / "openrr-ngx-host.dll").write_bytes(_make_pe64())
     (stage / "openrr-amd.ini").write_text("openrr-amd.ini content\n", encoding="utf-8")
     for dname in package_release.DATA_DOC_FILES:
         (stage / "openrr-amd" / dname).write_text(f"{dname} content\n", encoding="utf-8")
@@ -107,18 +106,19 @@ class PackageReleaseTests(unittest.TestCase):
             out2 = root / "out2"
             z1, s1, h1, count, _ = package_release.package_release(stage, out1, "OpenRR-test")
             z2, s2, h2, _, _ = package_release.package_release(stage, out2, "OpenRR-test")
-            self.assertEqual(count, 393)
+            self.assertEqual(count, 392)
             self.assertEqual(h1, h2)
             self.assertEqual(z1.read_bytes(), z2.read_bytes())
             self.assertEqual(s1.read_text(encoding="utf-8"), f"{h1}  OpenRR-test.zip\n")
             with zipfile.ZipFile(z1, "r") as zf:
                 names = zf.namelist()
-            self.assertEqual(package_release._read_version_header(Path(__file__).resolve().parents[2]), "0.1.7plus6")
-            self.assertEqual(len(names), 393)
+            self.assertEqual(package_release._read_version_header(Path(__file__).resolve().parents[2]), "0.1.7plus7")
+            self.assertEqual(len(names), 392)
             self.assertIn("OptiScaler/plugins/openrr-amd.asi", names)
             self.assertIn("openrr-amd/OpenRR_LICENSE.txt", names)
             self.assertIn("openrr-amd/OpenRR_NOTICE.txt", names)
             self.assertIn("openrr-amd/OpenRR_THIRD_PARTY.md", names)
+            self.assertNotIn("openrr-ngx-host.dll", names)
             self.assertNotIn("LICENSE", names)
             self.assertNotIn("NOTICE", names)
             self.assertNotIn("THIRD_PARTY.md", names)
@@ -170,7 +170,7 @@ class PackageReleaseTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             stage = _build_valid_stage(Path(td))
             asi = stage / "OptiScaler" / "plugins" / "openrr-amd.asi"
-            asi.write_bytes(_make_pe64(b"\0InitializeASI\0ONR_RR_COMPILER\0"))
+            asi.write_bytes(_make_pe64(b"\0InitializeASI\0OptiPluginInit\0ONR_RR_COMPILER\0"))
             with self.assertRaisesRegex(RuntimeError, "Forbidden test/override strings"):
                 package_release.validate_stage(stage)
 

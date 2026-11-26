@@ -6,26 +6,25 @@
 // step they are in (Phase). A game that freezes leaves the place it froze in the log instead of nothing.
 //
 // The report suspends the threads one at a time only long enough to copy their registers and stack (nothing is
-// allocated or locked meanwhile) and writes after they run again. At most four reports a process; OPENRR_WATCHDOG=0: none.
-// Implemented in nr_pe_log.cpp (linked into every module of ours).
+// allocated or locked meanwhile) and writes after they run again. At most four reports a process; enabled via OPENRR_WATCHDOG=1.
+// Implemented in rr_pe_log.cpp.
 #include <string>
 
 namespace openrr::pe::watchdog {
 
-// The module's start (the .asi's InitializeASI, ReShade's add-on attach): the one-minute check for no frame at all.
+// Starts the stall-monitoring thread (called from deferred post-DllMain init).
 void start();
 
-// A frame went by (a Present). Starts the watchdog if start() was not called.
+// Enable stall monitoring only while at least one OpenRR feature context is active.
+void set_rr_active(bool active);
+
+// An active RR frame went by. Starts the watchdog if start() was not called.
 void beat();
 
-// The game's own Present (the .asi's hook on the swap chain the game holds). Under frame generation the presents go on
-// while the game's frames stop (a loading game at a third of a frame a second, its frame generator still presenting):
-// a stall of the game's frames alone of 3 s is reported too, at most twice a process.
+// The game's own frame beat (optional secondary stall check).
 void game_beat();
 
-// The watching thread ends and this waits until it has (it holds the module while it runs, and lets go as it ends):
-// before a module of ours is unloaded - ReShade calls the add-on's AddonUninit, outside the loader lock, before its
-// FreeLibrary when the game's last device goes. Never from DllMain. Nothing starts it again in this module's life.
+// Stops the watching thread and waits for it to exit (never call from DllMain).
 void stop_and_wait();
 
 // Every thread in a step now: "[thread <id>: <step>, <ms in it> ms] ...", "none" when none (a heartbeat's line).

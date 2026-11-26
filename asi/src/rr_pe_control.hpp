@@ -8,7 +8,7 @@
 namespace openrr::pe::control {
 
 struct Status {
-    uint32_t route = 0;            // 1 D3D12, 2 Vulkan
+    uint32_t route = 0;            // 0 idle, 1 D3D12, 2 Vulkan
     bool rr_active = false;
     uint32_t state = 0;
     uint32_t backend = 0;
@@ -29,8 +29,7 @@ struct Status {
 };
 
 void report(const Status& s);
-void start_input();
-openrr::control::Shared* page();
+openrr::control::Shared snapshot();
 void asi_facts(const char* build);
 
 } // namespace openrr::pe::control

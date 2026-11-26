@@ -313,6 +313,8 @@ Slot* my_slot() {
     return nullptr;   // more threads in steps at once than slots: this one is not shown
 }
 
+std::atomic<bool> g_rr_active{false};
+std::atomic<ULONGLONG> g_active_since{0};
 std::atomic<ULONGLONG> g_last_beat{0};
 std::atomic<unsigned long long> g_beats{0};
 std::atomic<ULONGLONG> g_last_game{0};
@@ -589,23 +591,31 @@ DWORD WINAPI watch(void* param) {
         if (g_reports.load() >= kMaxReports) break;
         const ULONGLONG now = GetTickCount64();
         if (!in_front()) not_front = now;
+        if (!g_rr_active.load(std::memory_order_acquire)) {
+            stalled = false;
+            game_stalled = false;
+            continue;
+        }
         const unsigned long long beats = g_beats.load();
         if (!beats) {
-            if (!said_none && now - started >= 60000) {
+            const ULONGLONG since = std::max(std::max(g_active_since.load(std::memory_order_acquire), started), not_front);
+            if (!said_none && now >= since && now - since >= 60000) {
                 said_none = true;
-                report("no frame (Present) in the minute since OpenRR started");
+                report("no RR frame evaluated in the minute since OpenRR activated");
             }
             continue;
         }
-        const ULONGLONG gap = now - std::max(g_last_beat.load(), not_front);
+        const ULONGLONG beat_ref = std::max(g_last_beat.load(std::memory_order_acquire), not_front);
+        const ULONGLONG gap = now >= beat_ref ? (now - beat_ref) : 0;
         if (g_games.load() && game_reports < kMaxGameReports) {   // the game's frames alone (game_beat)
-            const ULONGLONG game_gap = now - std::max(g_last_game.load(), not_front);
+            const ULONGLONG game_ref = std::max(g_last_game.load(std::memory_order_acquire), not_front);
+            const ULONGLONG game_gap = now >= game_ref ? (now - game_ref) : 0;
             if (game_gap < kGameStallMs) game_stalled = false;
             else if (!game_stalled && gap < stall_ms()) {
                 game_stalled = true;
                 ++game_reports;
                 char why[160];
-                std::snprintf(why, sizeof why, "no frame of the game's own (its Present) for %llu ms while presents go on, "
+                std::snprintf(why, sizeof why, "no frame of the game's own for %llu ms while beats go on, "
                               "after %llu of them", (unsigned long long)game_gap, g_games.load());
                 report(why);
             }
@@ -614,7 +624,7 @@ DWORD WINAPI watch(void* param) {
         if (stalled) continue;
         stalled = true;
         char why[128];
-        std::snprintf(why, sizeof why, "no frame (Present) for %llu ms, after %llu frames", (unsigned long long)gap, beats);
+        std::snprintf(why, sizeof why, "no RR frame for %llu ms, after %llu frames", (unsigned long long)gap, beats);
         report(why);
     }
     {
@@ -668,6 +678,19 @@ void stop_and_wait() {
     // (ReShade then says the add-on "was not unregistered" and keeps it), which is better than a game that hangs here.
     WaitForSingleObject(t, 3000);
     CloseHandle(t);
+}
+
+void set_rr_active(bool active) {
+    if (active) {
+        if (!g_rr_active.load(std::memory_order_acquire)) {
+            const ULONGLONG now = GetTickCount64();
+            g_active_since.store(now, std::memory_order_release);
+            g_last_beat.store(now, std::memory_order_release);
+        }
+        g_rr_active.store(true, std::memory_order_release);
+    } else {
+        g_rr_active.store(false, std::memory_order_release);
+    }
 }
 
 void game_beat() {

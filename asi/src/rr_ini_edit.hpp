@@ -45,8 +45,8 @@ public:
             const size_t eol = text_.find('\n', at);
             const std::string line = text_.substr(at, eol == std::string::npos ? std::string::npos : eol - at);
             at = eol == std::string::npos ? text_.size() : eol + 1;
-            const std::string t = trim(line.substr(0, line.find_first_of(";#")));
-            if (t.empty()) continue;
+            const std::string t = trim(line);
+            if (t.empty() || t.front() == ';' || t.front() == '#') continue;
             if (t.front() == '[') {
                 const auto e = t.find(']');
                 cur_s = lower(trim(t.substr(1, e == std::string::npos ? std::string::npos : e - 1)));
@@ -61,7 +61,6 @@ public:
     }
 
     void set(const std::string& sec, const std::string& key, const std::string& value) {
-        if (get(sec, key, "\x01") == value) return;
         const std::string want_s = lower(sec), want_k = lower(key);
         const std::string nl = crlf_ ? "\r\n" : "\n";
         std::string out, cur_s;
@@ -70,8 +69,9 @@ public:
             const size_t eol = text_.find('\n', at);
             const std::string line = text_.substr(at, eol == std::string::npos ? std::string::npos : eol - at + 1);
             at = eol == std::string::npos ? text_.size() : eol + 1;
-            const std::string t = trim(line.substr(0, line.find_first_of(";#")));
-            if (!t.empty() && t.front() == '[') {
+            const std::string t = trim(line);
+            const bool is_comment = t.empty() || t.front() == ';' || t.front() == '#';
+            if (!is_comment && t.front() == '[') {
                 if (!done && cur_s == want_s) {
                     if (!out.empty() && out.back() != '\n') out += nl;
                     out += key + " = " + value + nl;
@@ -79,11 +79,13 @@ public:
                 }
                 const auto e = t.find(']');
                 cur_s = lower(trim(t.substr(1, e == std::string::npos ? std::string::npos : e - 1)));
-            } else if (!done && cur_s == want_s) {
+            } else if (!is_comment && cur_s == want_s) {
                 const auto eq = t.find('=');
                 if (eq != std::string::npos && lower(trim(t.substr(0, eq))) == want_k) {
-                    out += key + " = " + value + (!line.empty() && line.back() == '\n' ? nl : "");
-                    done = true;
+                    if (!done) {
+                        out += key + " = " + value + (!line.empty() && line.back() == '\n' ? nl : "");
+                        done = true;
+                    }
                     continue;
                 }
             }
@@ -96,22 +98,26 @@ public:
             }
             out += key + " = " + value + nl;
         }
-        text_ = std::move(out);
-        dirty_ = true;
+        if (out != text_) {
+            text_ = std::move(out);
+            dirty_ = true;
+        }
     }
 
-    void save() {
-        if (!dirty_) return;
-        dirty_ = false;
+    bool save(bool notify_config = true) {
+        if (!dirty_) return true;
         const std::string p_u8 = openrr::u8::text(path_);
-        if (FILE* f = openrr::u8::fopen(p_u8.c_str(), "wb")) {
-            std::fwrite(text_.data(), 1, text_.size(), f);
-            std::fclose(f);
-        }
+        FILE* f = openrr::u8::fopen(p_u8.c_str(), "wb");
+        if (!f) return false;
+        const bool wrote = text_.empty() || std::fwrite(text_.data(), 1, text_.size(), f) == text_.size();
+        const bool closed = std::fclose(f) == 0;
+        if (!wrote || !closed) return false;
+        dirty_ = false;
         WIN32_FILE_ATTRIBUTE_DATA d{};
         if (openrr::u8::attributes_ex(p_u8, &d))
             stamp_ = (uint64_t(d.ftLastWriteTime.dwHighDateTime) << 32) | d.ftLastWriteTime.dwLowDateTime;
-        openrr::pe::touch_config();
+        if (notify_config) openrr::pe::touch_config();
+        return true;
     }
 
 private:

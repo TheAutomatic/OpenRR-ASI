@@ -3,7 +3,8 @@
 #
 # The letters: msgid "@font" names a font file beside this file (fonts\NotoSansCJKsc-Regular.ttf of the
 # OpenRR language pack, SIL Open Font License 1.1, fonts\Noto-CJK-LICENSE.txt); without it the Windows
-# CJK fonts (msyh.ttc / simhei.ttf) are used, and if none has the letters the menu stays English.
+# CJK fonts (msyh.ttc / simhei.ttf) are used, and if OptiScaler has no CJK TTFFontPath configured,
+# the tab falls back to English until configured and restarted.
 
 msgid "@language"
 msgstr "简体中文"
@@ -11,14 +12,17 @@ msgstr "简体中文"
 msgid "@font"
 msgstr "fonts/NotoSansCJKsc-Regular.ttf"
 
-msgid "Enable OpenRR (Ray Reconstruction)"
-msgstr "启用 OpenRR（光线重建）"
-
-msgid "(Menu key: %s)"
-msgstr "（菜单快捷键：%s）"
-
 msgid "Status"
 msgstr "状态"
+
+msgid "OptiScaler Plugin API v3 (RegisterProvider) is unavailable. Please update to OptiScaler v0.10 nightly."
+msgstr "当前 OptiScaler 不支持 Plugin API v3（RegisterProvider），请升级到 OptiScaler v0.10 nightly。"
+
+msgid "OpenRR provider registration was disabled at startup ([OpenRR] Enabled = false). Enable it below and restart the game."
+msgstr "启动时已禁用 OpenRR 提供者注册（[OpenRR] Enabled = false）。请在下方开启并重启游戏。"
+
+msgid "OpenRR could not register as an OptiScaler DLSSD provider. Check openrr-amd.log."
+msgstr "OpenRR 未能注册为 OptiScaler DLSSD 提供者，请检查 openrr-amd.log。"
 
 msgid "Idle: waiting for the game to create a DLSS Ray Reconstruction feature."
 msgstr "空闲：正在等待游戏创建 DLSS 光线重建特性。"
@@ -38,6 +42,9 @@ msgstr "失败"
 msgid "Unknown"
 msgstr "未知"
 
+msgid "State: %s%s%s%s"
+msgstr "状态：%s%s%s%s"
+
 msgid "D3D12 Direct ELF"
 msgstr "D3D12 直连 ELF"
 
@@ -46,9 +53,6 @@ msgstr "Vulkan 宿主（RecordVk）"
 
 msgid "Vulkan Interop Bridge"
 msgstr "Vulkan 互操作桥接"
-
-msgid "State: %s%s%s%s"
-msgstr "状态：%s%s%s%s"
 
 msgid "Backend: %s"
 msgstr "后端：%s"
@@ -74,14 +78,17 @@ msgstr "共存：检测到 dlssnr-amd.asi（直连路径已激活）"
 msgid "Execution & Backend"
 msgstr "执行与后端"
 
-msgid "D3D12 Backend"
-msgstr "D3D12 后端"
+msgid "Enable OpenRR (Ray Reconstruction)"
+msgstr "启用 OpenRR（光线重建）"
+
+msgid "Registers OpenRR as an OptiScaler Ray Reconstruction provider (restart required when toggling). Use OptiScaler's Upscalers -> RR Upscaler selector to switch providers live."
+msgstr "将 OpenRR 注册为 OptiScaler 光线重建提供者（切换后需重启游戏）。可在 OptiScaler 的 Upscalers -> RR Upscaler 菜单中实时切换提供者。"
 
 msgid "Auto (D3D12 Direct preferred)"
 msgstr "自动（优先 D3D12 直连）"
 
-msgid "Network Mode"
-msgstr "网络模式"
+msgid "D3D12 Backend"
+msgstr "D3D12 后端"
 
 msgid "Legacy"
 msgstr "传统模式（Legacy）"
@@ -91,6 +98,9 @@ msgstr "标准加速（New，推荐）"
 
 msgid "Fast (experimental)"
 msgstr "极速模式（Fast，实验性）"
+
+msgid "Network Mode"
+msgstr "网络模式"
 
 msgid "New"
 msgstr "标准加速（New）"
@@ -104,17 +114,14 @@ msgstr "加速内核不可用"
 msgid "Runtime: %s"
 msgstr "运行时模式：%s"
 
-msgid "Coexist Split"
-msgstr "共存拆分策略"
-
 msgid "Auto (disable split when dlssnr-amd is present)"
 msgstr "自动（存在 dlssnr-amd 时禁用拆分）"
 
 msgid "Off (never split command lists)"
 msgstr "关闭（永不拆分命令列表）"
 
-msgid "Depth Type"
-msgstr "深度类型"
+msgid "Coexist Split"
+msgstr "共存拆分策略"
 
 msgid "Auto"
 msgstr "自动"
@@ -125,8 +132,8 @@ msgstr "硬件深度（NDC）"
 msgid "Linear Depth"
 msgstr "线性深度"
 
-msgid "Vulkan Input Layout"
-msgstr "Vulkan 输入布局"
+msgid "Depth Type"
+msgstr "深度类型"
 
 msgid "Shader Read Optimal"
 msgstr "着色器只读最优（Shader Read Optimal）"
@@ -134,11 +141,17 @@ msgstr "着色器只读最优（Shader Read Optimal）"
 msgid "General"
 msgstr "通用（General）"
 
-msgid "OptiFG Frame Gen Compat (experimental)"
-msgstr "OptiFG 帧生成兼容（实验性）"
+msgid "Vulkan Input Layout"
+msgstr "Vulkan 输入布局"
 
-msgid "Restart required. Set OptiScaler's [Libraries] NvngxPath to load openrr-ngx-host.dll."
-msgstr "需要重启游戏。请在 OptiScaler 的 [Libraries] NvngxPath 中设置加载 openrr-ngx-host.dll。"
+msgid "Re-init Upscaler"
+msgstr "重建 Upscaler"
+
+msgid "Recreates active upscalers so backend or depth changes take effect without restarting."
+msgstr "重建当前活动的 Upscaler，使后端或深度类型修改无需重启即可生效。"
+
+msgid "Re-init requested"
+msgstr "已请求重建"
 
 msgid "Guides"
 msgstr "引导图"
@@ -173,53 +186,23 @@ msgstr "使用反射运动矢量（Reflection MVs）"
 msgid "Use Transparency Layer Opacity & Motion"
 msgstr "使用半透明层不透明度与运动矢量"
 
-msgid "Menu & Hotkeys"
-msgstr "菜单与快捷键"
-
-msgid "Menu Key"
-msgstr "菜单快捷键"
-
-msgid "Enter a key such as F7 or Ctrl+F7, then press Enter."
-msgstr "输入按键（例如 F7 或 Ctrl+F7），然后按 Enter 确认。"
-
-msgid "Use OptiScaler Shortcut"
-msgstr "使用 OptiScaler 快捷键"
-
-msgid "Pass OptiScaler Key (Insert) while open"
-msgstr "打开时透传 OptiScaler 按键（Insert）"
-
-msgid "Menu Size"
-msgstr "菜单大小"
-
-msgid "Text Size"
-msgstr "文字大小"
-
-msgid "Theme"
-msgstr "主题"
-
-msgid "Blue"
-msgstr "蓝"
-
-msgid "Teal"
-msgstr "青绿"
-
-msgid "Violet"
-msgstr "紫"
-
-msgid "Amber"
-msgstr "琥珀"
-
-msgid "Crimson"
-msgstr "深红"
-
-msgid "Graphite"
-msgstr "石墨"
-
 msgid "Language"
 msgstr "语言"
 
 msgid "openrr-amd\\lang\\<name>.txt; the file reloads when it changes."
 msgstr "读取 openrr-amd\\lang\\<name>.txt；文件修改后会自动重载。"
 
-msgid "Close"
-msgstr "关闭"
+msgid "Updated OptiScaler.ini ([Menu] TTFFontPath). Restart the game (without clicking OptiScaler's Save INI) to display non-Latin text."
+msgstr "已更新 OptiScaler.ini（[Menu] TTFFontPath）。请直接重启游戏（不要先点击 OptiScaler 的 Save INI）以显示非拉丁文字。"
+
+msgid "OptiScaler's built-in font has Latin glyphs only. Configure [Menu] TTFFontPath in OptiScaler.ini and restart to display this language."
+msgstr "OptiScaler 内置字体仅包含拉丁字符。请在 OptiScaler.ini 中配置 [Menu] TTFFontPath 并重启游戏以显示该语言。"
+
+msgid "Configure CJK Font in OptiScaler.ini"
+msgstr "在 OptiScaler.ini 中配置中文字体"
+
+msgid "No CJK font file found in openrr-amd\\lang\\fonts or C:\\Windows\\Fonts."
+msgstr "在 openrr-amd\\lang\\fonts 或 C:\\Windows\\Fonts 中未找到可用的 CJK 字体文件。"
+
+msgid "Could not write OptiScaler.ini. Check file permissions."
+msgstr "无法写入 OptiScaler.ini，请检查文件权限。"

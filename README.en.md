@@ -11,26 +11,25 @@ For details about the OpenRR network reimplementation, RDNA4 shader architecture
 
 ---
 
-This release (**v0.1.7plus6**) builds on **v0.1.7plus5** (`NvAPI_GPU_GetGPUInfo` `0xafd1b02c` fallback compatibility and parallelized build/packaging) and **v0.1.7plus4** / **v0.1.7plus3** (ReShade + RenoDX D3D12 wrapper compatibility and D3D12 hook hardening) with a **Linux Wine / Proton + `vkd3d-proton` direct Vulkan interop fix**: `vkd3d-proton`'s `GetDeviceExtensions()` returns the extension list captured before `vkCreateDevice` and therefore never includes extensions injected by OpenRR's `vkCreateDevice` hook via `PrepareVkDevice` (`VK_KHR_workgroup_memory_explicit_layout` and `VK_EXT_shader_float8`), which previously caused prepared devices to be falsely rejected; OpenRR now skips that stale list check for devices it already prepared and logs the actual `VK_EXT_shader_float8` state accurately. It continues to integrate upstream **v0.1.7** (including fixed RDNA4 ACO routing, RX 7000 / RDNA3 `shaders-gfx11` support, and a unified Windows + Linux Wine / Proton Mesa RADV >= 26.3 release), while retaining ASI integration, in-game menu, and GPU resource lifetime protections. See **[v017plus-speed-quality-eval.en.md](docs/test-evidence/v017plus-speed-quality-eval.en.md)** ([简体中文](docs/test-evidence/v017plus-speed-quality-eval.md)) for the full v0.1.7plus speed, image quality, and VRAM evaluation, and [v017-stage10-audit.md](docs/test-evidence/v017-stage10-audit.md) for Stage 10 validation evidence; historical figures for earlier versions are retained at the bottom.
+This release (**v0.1.7plus7**) refactors OpenRR-ASI into a native **OptiScaler v0.10 nightly (Plugin API v1–v3)** plugin while keeping all fixes from **v0.1.7plus6** (Linux Wine / Proton + `vkd3d-proton` direct Vulkan interop), **v0.1.7plus5** (`NvAPI_GPU_GetGPUInfo` `0xafd1b02c` fallback compatibility and parallelized build/packaging), and **v0.1.7plus4** / **v0.1.7plus3** (ReShade + RenoDX D3D12 wrapper compatibility and D3D12 hook hardening):
+- **Native `OptiProvider_Dlssd` registration**: registers directly as a first-class OptiScaler Ray Reconstruction provider via Plugin API v3 `RegisterProvider(..., "OpenRR", OptiProvider_Dlssd, ...)`, removing ~30 outer `NVSDK_NGX_*` MinHooks, `SlCapsPatch`, and the separate `openrr-ngx-host.dll` bridge. Downstream OptiScaler features (`OptiFG`, `XeFG`, `HUDfix`, `OutputScaling`, `RCAS`, and live RR upscaler switching) now work natively without extra host DLL configuration or restarts.
+- **Native `PLUGINS -> OpenRR` tab inside OptiScaler**: removes the standalone DX11/DX12/Vulkan ImGui overlay, SwapChain / `Present` hooks, WndProc / User32 input interception, and bundled UI font. Settings now live directly in OptiScaler's `PLUGINS -> OpenRR` tab with a one-click `Re-init Upscaler` action and zero-hook CJK font configuration (`OptiScaler.ini [Menu] UseHQFont=true` + `TTFFontPath`, safely falling back to English until configured and restarted).
+- **Requirement**: requires **OptiScaler v0.10 nightly** (with Plugin API v3 `RegisterProvider`). Legacy `openrr-ngx-host.dll`, `OptiFGHost`, `MenuKey`, `MenuScale`, `TextScale`, and `Theme` options have been removed; clean up any old `openrr-ngx-host.dll` and replace `openrr-amd.ini` when upgrading.
+
+It continues to integrate upstream **v0.1.7** (including fixed RDNA4 ACO routing, RX 7000 / RDNA3 `shaders-gfx11` support, and a unified Windows + Linux Wine / Proton Mesa RADV >= 26.3 release), while retaining GPU resource lifetime protections and performance/VRAM optimizations. See **[v017plus-speed-quality-eval.en.md](docs/test-evidence/v017plus-speed-quality-eval.en.md)** ([简体中文](docs/test-evidence/v017plus-speed-quality-eval.md)) for the full v0.1.7plus speed, image quality, and VRAM evaluation, and [v017-stage10-audit.md](docs/test-evidence/v017-stage10-audit.md) for Stage 10 validation evidence; historical figures for earlier versions are retained at the bottom.
 
 ## What this fork adds
 
-### Optional OptiFG frame generation compatibility
+Upstream OpenRR builds as an external `OpenNrRrRuntime.dll` by default and requires a specially modified OptiScaler build to call it. This fork packages it as a single native `openrr-amd.asi` plugin for **official, unmodified [OptiScaler](https://github.com/optiscaler/OptiScaler) v0.10 nightly**, with the following features and fixes.
 
-The general release configuration keeps `[OpenRR] OptiFGHost=false` in `openrr-amd.ini`, using the standalone RR path by default. For **frame generation with upscaler input** (for example, `FGInput=upscaler` and `FGOutput=xefg`), follow the [OptiFG installation guide](asi/OPTIFG.md) (in Chinese) to configure the additional `openrr-ngx-host.dll`, then set `OptiFGHost=true` and restart the game. Do not use `_nvngx.dll` from older test packages.
+### 1. Single-file native `.asi` plugin and a MinGW build toolchain
 
-Once host mode is enabled, turning off FG in the menu does not automatically leave host mode. To return to standalone RR, set the option back to `false` and restart. Host wrapping and parameter handling may add overhead, while FG has its own resource preparation and interpolation costs. The performance difference relative to standalone RR has not yet been quantified. Updating only the ASI while leaving this option disabled does not activate the host bridge.
-
-Upstream OpenRR builds as an external `OpenNrRrRuntime.dll` by default and requires a specially modified OptiScaler build to call it. This fork packages it as a single `openrr-amd.asi` plugin for **official, unmodified [OptiScaler](https://github.com/optiscaler/OptiScaler)**, with the following features and fixes.
-
-### 1. Single-file `.asi` plugin and a MinGW build toolchain
-
-- **No separate runtime DLL**: `OpenNrRrRuntime` and the GPU engine are statically embedded in `openrr-amd.asi` (approximately 3.4 MB after stripping a release build). Place it in the official OptiScaler `OptiScaler/plugins/` (or legacy `plugins/`) directory to handle DLSS Ray Reconstruction (DLSS-D).
+- **No separate runtime DLL**: `OpenNrRrRuntime` and the GPU engine are statically embedded in `openrr-amd.asi` (even smaller and leaner after removing the standalone ImGui overlay and DX11/DX12/Vulkan overlay renderers). Place it in OptiScaler's `OptiScaler/plugins/` directory to register `"OpenRR"` as a native DLSSD provider and settings tab via `OptiPluginInit`.
 - **Minimal dependencies and cross-platform support**: the MinGW-w64 build script (`asi/build/build_asi.sh`) statically links runtime libraries and resolves Vulkan entry points on demand through assembly stubs. Dependencies are limited to basic Windows system DLLs, with support for native Windows and Linux Wine / Proton (RADV).
 
 #### Network modes, performance, and VRAM overview (RX 9070 XT, `v0.1.7plus`)
 
-Switch live at runtime from the sidebar menu or via `[OpenRR] Mode` (`new` / `fast` / `legacy`) in `openrr-amd.ini` (on first launch, `New` and `Fast` pipelines compile in the background while output falls back to `Legacy` until ready):
+Switch live at runtime from OptiScaler's `PLUGINS -> OpenRR` tab or via `[OpenRR] Mode` (`new` / `fast` / `legacy`) in `openrr-amd.ini` (on first launch, `New` and `Fast` pipelines compile in the background while output falls back to `Legacy` until ready):
 
 | Mode | 1080p Quality | 1440p Quality | 4K Quality | Speedup vs Official `v0.1.7` (`3×ABBA`) | Quality vs RTX 5090 (47-Frame Mean `PSNR_01` / Reinhard) |
 |---|---|---|---|---|---|
@@ -41,22 +40,23 @@ Switch live at runtime from the sidebar menu or via `[OpenRR] Mode` (`new` / `fa
 - **Less than half the VRAM of RTX 5090**: lifetime-aliased `Engine::arena_` allocation uses only **`209 / 361 / 586 / 791 MB`** of feature VRAM at 1080p Qual / 1440p Qual / 4K Perf / 4K Qual—saving **`0.7–1.1 GB` (`48%–70%`) at 4K** compared with official NVIDIA NGX on RTX 5090 (`1.32–1.71 GiB` resident, `2.45 GiB` peak under DRS) at comparable image quality. Native Vulkan (`RecordVk`) direct pass-through saves an extra `60–130 MB` over upstream.
 - See the full 6-preset benchmarks, 84-leg `3×ABBA` data, three-way VRAM breakdown, and `v1 + v2_motion` image quality results in **[v0.1.7plus Speed, Image Quality, and VRAM Evaluation Report](docs/test-evidence/v017plus-speed-quality-eval.en.md)** ([简体中文](docs/test-evidence/v017plus-speed-quality-eval.md)).
 
-### 2. NGX interception, state restoration, and multiple backends
+### 2. Native OptiScaler DLSSD provider, state restoration, and multiple backends
 
-- **Lightweight capability detection**: rewrites NGX `SuperSamplingDenoising` capability parameters. The first query performs a lightweight synchronous check of the `nvngx_dlssd.dll` 310.9.1 version and Vulkan RDNA4 features at instance level, with a 30-second cache for failed checks. Weight parsing and pipeline compilation run on a background thread after `CreateFeature` to avoid blocking the game main thread.
-- **Non-intrusive compute state restoration for D3D12 Direct**: never calls `SetDescriptorHeaps` or touches graphics root state during recording (descriptors are read directly via raw GPU addresses in root constants). Uses MinHook to intercept underlying `D3D12Core` functions as soon as a D3D12 device is discovered, without modifying object vtables—observing host heap switches read-only to invalidate stale table handles, and restoring the compute root signature, all compute root arguments (descriptor tables, CBVs, SRVs, UAVs, and 32-bit root constants), and the PSO / state object after `Record`. This supports games such as Resident Evil 9 (`re9.exe`) and 007 First Light without relying on state restoration inside a custom OptiScaler build.
+- **Native `OptiProvider_Dlssd` integration**: registers `"OpenRR"` directly with OptiScaler Plugin API v3 instead of hooking external `NVSDK_NGX_*` exports. OptiScaler handles upstream input routing, Streamline `sl.dlss_d` spoofing, and downstream `OptiFG` / `XeFG` / `HUDfix` / `OutputScaling` / `RCAS`; switch providers live in OptiScaler's `Upscalers -> RR Upscaler` menu (`auto` selects OpenRR automatically on AMD GPUs).
+- **Lightweight capability detection**: the first capability query performs a lightweight synchronous check of `nvngx_dlssd.dll` 310.9.1 and instance-level Vulkan features with a 30-second cache for failed checks. Weight parsing and pipeline compilation run on a background thread after `CreateFeature` to avoid blocking the game main thread.
+- **Non-intrusive compute state restoration for D3D12 Direct**: never calls `SetDescriptorHeaps` or touches graphics root state during recording (descriptors are read directly via raw GPU addresses in root constants). Uses MinHook to intercept underlying `D3D12Core` functions as soon as a D3D12 device is discovered, without modifying object vtables—observing host heap switches read-only to invalidate stale table handles, and restoring the compute root signature, all compute root arguments (descriptor tables, CBVs, SRVs, UAVs, and 32-bit root constants), and the PSO / state object after `Record`. Supports games such as Resident Evil 9 (`re9.exe`) and 007 First Light natively.
 - **Automatic D3D12 ↔ Vulkan fallback and bridge hardening**: when direct ELF execution through `amdxc64.dll` is unavailable (for example, Linux vkd3d-proton), or when `Backend = vulkan` is selected, uses command-list splitting and Vulkan shared-resource interoperability. Includes protection against recursive fallback and rejection rules for split barriers, enhanced barriers, RTAS, and meta commands.
-- **Native Vulkan games (`RecordVk`)**: watches for late loading of `vulkan-1.dll` through `LdrRegisterDllNotification`. Injects the required extensions, features, and a separate compute queue during the game's `vkCreateDevice`, and hides RR when the device has not been prepared.
-- **Streamline RR without global DXGI spoofing**: when used with `OptiPatcher.asi` (`Dxgi=auto/false`), OpenRR temporarily reports supported AMD adapters as NVIDIA in `sl.common` SystemCaps only during the synchronous `slOnPluginLoad` call in `sl.dlss_d.dll`. It restores each modified field on return and removes two NVX-only Vulkan extensions from the plugin's returned JSON. Known limitation: this assumes no other thread reads these capabilities while `slInit` is loading plugins.
+- **Native Vulkan games (`RecordVk`)**: watches for late loading of `vulkan-1.dll` through `LdrRegisterDllNotification`. Injects the required extensions, features, and a separate compute queue during the game's `vkCreateDevice`, and refuses feature creation cleanly if the device was not prepared.
 
 ### 3. Coexistence with [`dlssnr-amd.asi`](https://gitlab.com/mochizuki0323/DLSSNR-AMD)
 
-- When `dlssnr-amd.asi` and `openrr-amd.asi` are both in `OptiScaler/plugins/` (or legacy `plugins/`), no configuration changes are required for either plugin. OpenRR automatically selects D3D12 Direct without adding another command-list vtable hook, recognizes and tracks continuation command lists after splitting, and passes through the `Insert` (OptiScaler) and `End` (`dlssnr-amd`) hotkeys while the menu is open.
+- When `dlssnr-amd.asi` and `openrr-amd.asi` are both in `OptiScaler/plugins/`, no configuration changes are required for either plugin. OpenRR automatically detects coexistence, selects D3D12 Direct without adding another command-list vtable hook, and recognizes continuation command lists after splitting.
 
-### 4. Built-in ImGui sidebar
+### 4. Native OptiScaler `PLUGINS -> OpenRR` tab
 
-- Follows `OptiScaler.ini [Menu] ShortcutKey` (`Insert` by default) and docks to the right of the main OptiScaler panel, respecting its menu scale. Supports SDR, HDR10 PQ, and scRGB composition.
-- Allows in-game switching of `New` / `Fast` / `Legacy` network modes, the D3D12 backend, depth type, and additional guides. Changes are saved automatically to `openrr-amd.ini`.
+- Registered via `OptiPluginInit` + `RegisterTab`, inheriting OptiScaler's menu shortcut (`Insert` by default), theme, HDR rendering, and scaling without any separate SwapChain or input hooks.
+- Displays live status and dual-track GPU timings, switches `New` / `Fast` / `Legacy` network modes, D3D12 backend, depth type, and guides, and provides a `Re-init Upscaler` button (`ReInitUpscalers`) so backend or depth changes take effect without restarting. Settings stay in `openrr-amd.ini`.
+- **Zero-hook CJK localization**: leverages OptiScaler nightly's dynamic font backend. Selecting `zh-CN`, `ja`, or `ko` offers a one-click `Configure CJK Font in OptiScaler.ini` button that sets `[Menu] UseHQFont=true` and `TTFFontPath` (preferring bundled `openrr-amd/lang/fonts/NotoSansCJKsc-Regular.ttf`, then Windows system fonts); until configured and restarted, the tab safely stays in English so missing-glyph boxes never appear.
 
 ### 5. Fixes in `gpu/` and `runtime/`
 
@@ -70,6 +70,7 @@ These fixes have separate commits to make upstream integration easier.
 
 ## Requirements
 
+- **OptiScaler**: requires **OptiScaler v0.10 nightly** (with Plugin API v3 `RegisterProvider` and `RegisterTab`).
 - **GPU and driver**:
   - **Windows RDNA4 (RX 9000 series, `gfx1201`/`gfx1200`)**: fixed strict **ACO** offline pipeline route; Vulkan requires `VK_KHR_cooperative_matrix`, `VK_EXT_shader_float8` (`shaderFloat8` and `shaderFloat8CooperativeMatrix`), `VK_KHR_workgroup_memory_explicit_layout`, `VK_KHR_pipeline_binary`, and `maintenance5`. Windows D3D12 Direct also requires `IAmdExtD3DDevice5` from `amdxc64.dll`.
   - **Linux Wine / Proton (Mesa RADV >= 26.3)**: uses system Mesa RADV directly (no custom `libvulkan_radeon.so` or wrapper script needed); RDNA4 runs native RADV ACO with in-memory `SpvDecorationNoContraction` hardening on `shaders/` via `winevulkan.dll` and `vkd3d-proton` `RecordVk` interop.
@@ -85,13 +86,15 @@ These fixes have separate commits to make upstream integration easier.
 
 Use the **[dlss-5-amd-project](https://github.com/TheAutomatic/dlss-5-amd-project)** launcher for automatic deployment, configuration management, and installation alongside [`dlssnr-amd.asi`](https://gitlab.com/mochizuki0323/DLSSNR-AMD).
 
-### Option 2: Manual installation with official OptiScaler (unified Windows / Linux package)
+### Option 2: Manual installation with official OptiScaler v0.10 nightly (unified Windows / Linux package)
 
-Place the build artifacts (the 393-file unified `stage/` package, or extract `dist/OpenRR-v0.1.7plus6-OptiScaler.zip`) directly into the game directory containing OptiScaler's `dxgi.dll` / `OptiScaler.ini`:
+> When upgrading from `<= v0.1.7plus6`, remove any leftover `openrr-ngx-host.dll` from the game directory, clear any manual `[Libraries] NvngxPath` override in `OptiScaler.ini`, and replace `openrr-amd.ini` with the new file from the archive.
+
+Place the build artifacts (the 392-file unified `stage/` package, or extract `dist/OpenRR-v0.1.7plus7-OptiScaler.zip`) directly into the game directory containing OptiScaler's `dxgi.dll` / `OptiScaler.ini`:
 
 | File / directory | Destination relative to `OptiScaler.ini` |
 |---|---|
-| `openrr-amd.asi` | `OptiScaler/plugins/openrr-amd.asi` (for legacy OptiScaler 0.7/0.8 without an `OptiScaler/` folder, place in `plugins/openrr-amd.asi`) |
+| `openrr-amd.asi` | `OptiScaler/plugins/openrr-amd.asi` |
 | `openrr-amd.ini` | `openrr-amd.ini` |
 | `openrr-amd/shaders/*.spv` | `openrr-amd/shaders/*.spv` (`94` `.spv` files) |
 | `openrr-amd/shaders-gfx11/*.spv` | `openrr-amd/shaders-gfx11/*.spv` (`94` `.spv` files, required for RDNA3 / RDNA3.5) |
@@ -110,11 +113,11 @@ LoadAsiPlugins=true
 
 - The exact same unified release package runs on Linux Wine / Proton as long as **system Mesa RADV >= 26.3** is installed — no custom `libvulkan_radeon.so`, `with_mesa263.sh` launcher, or `VK_ICD_FILENAMES` override is required.
 - OpenRR resolves Vulkan via `winevulkan.dll`, uses native `vkd3d-proton` `RecordVk` interop, applies in-memory `SpvDecorationNoContraction` hardening to `shaders/*.spv`, and skips Windows PAL `aco/*.nrp` binaries automatically.
-- Alongside OptiScaler (`dxgi.dll`, `OptiScaler.ini` with `LoadAsiPlugins=true`) and `nvngx_dlssd.dll` (**310.9.1**), copy **`OptiScaler/plugins/openrr-amd.asi`** (keep exact `OptiScaler` casing on case-sensitive Linux filesystems so extracting merges into OptiScaler v10's `OptiScaler/plugins/` directory), `openrr-amd/` (`shaders/`, `shaders-gfx11/`, `lang/`), and `openrr-amd.ini` into the game directory (not a standalone `.asi`; extracting the release zip handles all paths automatically), and set Steam launch options to `WINEDLLOVERRIDES="dxgi=n,b" %command%`.
+- Alongside OptiScaler v0.10 nightly (`dxgi.dll`, `OptiScaler.ini` with `LoadAsiPlugins=true`) and `nvngx_dlssd.dll` (**310.9.1**), copy **`OptiScaler/plugins/openrr-amd.asi`** (keep exact `OptiScaler` casing on case-sensitive Linux filesystems so extracting merges into OptiScaler v0.10's `OptiScaler/plugins/` directory), `openrr-amd/` (`shaders/`, `shaders-gfx11/`, `lang/`), and `openrr-amd.ini` into the game directory (not a standalone `.asi`; extracting the release zip handles all paths automatically), and set Steam launch options to `WINEDLLOVERRIDES="dxgi=n,b" %command%`.
 
 > **Important:**
-> 1. **Do not rename the plugin to `*-loadlate.asi`.** OptiScaler loads `loadlate` plugins on a separate thread after `LateAsiPluginsDelay` (30 seconds by default). By then, the game has already queried NGX capabilities and called `vkCreateDevice`, so OpenRR cannot update RR capabilities or prepare the Vulkan device.
-> 2. **Coexistence with [`dlssnr-amd.asi`](https://gitlab.com/mochizuki0323/DLSSNR-AMD):** place both plugins directly in `OptiScaler/plugins/` (or root `plugins/` on older OptiScaler builds), without `loadlate` in either name. OptiScaler loads plugins alphabetically, so OpenRR installs its hooks after `dlssnr-amd` and becomes the outermost NGX hook, taking priority for RR calls. No changes to the `dlssnr-amd` configuration are needed.
+> 1. **Do not rename the plugin to `*-loadlate.asi`.** OptiScaler loads `loadlate` plugins on a separate thread after `LateAsiPluginsDelay` (30 seconds by default). By then, the game has already queried NGX capabilities and called `vkCreateDevice`, so OpenRR cannot register its DLSSD provider or prepare the Vulkan device.
+> 2. **Coexistence with [`dlssnr-amd.asi`](https://gitlab.com/mochizuki0323/DLSSNR-AMD):** place both plugins directly in `OptiScaler/plugins/`, without `loadlate` in either name. OpenRR registers through OptiScaler's native provider API and automatically selects D3D12 Direct mode; no changes to the `dlssnr-amd` configuration are needed.
 
 ---
 
@@ -152,8 +155,8 @@ This software is distributed **free of charge** for personal, noncommercial use.
 **Noncommercial forks, modifications, repackaged builds, and derivative works MUST comply with [NOTICE](NOTICE)**: derivative authors may credit their own changes, but MUST keep original author attribution (`TheAutomatic`), all upstream copyright notices, the official repository URL, and all `Required Notice:` lines intact. **Stripping attribution or altering binary metadata/version numbers to claim original authorship is strictly prohibited.**
 
 ### License Scope & Upstream Attributions
-- **[This Repository (TheAutomatic / OpenRR-ASI)](https://github.com/TheAutomatic/OpenRR-ASI)** — **[PolyForm Noncommercial License 1.0.0](LICENSE)** (see [NOTICE](NOTICE)): Original additions, modifications, standalone ASI plugin, host bridge, build/packaging tooling, and compiled release binaries (`openrr-amd.asi`, `openrr-ngx-host.dll`, precompiled shader/ACO records).
+- **[This Repository (TheAutomatic / OpenRR-ASI)](https://github.com/TheAutomatic/OpenRR-ASI)** — **[PolyForm Noncommercial License 1.0.0](LICENSE)** (see [NOTICE](NOTICE)): Original additions, modifications, standalone ASI plugin, build/packaging tooling, and compiled release binaries (`openrr-amd.asi`, precompiled shader/ACO records).
 - **[Upstream OpenRR (OpenNeuralRendering/OpenRR)](https://github.com/OpenNeuralRendering/OpenRR)** — **MIT License** (Copyright (c) 2026 OpenNR): Core GPU kernels, engine, runtime, and validators (full upstream MIT text preserved in [THIRD_PARTY.md](THIRD_PARTY.md)).
-- **Other Upstream & Third-Party Components** (`mochizuki0323/DLSSNR-AMD`, Dear ImGui, MinHook, Inter Font, Vulkan-Headers, Mesa RADV/ACO, Noto Sans CJK SC, etc.) retain their respective open-source licenses; see [NOTICE](NOTICE) and [THIRD_PARTY.md](THIRD_PARTY.md).
+- **Other Upstream & Third-Party Components** (`mochizuki0323/DLSSNR-AMD`, OptiScaler Plugin SDK, MinHook, Vulkan-Headers, Mesa RADV/ACO, Noto Sans CJK SC, etc.) retain their respective open-source licenses; see [NOTICE](NOTICE) and [THIRD_PARTY.md](THIRD_PARTY.md).
 
 > This repository and its release packages contain **no** proprietary NVIDIA binaries (such as `nvngx_dlssd.dll`), extracted neural network weights, or OptiScaler binaries. Users supply their own `nvngx_dlssd.dll` (`310.9.1`).

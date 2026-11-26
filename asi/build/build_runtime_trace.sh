@@ -6,7 +6,7 @@ base=${OPENRR_TRACE_BASE:-build/asi}
 out=${OPENRR_TRACE_OUT:-build/aco-runtime-trace}
 mkdir -p "$out"
 cxx=x86_64-w64-mingw32-g++
-flags=(-std=c++20 -mf16c -O2 -fno-strict-aliasing -DNDEBUG -DONR_RR_STATIC -DONR_RR_BUILDING -DOPENRR_EXPERIMENTAL_OPTIFG_HOST -DONR_LT_DEEP="\"2,4,2,4\""
+flags=(-std=c++20 -mf16c -O2 -fno-strict-aliasing -DNDEBUG -DONR_RR_STATIC -DONR_RR_BUILDING -DONR_LT_DEEP="\"2,4,2,4\""
   -Iasi/third_party/vulkan/include -Igpu/include -Igpu/src -Iruntime/include -Iruntime/src
   -Iasi/src -Iasi/third_party/minhook/include -I"$base")
 # A D3dDevice member was added, so rebuild every object which instantiates it.
@@ -17,11 +17,11 @@ done
 cp "$base/openrr.def" "$out/openrr.def"
 printf '\n    OnrRrDiagnostic\n' >> "$out/openrr.def"
 "$cxx" -shared -o "$out/openrr-trace.asi" "$out/openrr.def" \
-  "$base/rr_asi_main.o" "$base/rr_pe_menu.o" "$base/rr_pe_control.o" "$base/rr_pe_config.o" \
+  "$base/rr_asi_main.o" "$base/rr_opti_plugin.o" "$base/rr_pe_control.o" "$base/rr_pe_config.o" \
   "$base/rr_pe_vkdevice.o" "$base/rr_pe_d3d12split.o" "$base/rr_pe_log.o" "$base/rr_pe_crash.o" \
-  "$out/rt_runtime.o" "$base/rt_vk_host.o" "$out"/gpu_*.o "$base"/im_*.o "$base"/mh_*.o \
+  "$out/rt_runtime.o" "$base/rt_vk_host.o" "$out"/gpu_*.o "$base"/mh_*.o \
   "$base/vulkan_lazy_s.o" "$base/vulkan_lazy_c.o" \
-  -ld3d12 -ld3d11 -ldxgi -lole32 -lbcrypt -lversion -static -static-libgcc -static-libstdc++
+  -ld3d12 -ldxgi -lole32 -lbcrypt -lversion -static -static-libgcc -static-libstdc++
 "$cxx" -std=c++20 -O2 -DNDEBUG -Iruntime/include runtime/bench/openrr_bench.cpp \
   -ld3d12 -ldxgi -lole32 -lshell32 -static -static-libgcc -static-libstdc++ -o "$out/openrr_bench.exe"
 
