@@ -25,7 +25,7 @@ FORBIDDEN_SUFFIXES = {".log", ".pdb", ".debug", ".tmp", ".bak", ".pyc"}
 ACO_TARGETS = ("gfx1201", "gfx1200")
 LANG_FILES = ("English.txt", "zh-CN.txt", "ja.txt", "ko.txt")
 FONT_FILES = ("Noto-CJK-LICENSE.txt", "README.txt", "NotoSansCJKsc-Regular.ttf")
-ROOT_FILES = ("openrr-amd.ini", "openrr-ngx-host.dll")
+ROOT_FILES = ("openrr-amd.ini",)
 DATA_DOC_FILES = ("OpenRR_LICENSE.txt", "OpenRR_NOTICE.txt", "OpenRR_THIRD_PARTY.md")
 
 _FIXED_DATE_TIME = (2026, 1, 1, 0, 0, 0)
@@ -134,6 +134,8 @@ def _validate_stage_with_cache(stage: Path, jobs: int = 1) -> tuple[list[tuple[s
     asi_bytes = _verify_pe64(asi_path)
     if b"InitializeASI" not in asi_bytes:
         raise RuntimeError(f"Missing InitializeASI export symbol in {asi_path}")
+    if b"OptiPluginInit" not in asi_bytes:
+        raise RuntimeError(f"Missing OptiPluginInit export symbol in {asi_path}")
     leaked = [s.decode("ascii") for s in FORBIDDEN_ENV_STRINGS if s in asi_bytes]
     if leaked:
         raise RuntimeError(f"Forbidden test/override strings present in {asi_path}: {leaked}")
@@ -144,8 +146,6 @@ def _validate_stage_with_cache(stage: Path, jobs: int = 1) -> tuple[list[tuple[s
         f = _require_exact_child(stage, fname, expect_dir=False, dir_cache=dir_cache)
         if f.stat().st_size == 0:
             raise RuntimeError(f"Empty root file: {f}")
-        if fname == "openrr-ngx-host.dll":
-            prefetched[f] = _verify_pe64(f)
         expected.add(fname)
 
     data_dir = _require_exact_child(stage, "openrr-amd", expect_dir=True, dir_cache=dir_cache)

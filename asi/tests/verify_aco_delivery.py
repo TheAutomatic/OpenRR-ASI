@@ -79,7 +79,7 @@ def main():
     assert plugin[pe:pe+4] == b'PE\0\0' and struct.unpack_from('<H', plugin, pe+4)[0] == 0x8664
     doc_map = [('LICENSE', 'openrr-amd/OpenRR_LICENSE.txt'), ('THIRD_PARTY.md', 'openrr-amd/OpenRR_THIRD_PARTY.md')]
     doc_rels = [new_rel if (stage/new_rel).exists() else src_name for src_name, new_rel in doc_map]
-    expected = {plugin_rel,'openrr-ngx-host.dll','openrr-amd.ini',*doc_rels}
+    expected = {plugin_rel,'openrr-amd.ini',*doc_rels}
     for (src_name, _), rel_doc in zip(doc_map, doc_rels):
         assert (stage/rel_doc).read_bytes() == Path(src_name).read_bytes()
     expected |= {p.relative_to(stage).as_posix() for p in files}

@@ -1,8 +1,8 @@
-// openrr-amd.asi: Standalone OpenRR (DLSS Ray Reconstruction on AMD RDNA4) ASI plugin for upstream OptiScaler.
+// openrr-amd.asi: Native OptiScaler plugin & Ray Reconstruction (DLSSD) provider for AMD GPUs.
 // Shell adapted from mochi / DLSSNR-AMD (MIT, Copyright (c) 2026 mochizuki0323).
 #include "rr_path_win.hpp"
 #include "rr_ngx_abi.hpp"
-#include "rr_mochi_hook.hpp"
+#include "rr_opti_plugin.hpp"
 #include "rr_pe_config.hpp"
 #include "rr_pe_control.hpp"
 #include "rr_pe_crash.hpp"
@@ -12,7 +12,6 @@
 #include "rr_d3d12_record.hpp"
 #include "rr_data_paths.hpp"
 #include "rr_pe_log.hpp"
-#include "rr_pe_menu.hpp"
 #include "rr_pe_nvapi_compat.hpp"
 #include "rr_pe_vkdevice.hpp"
 #include "rr_pe_vkd3d_interop.hpp"
@@ -23,7 +22,6 @@
 #include "opennr_rr/vk.hpp"
 
 #include <windows.h>
-#include <d3d11.h>
 #include <d3d12.h>
 #include <dxgi1_4.h>
 #include <vulkan/vulkan.h>
@@ -46,10 +44,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
-#include <thread>
-#include <tuple>
 #include <unordered_map>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -63,28 +58,6 @@ using openrr::pe::log;
 
 HMODULE g_self = nullptr;
 HMODULE g_opti = nullptr;
-
-struct Range { uintptr_t begin = 0, end = 0; };
-Range g_opti_range{}, g_self_range{};
-
-Range range_of(HMODULE m) {
-    if (!m) return {};
-    const auto base = reinterpret_cast<uintptr_t>(m);
-    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
-    if (dos->e_magic != IMAGE_DOS_SIGNATURE) return {};
-    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
-    if (nt->Signature != IMAGE_NT_SIGNATURE) return {};
-    return {base, base + nt->OptionalHeader.SizeOfImage};
-}
-
-bool in_range(const Range& r, const void* p) {
-    const auto a = reinterpret_cast<uintptr_t>(p);
-    return a >= r.begin && a < r.end;
-}
-
-template <class T> void release(T*& p) {
-    if (p) { p->Release(); p = nullptr; }
-}
 
 std::wstring wide_from_utf8(const std::string& s) {
     return openrr::u8::wide(s);
@@ -852,9 +825,8 @@ bool ensure_direct_state_hooks(ID3D12Device* dev, ID3D12GraphicsCommandList* cl 
     if (g_direct_hooks_installed.load(std::memory_order_acquire))
         return g_direct_hooks_ok.load(std::memory_order_relaxed) && cmd_sig_ok;
     if (dev && !cmd_sig_ok) {
-        static bool logged_cmd_sig_unavail = false;
-        if (!logged_cmd_sig_unavail) {
-            logged_cmd_sig_unavail = true;
+        static std::atomic<bool> logged_cmd_sig_unavail{false};
+        if (!logged_cmd_sig_unavail.exchange(true, std::memory_order_relaxed)) {
             log("[openrr] Direct state hook deferred: CreateCommandSignature (slot 41) unavailable for device");
         }
         return false;
@@ -1208,9 +1180,8 @@ std::wstring resolve_data_dir() {
     const std::filesystem::path opti_dir = wide_from_utf8(openrr::pe::module_folder());
     const wchar_t legacy_name[] = {L'o', L'p', L'e', L'n', L'n', L'r', L'-', L'r', L'r', 0};
     if (std::filesystem::exists(opti_dir / legacy_name, ec)) {
-        static bool logged_legacy = false;
-        if (!logged_legacy) {
-            logged_legacy = true;
+        static std::atomic<bool> logged_legacy{false};
+        if (!logged_legacy.exchange(true, std::memory_order_relaxed)) {
             log("[openrr] note: legacy %ls\\ directory detected and ignored; using openrr-amd\\", legacy_name);
         }
     }
@@ -1477,7 +1448,6 @@ bool query_d3d12_adapter_names(ID3D12Device* dev) {
 bool g_unreal_by_exe = false;
 bool g_game_colour_readable = false;
 bool g_game_motion_readable = false;
-std::atomic<int> g_ngx_engine{-1};
 int g_barrier_color = -1, g_barrier_mv = -1, g_barrier_depth = -1, g_barrier_output = -1;
 
 std::wstring lower_w(std::wstring s) {
@@ -1560,8 +1530,8 @@ void judge_executable() {
 
 // [Hotfix] *ResourceBarrier in OptiScaler.ini beside OptiScaler (auto / absent: not set).
 void read_ini_barriers() {
-    char ini[MAX_PATH * 4 + 32];
-    std::snprintf(ini, sizeof ini, "%s\\OptiScaler.ini", openrr::pe::module_folder());
+    const std::string base = openrr::pe::module_folder();
+    const std::string ini = (base.empty() ? std::string() : base + "\\") + "OptiScaler.ini";
     auto get = [&](const char* key) {
         char v[32] = {};
         openrr::u8::profile("Hotfix", key, "", v, sizeof v, ini);
@@ -1575,10 +1545,10 @@ void read_ini_barriers() {
 }
 
 bool is_unreal_engine() {
-    return g_unreal_by_exe || g_ngx_engine.load(std::memory_order_relaxed) == int(NVSDK_NGX_ENGINE_TYPE_UNREAL);
+    return g_unreal_by_exe;
 }
 
-// ---- Optimal settings & stats callbacks for DLSS-D (HANDOFF §3.2) ----
+// ---- Optimal settings & stats callbacks for DLSS-D ----
 NVSDK_NGX_Result RR_NGX_MSABI hk_dlssd_optimal_settings(NVSDK_NGX_Parameter* InParams) {
     if (!InParams) return NVSDK_NGX_Result_FAIL_InvalidParameter;
     unsigned int Width = 0, Height = 0;
@@ -1638,8 +1608,8 @@ NVSDK_NGX_Result RR_NGX_MSABI hk_dlssd_get_stats(NVSDK_NGX_Parameter* InParams) 
     return NVSDK_NGX_Result_Success;
 }
 
-// ---- Capability parameter rewriting (HANDOFF §3.1) ----
-LUID g_last_d3d12_luid{};
+// ---- Capability checks & parameter population for OptiProvider_Dlssd ----
+std::atomic<uint64_t> g_last_d3d12_luid_bits{0};
 std::atomic<bool> g_has_d3d12_luid{false};
 std::unordered_map<unsigned int, std::shared_ptr<openrr::pe::vkd3d::InteropSession>> g_vkd3d_sessions;
 
@@ -1647,23 +1617,31 @@ bool d3d12_rr_capable() {
     LUID luid{};
     const LUID* p_luid = nullptr;
     if (g_has_d3d12_luid.load(std::memory_order_acquire)) {
-        luid = g_last_d3d12_luid;
+        const uint64_t bits = g_last_d3d12_luid_bits.load(std::memory_order_acquire);
+        static_assert(sizeof(LUID) == sizeof(uint64_t));
+        std::memcpy(&luid, &bits, sizeof(luid));
         p_luid = &luid;
     }
     return check_usable(p_luid);
 }
 
-bool vk_rr_capable(VkPhysicalDevice phys = VK_NULL_HANDLE) {
+bool vk_rr_capable(VkPhysicalDevice phys = VK_NULL_HANDLE, VkDevice dev = VK_NULL_HANDLE,
+                   bool allow_pre_device = false) {
     openrr::pe::vkdevice::DeviceInfo di{};
-    if (!openrr::pe::vkdevice::latest_device_info(&di) || !di.prepared) {
-        static bool logged_unprepared = false;
-        if (!logged_unprepared) {
-            logged_unprepared = true;
-            log("[openrr] Vulkan capability check: game's VkDevice was not prepared at vkCreateDevice; Ray Reconstruction not offered");
+    const bool have_dev = dev ? openrr::pe::vkdevice::get_device_info(dev, &di)
+                              : openrr::pe::vkdevice::latest_device_info(&di);
+    if (have_dev) {
+        if (!di.prepared) {
+            static std::atomic<bool> logged_unprepared{false};
+            if (!logged_unprepared.exchange(true, std::memory_order_relaxed)) {
+                log("[openrr] Vulkan capability check: game's VkDevice was not prepared at vkCreateDevice; Ray Reconstruction not offered");
+            }
+            return false;
         }
+        if (!phys) phys = di.physical;
+    } else if (!allow_pre_device || !phys) {
         return false;
     }
-    if (!phys) phys = di.physical;
     if (phys) {
         openrr::pe::vulkan_entry_points();
         VkPhysicalDeviceIDProperties id{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES};
@@ -1678,17 +1656,8 @@ bool vk_rr_capable(VkPhysicalDevice phys = VK_NULL_HANDLE) {
     return check_usable(nullptr);
 }
 
-void patch_capability_params(NVSDK_NGX_Parameter* params, bool is_vk) {
-    ensure_deferred_init();
+void populate_dlssd_callbacks(NVSDK_NGX_Parameter* params) {
     if (!params) return;
-    if (!(is_vk ? vk_rr_capable() : d3d12_rr_capable())) return;
-
-    params->Set(NVSDK_NGX_Parameter_SuperSamplingDenoising_Available, 1);
-    params->Set(NVSDK_NGX_Parameter_SuperSamplingDenoising_NeedsUpdatedDriver, 0);
-    params->Set(NVSDK_NGX_Parameter_SuperSamplingDenoising_MinDriverVersionMajor, 0);
-    params->Set(NVSDK_NGX_Parameter_SuperSamplingDenoising_MinDriverVersionMinor, 0);
-    params->Set(NVSDK_NGX_Parameter_SuperSamplingDenoising_FeatureInitResult, 1);
-
     void* cb = nullptr;
     if (params->Get(NVSDK_NGX_Parameter_DLSSDOptimalSettingsCallback, &cb) != NVSDK_NGX_Result_Success || !cb) {
         params->Set(NVSDK_NGX_Parameter_DLSSDOptimalSettingsCallback,
@@ -1699,22 +1668,9 @@ void patch_capability_params(NVSDK_NGX_Parameter* params, bool is_vk) {
         params->Set(NVSDK_NGX_Parameter_DLSSDGetStatsCallback,
                     reinterpret_cast<void*>(&hk_dlssd_get_stats));
     }
-    params->Set("RayReconstruction.Hint.Render.Preset.DLAA", 0u);
-    params->Set("RayReconstruction.Hint.Render.Preset.UltraQuality", 0u);
-    params->Set("RayReconstruction.Hint.Render.Preset.Quality", 0u);
-    params->Set("RayReconstruction.Hint.Render.Preset.Balanced", 0u);
-    params->Set("RayReconstruction.Hint.Render.Preset.Performance", 0u);
-    params->Set("RayReconstruction.Hint.Render.Preset.UltraPerformance", 0u);
 }
 
 // ---- Parameter reading helpers (HANDOFF §3.4: DLSSD.* first, then generic fallback) ----
-template <class T>
-bool get_param_2(const NVSDK_NGX_Parameter& p, const char* k1, const char* k2, T& out) {
-    if (k1 && p.Get(k1, &out) == NVSDK_NGX_Result_Success) return true;
-    if (k2 && p.Get(k2, &out) == NVSDK_NGX_Result_Success) return true;
-    return false;
-}
-
 ID3D12Resource* get_d3d12_res(const NVSDK_NGX_Parameter& p, const char* k1, const char* k2 = nullptr) {
     auto try_key = [&](const char* k) -> ID3D12Resource* {
         if (!k) return nullptr;
@@ -1987,8 +1943,7 @@ void log_d3d12_ngx_inputs(RrContext& ctx, const NVSDK_NGX_Parameter& params, con
     openrr::pe::flush_log();
 }
 
-bool fill_d3d12_frame(RrContext& ctx, const NVSDK_NGX_Parameter& params, OnrRrFrame& frame, bool host_owned) {
-    (void)host_owned;
+bool fill_d3d12_frame(RrContext& ctx, const NVSDK_NGX_Parameter& params, OnrRrFrame& frame) {
     const openrr::pe::Config cfg = openrr::pe::current_config();
     frame = {};
     frame.size = sizeof(frame);
@@ -2378,38 +2333,10 @@ void update_status_from_context(const RrContext& ctx, bool split_used) {
     openrr::pe::control::report(st);
 }
 
-// ---- NGX Hook Function Signatures & Detours ----
-using PFN_D3D12_Init = NVSDK_NGX_Result(RR_NGX_MSABI*)(unsigned long long, const wchar_t*, ID3D12Device*, const NVSDK_NGX_FeatureCommonInfo*, NVSDK_NGX_Version);
-using PFN_D3D12_Init_Ext = NVSDK_NGX_Result(RR_NGX_MSABI*)(unsigned long long, const wchar_t*, ID3D12Device*, NVSDK_NGX_Version, const NVSDK_NGX_FeatureCommonInfo*);
-using PFN_D3D12_Init_ProjectID = NVSDK_NGX_Result(RR_NGX_MSABI*)(const char*, int, const char*, const wchar_t*, ID3D12Device*, NVSDK_NGX_Version, const NVSDK_NGX_FeatureCommonInfo*);
-using PFN_D3D12_Init_with_ProjectID = NVSDK_NGX_Result(RR_NGX_MSABI*)(const char*, int, const char*, const wchar_t*, ID3D12Device*, const NVSDK_NGX_FeatureCommonInfo*, NVSDK_NGX_Version);
-using PFN_GetParams = NVSDK_NGX_Result(RR_NGX_MSABI*)(NVSDK_NGX_Parameter**);
-using PFN_PopulateParams = NVSDK_NGX_Result(RR_NGX_MSABI*)(NVSDK_NGX_Parameter*);
-using PFN_D3D12_GetFeatureReq = NVSDK_NGX_Result(RR_NGX_MSABI*)(IDXGIAdapter*, const NVSDK_NGX_FeatureDiscoveryInfo*, NVSDK_NGX_FeatureRequirement*);
-using PFN_GetScratchSize = NVSDK_NGX_Result(RR_NGX_MSABI*)(NVSDK_NGX_Feature, const NVSDK_NGX_Parameter*, size_t*);
-using PFN_D3D12_CreateFeature = NVSDK_NGX_Result(RR_NGX_MSABI*)(ID3D12GraphicsCommandList*, NVSDK_NGX_Feature, NVSDK_NGX_Parameter*, NVSDK_NGX_Handle**);
-using PFN_D3D12_EvaluateFeature = NVSDK_NGX_Result(RR_NGX_MSABI*)(ID3D12GraphicsCommandList*, const NVSDK_NGX_Handle*, NVSDK_NGX_Parameter*, void*);
-using PFN_ReleaseFeature = NVSDK_NGX_Result(RR_NGX_MSABI*)(NVSDK_NGX_Handle*);
-using PFN_Shutdown = NVSDK_NGX_Result(RR_NGX_MSABI*)(void);
-using PFN_D3D12_Shutdown1 = NVSDK_NGX_Result(RR_NGX_MSABI*)(ID3D12Device*);
-
-PFN_D3D12_Init real_d3d12_init = nullptr;
-PFN_D3D12_Init_Ext real_d3d12_init_ext = nullptr;
-PFN_D3D12_Init_ProjectID real_d3d12_init_project = nullptr;
-PFN_D3D12_Init_with_ProjectID real_d3d12_init_with_project = nullptr;
-PFN_GetParams real_d3d12_get_cap_params = nullptr;
-PFN_GetParams real_d3d12_get_params = nullptr;
-PFN_GetParams real_d3d12_alloc_params = nullptr;
-PFN_PopulateParams real_d3d12_populate_params = nullptr;
-PFN_D3D12_GetFeatureReq real_d3d12_get_feat_req = nullptr;
-PFN_GetScratchSize real_d3d12_get_scratch = nullptr;
-PFN_D3D12_CreateFeature real_d3d12_create = nullptr;
-PFN_D3D12_EvaluateFeature real_d3d12_evaluate = nullptr;
-PFN_ReleaseFeature real_d3d12_release = nullptr;
-PFN_Shutdown real_d3d12_shutdown = nullptr;
-PFN_D3D12_Shutdown1 real_d3d12_shutdown1 = nullptr;
-
-void on_dxgi_present_cb();
+// ---- Native OptiScaler DLSSD Provider (OptiProvider_Dlssd) ----
+void sync_watchdog_rr_active_locked() {
+    openrr::pe::watchdog::set_rr_active(!g_d3d12_rr.empty() || !g_vk_rr.empty());
+}
 
 void on_d3d12_device_seen(ID3D12Device* dev) {
     ensure_cmd_sig_hook(dev);
@@ -2417,10 +2344,13 @@ void on_d3d12_device_seen(ID3D12Device* dev) {
     if (!dev) return;
     const bool is_vkd3d = openrr::pe::vkd3d::is_vkd3d_device(dev);
     if (is_vkd3d) rr_vk_use_loader(0);
-    g_last_d3d12_luid = dev->GetAdapterLuid();
+    const LUID luid = dev->GetAdapterLuid();
+    uint64_t luid_bits = 0;
+    std::memcpy(&luid_bits, &luid, sizeof(luid));
+    g_last_d3d12_luid_bits.store(luid_bits, std::memory_order_release);
     g_has_d3d12_luid.store(true, std::memory_order_release);
     query_d3d12_adapter_names(dev);
-    if (check_usable(&g_last_d3d12_luid)) {
+    if (check_usable(&luid)) {
         const openrr::pe::Config cfg = openrr::pe::current_config();
         if (!is_vkd3d && cfg.backend == "vulkan" && split_allowed_by_config()) {
             ensure_allocator_reset_hook(dev);
@@ -2428,74 +2358,62 @@ void on_d3d12_device_seen(ID3D12Device* dev) {
             ensure_direct_state_hooks(dev, nullptr);
         }
     }
-    openrr::pe::menu::on_present_beat(&on_dxgi_present_cb);
-    openrr::pe::menu::prepare_dxgi();
-    openrr::pe::menu::install();
 }
 
-NVSDK_NGX_Result RR_NGX_MSABI hk_d3d12_init(unsigned long long app, const wchar_t* path, ID3D12Device* dev,
-                                            const NVSDK_NGX_FeatureCommonInfo* info, NVSDK_NGX_Version ver) {
+NVSDK_NGX_Result provider_d3d12_init_impl(ID3D12Device* dev, const NVSDK_NGX_FeatureCommonInfo* info) {
     note_feature_common_info(info);
     on_d3d12_device_seen(dev);
-    return real_d3d12_init(app, path, dev, info, ver);
+    if (!dev) return NVSDK_NGX_Result_FAIL_InvalidParameter;
+    const LUID luid = dev->GetAdapterLuid();
+    if (!check_usable(&luid)) {
+        return NVSDK_NGX_Result_FAIL_FeatureNotSupported;
+    }
+    return NVSDK_NGX_Result_Success;
 }
 
-NVSDK_NGX_Result RR_NGX_MSABI hk_d3d12_init_ext(unsigned long long app, const wchar_t* path, ID3D12Device* dev,
-                                                NVSDK_NGX_Version ver, const NVSDK_NGX_FeatureCommonInfo* info) {
-    note_feature_common_info(info);
-    on_d3d12_device_seen(dev);
-    return real_d3d12_init_ext(app, path, dev, ver, info);
+NVSDK_NGX_Result RR_NGX_MSABI provider_d3d12_init(unsigned long long, const wchar_t*, ID3D12Device* dev,
+                                                  const NVSDK_NGX_FeatureCommonInfo* info, NVSDK_NGX_Version) {
+    try { return provider_d3d12_init_impl(dev, info); }
+    catch (...) { return NVSDK_NGX_Result_Fail; }
 }
 
-NVSDK_NGX_Result RR_NGX_MSABI hk_d3d12_init_project(const char* proj, int eng, const char* ver_str, const wchar_t* path,
-                                                    ID3D12Device* dev, NVSDK_NGX_Version ver,
-                                                    const NVSDK_NGX_FeatureCommonInfo* info) {
-    g_ngx_engine.store(eng);
-    note_feature_common_info(info);
-    on_d3d12_device_seen(dev);
-    return real_d3d12_init_project(proj, eng, ver_str, path, dev, ver, info);
+NVSDK_NGX_Result RR_NGX_MSABI provider_d3d12_init_ext(unsigned long long, const wchar_t*, ID3D12Device* dev,
+                                                      NVSDK_NGX_Version, const NVSDK_NGX_FeatureCommonInfo* info) {
+    try { return provider_d3d12_init_impl(dev, info); }
+    catch (...) { return NVSDK_NGX_Result_Fail; }
 }
 
-NVSDK_NGX_Result RR_NGX_MSABI hk_d3d12_init_with_project(const char* proj, int eng, const char* ver_str, const wchar_t* path,
-                                                         ID3D12Device* dev, const NVSDK_NGX_FeatureCommonInfo* info,
-                                                         NVSDK_NGX_Version ver) {
-    g_ngx_engine.store(eng);
-    note_feature_common_info(info);
-    on_d3d12_device_seen(dev);
-    return real_d3d12_init_with_project(proj, eng, ver_str, path, dev, info, ver);
+NVSDK_NGX_Result RR_NGX_MSABI provider_d3d12_populate_params(NVSDK_NGX_Parameter* params) {
+    try {
+        ensure_deferred_init();
+        if (!params) return NVSDK_NGX_Result_FAIL_InvalidParameter;
+        if (!d3d12_rr_capable()) {
+            params->Set(NVSDK_NGX_Parameter_SuperSamplingDenoising_Available, 0);
+            params->Set(NVSDK_NGX_Parameter_SuperSamplingDenoising_FeatureInitResult,
+                        static_cast<int>(NVSDK_NGX_Result_FAIL_FeatureNotSupported));
+            return NVSDK_NGX_Result_FAIL_FeatureNotSupported;
+        }
+        params->Set(NVSDK_NGX_Parameter_SuperSamplingDenoising_Available, 1);
+        params->Set(NVSDK_NGX_Parameter_SuperSamplingDenoising_NeedsUpdatedDriver, 0);
+        params->Set(NVSDK_NGX_Parameter_SuperSamplingDenoising_FeatureInitResult, 1);
+        populate_dlssd_callbacks(params);
+        return NVSDK_NGX_Result_Success;
+    } catch (...) {
+        return NVSDK_NGX_Result_Fail;
+    }
 }
 
-NVSDK_NGX_Result RR_NGX_MSABI hk_d3d12_get_cap_params(NVSDK_NGX_Parameter** out) {
-    const NVSDK_NGX_Result r = real_d3d12_get_cap_params(out);
-    if (r == NVSDK_NGX_Result_Success && out && *out) patch_capability_params(*out, false);
-    return r;
-}
-
-NVSDK_NGX_Result RR_NGX_MSABI hk_d3d12_get_params(NVSDK_NGX_Parameter** out) {
-    const NVSDK_NGX_Result r = real_d3d12_get_params(out);
-    if (r == NVSDK_NGX_Result_Success && out && *out) patch_capability_params(*out, false);
-    return r;
-}
-
-NVSDK_NGX_Result RR_NGX_MSABI hk_d3d12_alloc_params(NVSDK_NGX_Parameter** out) {
-    const NVSDK_NGX_Result r = real_d3d12_alloc_params(out);
-    if (r == NVSDK_NGX_Result_Success && out && *out) patch_capability_params(*out, false);
-    return r;
-}
-
-NVSDK_NGX_Result RR_NGX_MSABI hk_d3d12_populate_params(NVSDK_NGX_Parameter* params) {
-    const NVSDK_NGX_Result r = real_d3d12_populate_params(params);
-    if (r == NVSDK_NGX_Result_Success && params) patch_capability_params(params, false);
-    return r;
-}
-
-NVSDK_NGX_Result RR_NGX_MSABI hk_d3d12_get_feat_req(IDXGIAdapter* adapter, const NVSDK_NGX_FeatureDiscoveryInfo* info,
-                                                    NVSDK_NGX_FeatureRequirement* out) {
-    ensure_deferred_init();
-    if (info) note_feature_common_info(info->FeatureInfo);
-    const NVSDK_NGX_Result r = real_d3d12_get_feat_req ? real_d3d12_get_feat_req(adapter, info, out)
-                                                       : NVSDK_NGX_Result_FAIL_FeatureNotSupported;
-    if (info && info->FeatureID == NVSDK_NGX_Feature_RayReconstruction && out) {
+NVSDK_NGX_Result RR_NGX_MSABI provider_d3d12_get_feat_req(IDXGIAdapter* adapter,
+                                                          const NVSDK_NGX_FeatureDiscoveryInfo* info,
+                                                          NVSDK_NGX_FeatureRequirement* out) {
+    try {
+        ensure_deferred_init();
+        if (!info || !out) return NVSDK_NGX_Result_FAIL_InvalidParameter;
+        note_feature_common_info(info->FeatureInfo);
+        if (info->FeatureID != NVSDK_NGX_Feature_RayReconstruction) {
+            out->FeatureSupported = NVSDK_NGX_FeatureSupportResult_AdapterUnsupported;
+            return NVSDK_NGX_Result_FAIL_FeatureNotSupported;
+        }
         LUID luid{};
         const LUID* p_luid = nullptr;
         if (adapter) {
@@ -2505,62 +2423,58 @@ NVSDK_NGX_Result RR_NGX_MSABI hk_d3d12_get_feat_req(IDXGIAdapter* adapter, const
                 p_luid = &luid;
             }
         }
-        if ((p_luid ? check_usable(p_luid) : d3d12_rr_capable())) {
+        if (p_luid ? check_usable(p_luid) : d3d12_rr_capable()) {
             out->FeatureSupported = NVSDK_NGX_FeatureSupportResult_Supported;
             out->MinHWArchitecture = 0;
             std::snprintf(out->MinOSVersion, sizeof(out->MinOSVersion), "10.0.10240.16384");
             return NVSDK_NGX_Result_Success;
         }
+        out->FeatureSupported = NVSDK_NGX_FeatureSupportResult_AdapterUnsupported;
+        return NVSDK_NGX_Result_FAIL_FeatureNotSupported;
+    } catch (...) {
+        return NVSDK_NGX_Result_Fail;
     }
-    return r;
 }
 
-NVSDK_NGX_Result RR_NGX_MSABI hk_d3d12_get_scratch(NVSDK_NGX_Feature feat, const NVSDK_NGX_Parameter* params, size_t* out) {
+NVSDK_NGX_Result RR_NGX_MSABI provider_d3d12_get_scratch(NVSDK_NGX_Feature feat, const NVSDK_NGX_Parameter*,
+                                                         size_t* out) {
     if (!out) return NVSDK_NGX_Result_FAIL_InvalidParameter;
-    if (feat == NVSDK_NGX_Feature_RayReconstruction && d3d12_rr_capable()) {
-        *out = 0;
-        return NVSDK_NGX_Result_Success;
-    }
-    return real_d3d12_get_scratch ? real_d3d12_get_scratch(feat, params, out) : NVSDK_NGX_Result_Success;
+    if (feat != NVSDK_NGX_Feature_RayReconstruction) return NVSDK_NGX_Result_FAIL_FeatureNotSupported;
+    *out = 0;
+    return NVSDK_NGX_Result_Success;
 }
 
 NVSDK_NGX_Result create_d3d12_rr(ID3D12GraphicsCommandList* cmd, NVSDK_NGX_Feature feature,
-                               NVSDK_NGX_Parameter* params, NVSDK_NGX_Handle** out, bool host_owned) {
-    // An inner host call must never recurse into the outer OptiScaler entry.
-    const auto fallback = [&]() {
-        return host_owned ? NVSDK_NGX_Result_FAIL_UnableToInitializeFeature
-                          : real_d3d12_create(cmd, feature, params, out);
-    };
+                                 NVSDK_NGX_Parameter* params, NVSDK_NGX_Handle** out) {
     if (feature != NVSDK_NGX_Feature_RayReconstruction) {
-        return host_owned ? NVSDK_NGX_Result_FAIL_FeatureNotSupported : fallback();
+        return NVSDK_NGX_Result_FAIL_FeatureNotSupported;
     }
     if (!cmd || !params || !out) return NVSDK_NGX_Result_FAIL_InvalidParameter;
     const RrCreateParams create = read_create_params(*params);
     ensure_deferred_init();
 
-    const openrr::pe::Config cfg = openrr::pe::current_config();
-    if (!cfg.enabled) {
-        return fallback();
-    }
-
     ID3D12Device* dev = nullptr;
     if (FAILED(cmd->GetDevice(IID_PPV_ARGS(&dev))) || !dev) {
-        return fallback();
+        return NVSDK_NGX_Result_FAIL_UnableToInitializeFeature;
     }
     struct DevHold { ID3D12Device* d; ~DevHold() { if (d) d->Release(); } } hold{dev};
     on_d3d12_device_seen(dev);
 
     const LUID luid = dev->GetAdapterLuid();
     if (!check_usable(&luid)) {
-        return fallback();
+        return NVSDK_NGX_Result_FAIL_FeatureNotSupported;
     }
+
+    const openrr::pe::Config cfg = openrr::pe::current_config();
 
     // Re-probe mochi coexistence at Create time in case dlssnr-amd-loadlate.asi finished loading (Item #7).
     const bool mochi = probe_coexist_mochi();
+    const bool is_vkd3d = openrr::pe::vkd3d::is_vkd3d_device(dev);
 
     // Only install command-list split hooks when the Vulkan interop bridge is requested;
-    // D3D12 Direct records straight into the game's list without splitting (HANDOFF §3.6, Item #1).
-    if (cfg.backend == "vulkan" && split_allowed_by_config()) {
+    // D3D12 Direct records straight into the game's list without splitting (HANDOFF §3.6, Item #1),
+    // and vkd3d-proton always uses RecordVk interop directly.
+    if (!is_vkd3d && cfg.backend == "vulkan" && split_allowed_by_config()) {
         ensure_allocator_reset_hook(dev);
         std::string why;
         openrr::pe::split::prepare(cmd, &why);
@@ -2588,7 +2502,7 @@ NVSDK_NGX_Result create_d3d12_rr(ID3D12GraphicsCommandList* cmd, NVSDK_NGX_Featu
 
     std::shared_ptr<openrr::pe::vkd3d::InteropSession> vkd3d_session;
     OnrRrVkDevice vkd_info{};
-    if (openrr::pe::vkd3d::is_vkd3d_device(dev)) {
+    if (is_vkd3d) {
         auto sess = std::make_shared<openrr::pe::vkd3d::InteropSession>();
         std::string vkd3d_why;
         if (!openrr::pe::vkd3d::probe_and_open(dev, *sess, vkd3d_why)) {
@@ -2620,7 +2534,7 @@ NVSDK_NGX_Result create_d3d12_rr(ID3D12GraphicsCommandList* cmd, NVSDK_NGX_Featu
     ci.dlssd_path = dlssd.c_str();
     ci.data_dir = data_dir.c_str();
     ci.log_path = log_path.c_str();
-    ci.backend = vkd3d_session ? ONR_RR_BACKEND_CHOICE_AUTO : backend_choice;
+    ci.backend = vkd3d_session ? uint32_t(ONR_RR_BACKEND_CHOICE_AUTO) : backend_choice;
     ci.vk_device = vkd3d_session ? &vkd_info : nullptr;
 
     openrr::pe::vulkan_entry_points();
@@ -2637,6 +2551,24 @@ NVSDK_NGX_Result create_d3d12_rr(ID3D12GraphicsCommandList* cmd, NVSDK_NGX_Featu
         block_session("Create failed: " + err);
         return NVSDK_NGX_Result_FAIL_UnableToInitializeFeature;
     }
+    struct CreateCleanup {
+        RrContext* ctx;
+        bool committed = false;
+        ~CreateCleanup() {
+            if (!committed && ctx) {
+                if (ctx->runtime_ctx) {
+                    InternalVkScope vk_scope;
+                    g_api.Destroy(ctx->runtime_ctx);
+                    ctx->runtime_ctx = nullptr;
+                }
+                if (ctx->holder) ctx->holder->ctx = nullptr;
+                if (ctx->allocated_handle) {
+                    delete ctx->allocated_handle;
+                    ctx->allocated_handle = nullptr;
+                }
+            }
+        }
+    } cleanup{ctx.get()};
     ctx->holder->ctx = ctx->runtime_ctx;
 
     ctx->mode_applied = cfg.mode;
@@ -2646,9 +2578,6 @@ NVSDK_NGX_Result create_d3d12_rr(ID3D12GraphicsCommandList* cmd, NVSDK_NGX_Featu
     ctx->handle_id = id;
     if (*out == nullptr) {
         ctx->allocated_handle = new NVSDK_NGX_Handle{id};
-        *out = ctx->allocated_handle;
-    } else {
-        (*out)->Id = id;
     }
 
     uint32_t running_be = ONR_RR_BACKEND_D3D12;
@@ -2665,10 +2594,18 @@ NVSDK_NGX_Result create_d3d12_rr(ID3D12GraphicsCommandList* cmd, NVSDK_NGX_Featu
         mochi ? "yes" : "no");
 
     update_status_from_context(*ctx, !vkd3d_session && running_be == ONR_RR_BACKEND_VULKAN);
+    NVSDK_NGX_Handle* allocated_out = ctx->allocated_handle;
     {
         std::lock_guard<std::mutex> lock(g_ctx_mutex);
         if (vkd3d_session) g_vkd3d_sessions[id] = std::move(vkd3d_session);
         g_d3d12_rr[id] = std::move(ctx);
+        sync_watchdog_rr_active_locked();
+    }
+    cleanup.committed = true;
+    if (allocated_out) {
+        *out = allocated_out;
+    } else {
+        (*out)->Id = id;
     }
     return NVSDK_NGX_Result_Success;
 }
@@ -2677,12 +2614,14 @@ std::atomic<uint64_t> g_d3d_skipped_frames{0};
 
 NVSDK_NGX_Result evaluate_vkd3d_interop_rr(ID3D12GraphicsCommandList* cmd, NVSDK_NGX_Parameter* params,
                                            RrContext& ctx, openrr::pe::vkd3d::InteropSession& session,
-                                           std::unique_lock<std::mutex> lock, bool host_owned) {
+                                           std::unique_lock<std::mutex> lock) {
     if (!cmd || !params || !ctx.runtime_ctx || !g_api5.RecordVk) {
         return NVSDK_NGX_Result_FAIL_InvalidParameter;
     }
+    openrr::pe::watchdog::beat();
+
     OnrRrFrame d3d_frame{};
-    if (!fill_d3d12_frame(ctx, *params, d3d_frame, host_owned)) {
+    if (!fill_d3d12_frame(ctx, *params, d3d_frame)) {
         return NVSDK_NGX_Result_Fail;
     }
 
@@ -2759,34 +2698,22 @@ NVSDK_NGX_Result evaluate_vkd3d_interop_rr(ID3D12GraphicsCommandList* cmd, NVSDK
     return NVSDK_NGX_Result_Success;
 }
 
-#ifdef OPENRR_EXPERIMENTAL_OPTIFG_HOST
-bool prepare_optifg_host();
-bool g_optifg_host_active = false;
-#endif
-NVSDK_NGX_Result RR_NGX_MSABI hk_d3d12_create(ID3D12GraphicsCommandList* cmd, NVSDK_NGX_Feature feature,
-                                              NVSDK_NGX_Parameter* params, NVSDK_NGX_Handle** out) {
-#ifdef OPENRR_EXPERIMENTAL_OPTIFG_HOST
-    if (feature == NVSDK_NGX_Feature_RayReconstruction && prepare_optifg_host())
-        return real_d3d12_create(cmd, feature, params, out);
-#endif
-    return create_d3d12_rr(cmd, feature, params, out, false);
-}
-
 NVSDK_NGX_Result evaluate_d3d12_rr(ID3D12GraphicsCommandList* cmd, const NVSDK_NGX_Handle* handle,
-                                 NVSDK_NGX_Parameter* params, void* callback, bool host_owned) {
-    if (!handle) return host_owned ? NVSDK_NGX_Result_FAIL_InvalidParameter : real_d3d12_evaluate(cmd, handle, params, callback);
+                                   NVSDK_NGX_Parameter* params) {
+    if (!handle) return NVSDK_NGX_Result_FAIL_InvalidParameter;
 
     std::unique_lock<std::mutex> lock(g_ctx_mutex);
     auto it = g_d3d12_rr.find(handle->Id);
     if (it == g_d3d12_rr.end()) {
-        lock.unlock();
-        return host_owned ? NVSDK_NGX_Result_FAIL_FeatureNotFound : real_d3d12_evaluate(cmd, handle, params, callback);
+        return NVSDK_NGX_Result_FAIL_FeatureNotFound;
     }
     if (auto vit = g_vkd3d_sessions.find(handle->Id); vit != g_vkd3d_sessions.end() && vit->second) {
         auto sess = vit->second;
-        return evaluate_vkd3d_interop_rr(cmd, params, *it->second, *sess, std::move(lock), host_owned);
+        return evaluate_vkd3d_interop_rr(cmd, params, *it->second, *sess, std::move(lock));
     }
     if (!cmd || !params) return NVSDK_NGX_Result_FAIL_InvalidParameter;
+
+    openrr::pe::watchdog::beat();
 
     RrContext& ctx = *it->second;
     const openrr::pe::Config cfg = openrr::pe::current_config();
@@ -2796,7 +2723,7 @@ NVSDK_NGX_Result evaluate_d3d12_rr(ID3D12GraphicsCommandList* cmd, const NVSDK_N
     }
 
     OnrRrFrame frame{};
-    if (!fill_d3d12_frame(ctx, *params, frame, host_owned)) {
+    if (!fill_d3d12_frame(ctx, *params, frame)) {
         return NVSDK_NGX_Result_Fail;
     }
 
@@ -2821,11 +2748,10 @@ NVSDK_NGX_Result evaluate_d3d12_rr(ID3D12GraphicsCommandList* cmd, const NVSDK_N
             const uint64_t skip_n = ++g_d3d_skipped_frames;
             log("[openrr] command list state before Reset not yet tracked (%s, streak=%u); skipping this frame (output not written, count=%llu)",
                 split_why.c_str(), ctx.unknown_streak, static_cast<unsigned long long>(skip_n));
-            return host_owned ? NVSDK_NGX_Result_Fail : NVSDK_NGX_Result_Success;
+            return NVSDK_NGX_Result_Success;
         }
-        static bool logged_fallback = false;
-        if (!logged_fallback) {
-            logged_fallback = true;
+        static std::atomic<bool> logged_fallback{false};
+        if (!logged_fallback.exchange(true, std::memory_order_relaxed)) {
             log("[openrr] Vulkan bridge cannot split command list (%s)",
                 can_split ? split_why.c_str() : "disabled by coexistence rule");
         }
@@ -2849,7 +2775,7 @@ NVSDK_NGX_Result evaluate_d3d12_rr(ID3D12GraphicsCommandList* cmd, const NVSDK_N
                             (!st || !st->valid) ? "recorded before Reset hook" : "bundle state unknown",
                             streak, static_cast<unsigned long long>(skip_n));
                     }
-                    return host_owned ? NVSDK_NGX_Result_Fail : NVSDK_NGX_Result_Success;
+                    return NVSDK_NGX_Result_Success;
                 }
                 if (streak == 3) {
                     log("[openrr] D3D12 Direct: command-list state remained untracked for %u frames; failing evaluation", streak);
@@ -2905,7 +2831,7 @@ NVSDK_NGX_Result evaluate_d3d12_rr(ID3D12GraphicsCommandList* cmd, const NVSDK_N
                 log("[openrr] D3D12 Direct: all 127 recording slots in flight; skipping this frame (output not written, count=%llu)",
                     static_cast<unsigned long long>(skip_n));
             }
-            return host_owned ? NVSDK_NGX_Result_Fail : NVSDK_NGX_Result_Success;
+            return NVSDK_NGX_Result_Success;
         }
         if (rc != ONR_RR_OK) {
             update_status_from_context(ctx, false);
@@ -2978,10 +2904,11 @@ void destroy_d3d12_rr_context(RrContext& ctx) {
     }
 }
 
-NVSDK_NGX_Result release_d3d12_rr(NVSDK_NGX_Handle* handle, bool host_owned) {
-    if (!handle) return host_owned ? NVSDK_NGX_Result_FAIL_InvalidParameter : real_d3d12_release(handle);
+NVSDK_NGX_Result release_d3d12_rr(NVSDK_NGX_Handle* handle) {
+    if (!handle) return NVSDK_NGX_Result_FAIL_InvalidParameter;
     std::unique_ptr<RrContext> gone;
     std::shared_ptr<openrr::pe::vkd3d::InteropSession> gone_vkd3d;
+    bool any_active = false;
     {
         std::lock_guard<std::mutex> lock(g_ctx_mutex);
         auto it = g_d3d12_rr.find(handle->Id);
@@ -2993,85 +2920,84 @@ NVSDK_NGX_Result release_d3d12_rr(NVSDK_NGX_Handle* handle, bool host_owned) {
             gone_vkd3d = std::move(vit->second);
             g_vkd3d_sessions.erase(vit);
         }
+        any_active = !g_d3d12_rr.empty() || !g_vk_rr.empty();
+        sync_watchdog_rr_active_locked();
     }
-    if (!gone) {
-        return host_owned ? NVSDK_NGX_Result_FAIL_FeatureNotFound : real_d3d12_release(handle);
-    }
+    if (!gone) return NVSDK_NGX_Result_FAIL_FeatureNotFound;
     log("[openrr] D3D12 Ray Reconstruction feature released (handle=0x%X)", gone->handle_id);
     destroy_d3d12_rr_context(*gone);
     gone_vkd3d.reset();
     if (gone->allocated_handle == handle) delete gone->allocated_handle;
-    openrr::pe::control::Status st{};
-    openrr::pe::control::report(st);
+    if (!any_active) {
+        openrr::pe::control::Status st{};
+        openrr::pe::control::report(st);
+    }
     return NVSDK_NGX_Result_Success;
 }
 
-NVSDK_NGX_Result RR_NGX_MSABI hk_d3d12_evaluate(ID3D12GraphicsCommandList* cmd, const NVSDK_NGX_Handle* handle,
-                                                NVSDK_NGX_Parameter* params, void* callback) {
-    return evaluate_d3d12_rr(cmd, handle, params, callback, false);
-}
-
-NVSDK_NGX_Result RR_NGX_MSABI hk_d3d12_release(NVSDK_NGX_Handle* handle) {
-    return release_d3d12_rr(handle, false);
-}
-
-void destroy_all_d3d12_rr() {
-    std::unordered_map<unsigned int, std::unique_ptr<RrContext>> all;
-    std::unordered_map<unsigned int, std::shared_ptr<openrr::pe::vkd3d::InteropSession>> all_vkd3d;
+void destroy_all_d3d12_rr(ID3D12Device* filter_dev = nullptr) {
+    std::vector<std::unique_ptr<RrContext>> list;
+    std::vector<std::shared_ptr<openrr::pe::vkd3d::InteropSession>> vkd3d_list;
+    bool any_active = false;
     {
         std::lock_guard<std::mutex> lock(g_ctx_mutex);
-        all.swap(g_d3d12_rr);
-        all_vkd3d.swap(g_vkd3d_sessions);
+        for (auto it = g_d3d12_rr.begin(); it != g_d3d12_rr.end();) {
+            if (!filter_dev || (it->second && it->second->d3d12_device == filter_dev)) {
+                const unsigned int id = it->first;
+                list.push_back(std::move(it->second));
+                it = g_d3d12_rr.erase(it);
+                if (auto vit = g_vkd3d_sessions.find(id); vit != g_vkd3d_sessions.end()) {
+                    vkd3d_list.push_back(std::move(vit->second));
+                    g_vkd3d_sessions.erase(vit);
+                }
+            } else {
+                ++it;
+            }
+        }
+        any_active = !g_d3d12_rr.empty() || !g_vk_rr.empty();
+        sync_watchdog_rr_active_locked();
     }
-    for (auto& [id, ctx] : all) {
+    for (auto& ctx : list) {
         if (ctx) {
             destroy_d3d12_rr_context(*ctx);
             if (ctx->allocated_handle) delete ctx->allocated_handle;
         }
     }
-    all_vkd3d.clear();
+    vkd3d_list.clear();
+    if (!list.empty() && !any_active) {
+        openrr::pe::control::Status st{};
+        openrr::pe::control::report(st);
+    }
 }
 
-NVSDK_NGX_Result RR_NGX_MSABI hk_d3d12_shutdown() {
-    destroy_all_d3d12_rr();
-    return real_d3d12_shutdown ? real_d3d12_shutdown() : NVSDK_NGX_Result_Success;
+NVSDK_NGX_Result RR_NGX_MSABI provider_d3d12_create(ID3D12GraphicsCommandList* cmd, NVSDK_NGX_Feature feature,
+                                                    NVSDK_NGX_Parameter* params, NVSDK_NGX_Handle** out) {
+    try { return create_d3d12_rr(cmd, feature, params, out); }
+    catch (...) { return NVSDK_NGX_Result_Fail; }
 }
 
-NVSDK_NGX_Result RR_NGX_MSABI hk_d3d12_shutdown1(ID3D12Device* dev) {
-    destroy_all_d3d12_rr();
-    return real_d3d12_shutdown1 ? real_d3d12_shutdown1(dev) : NVSDK_NGX_Result_Success;
+NVSDK_NGX_Result RR_NGX_MSABI provider_d3d12_evaluate(ID3D12GraphicsCommandList* cmd, const NVSDK_NGX_Handle* handle,
+                                                      const NVSDK_NGX_Parameter* params, void*) {
+    try { return evaluate_d3d12_rr(cmd, handle, const_cast<NVSDK_NGX_Parameter*>(params)); }
+    catch (...) { return NVSDK_NGX_Result_Fail; }
 }
 
-// ---- Vulkan NGX Hooks & Device Tracking ----
-using PFN_VK_Init = NVSDK_NGX_Result(RR_NGX_MSABI*)(unsigned long long, const wchar_t*, VkInstance, VkPhysicalDevice, VkDevice, PFN_vkGetInstanceProcAddr, PFN_vkGetDeviceProcAddr, const NVSDK_NGX_FeatureCommonInfo*, NVSDK_NGX_Version);
-using PFN_VK_Init_Ext = NVSDK_NGX_Result(RR_NGX_MSABI*)(unsigned long long, const wchar_t*, VkInstance, VkPhysicalDevice, VkDevice, NVSDK_NGX_Version, const NVSDK_NGX_FeatureCommonInfo*);
-using PFN_VK_Init_Ext2 = NVSDK_NGX_Result(RR_NGX_MSABI*)(unsigned long long, const wchar_t*, VkInstance, VkPhysicalDevice, VkDevice, PFN_vkGetInstanceProcAddr, PFN_vkGetDeviceProcAddr, NVSDK_NGX_Version, const NVSDK_NGX_FeatureCommonInfo*);
-using PFN_VK_Init_ProjectID = NVSDK_NGX_Result(RR_NGX_MSABI*)(const char*, int, const char*, const wchar_t*, VkInstance, VkPhysicalDevice, VkDevice, PFN_vkGetInstanceProcAddr, PFN_vkGetDeviceProcAddr, NVSDK_NGX_Version, const NVSDK_NGX_FeatureCommonInfo*);
-using PFN_VK_Init_ProjectID_Ext = NVSDK_NGX_Result(RR_NGX_MSABI*)(const char*, int, const char*, const wchar_t*, VkInstance, VkPhysicalDevice, VkDevice, PFN_vkGetInstanceProcAddr, PFN_vkGetDeviceProcAddr, NVSDK_NGX_Version, const NVSDK_NGX_FeatureCommonInfo*);
-using PFN_VK_GetFeatureReq = NVSDK_NGX_Result(RR_NGX_MSABI*)(VkInstance, VkPhysicalDevice, const NVSDK_NGX_FeatureDiscoveryInfo*, NVSDK_NGX_FeatureRequirement*);
-using PFN_VK_CreateFeature1 = NVSDK_NGX_Result(RR_NGX_MSABI*)(VkDevice, VkCommandBuffer, NVSDK_NGX_Feature, NVSDK_NGX_Parameter*, NVSDK_NGX_Handle**);
-using PFN_VK_CreateFeature = NVSDK_NGX_Result(RR_NGX_MSABI*)(VkCommandBuffer, NVSDK_NGX_Feature, NVSDK_NGX_Parameter*, NVSDK_NGX_Handle**);
-using PFN_VK_EvaluateFeature = NVSDK_NGX_Result(RR_NGX_MSABI*)(VkCommandBuffer, const NVSDK_NGX_Handle*, NVSDK_NGX_Parameter*, void*);
-using PFN_VK_Shutdown1 = NVSDK_NGX_Result(RR_NGX_MSABI*)(VkDevice);
+NVSDK_NGX_Result RR_NGX_MSABI provider_d3d12_release(NVSDK_NGX_Handle* handle) {
+    try { return release_d3d12_rr(handle); }
+    catch (...) { return NVSDK_NGX_Result_Fail; }
+}
 
-PFN_VK_Init real_vk_init = nullptr;
-PFN_VK_Init_Ext real_vk_init_ext = nullptr;
-PFN_VK_Init_Ext2 real_vk_init_ext2 = nullptr;
-PFN_VK_Init_ProjectID real_vk_init_project = nullptr;
-PFN_VK_Init_ProjectID_Ext real_vk_init_project_ext = nullptr;
-PFN_GetParams real_vk_get_cap_params = nullptr;
-PFN_GetParams real_vk_get_params = nullptr;
-PFN_GetParams real_vk_alloc_params = nullptr;
-PFN_PopulateParams real_vk_populate_params = nullptr;
-PFN_VK_GetFeatureReq real_vk_get_feat_req = nullptr;
-PFN_GetScratchSize real_vk_get_scratch = nullptr;
-PFN_VK_CreateFeature1 real_vk_create1 = nullptr;
-PFN_VK_CreateFeature real_vk_create = nullptr;
-PFN_VK_EvaluateFeature real_vk_evaluate = nullptr;
-PFN_ReleaseFeature real_vk_release = nullptr;
-PFN_Shutdown real_vk_shutdown = nullptr;
-PFN_VK_Shutdown1 real_vk_shutdown1 = nullptr;
+NVSDK_NGX_Result RR_NGX_MSABI provider_d3d12_shutdown() {
+    try { destroy_all_d3d12_rr(); return NVSDK_NGX_Result_Success; }
+    catch (...) { return NVSDK_NGX_Result_Fail; }
+}
 
+NVSDK_NGX_Result RR_NGX_MSABI provider_d3d12_shutdown1(ID3D12Device* dev) {
+    try { destroy_all_d3d12_rr(dev); return NVSDK_NGX_Result_Success; }
+    catch (...) { return NVSDK_NGX_Result_Fail; }
+}
+
+// ---- Vulkan Provider Implementation ----
 std::mutex g_vk_ngx_mutex;
 VkInstance g_ngx_vk_instance = VK_NULL_HANDLE;
 VkPhysicalDevice g_ngx_vk_phys = VK_NULL_HANDLE;
@@ -3086,92 +3012,88 @@ void note_ngx_vk(VkInstance inst, VkPhysicalDevice phys, VkDevice dev, const NVS
     if (dev) g_ngx_vk_device = dev;
 }
 
-NVSDK_NGX_Result RR_NGX_MSABI hk_vk_init(unsigned long long app, const wchar_t* path, VkInstance inst, VkPhysicalDevice phys,
-                                         VkDevice dev, PFN_vkGetInstanceProcAddr gipa, PFN_vkGetDeviceProcAddr gdpa,
-                                         const NVSDK_NGX_FeatureCommonInfo* info, NVSDK_NGX_Version ver) {
+NVSDK_NGX_Result provider_vk_init_impl(VkInstance inst, VkPhysicalDevice phys, VkDevice dev,
+                                       const NVSDK_NGX_FeatureCommonInfo* info) {
     note_ngx_vk(inst, phys, dev, info);
-    return real_vk_init(app, path, inst, phys, dev, gipa, gdpa, info, ver);
-}
-
-NVSDK_NGX_Result RR_NGX_MSABI hk_vk_init_ext(unsigned long long app, const wchar_t* path, VkInstance inst, VkPhysicalDevice phys,
-                                             VkDevice dev, NVSDK_NGX_Version ver, const NVSDK_NGX_FeatureCommonInfo* info) {
-    note_ngx_vk(inst, phys, dev, info);
-    return real_vk_init_ext(app, path, inst, phys, dev, ver, info);
-}
-
-NVSDK_NGX_Result RR_NGX_MSABI hk_vk_init_ext2(unsigned long long app, const wchar_t* path, VkInstance inst, VkPhysicalDevice phys,
-                                              VkDevice dev, PFN_vkGetInstanceProcAddr gipa, PFN_vkGetDeviceProcAddr gdpa,
-                                              NVSDK_NGX_Version ver, const NVSDK_NGX_FeatureCommonInfo* info) {
-    note_ngx_vk(inst, phys, dev, info);
-    return real_vk_init_ext2(app, path, inst, phys, dev, gipa, gdpa, ver, info);
-}
-
-NVSDK_NGX_Result RR_NGX_MSABI hk_vk_init_project(const char* proj, int eng, const char* ver_str, const wchar_t* path,
-                                                 VkInstance inst, VkPhysicalDevice phys, VkDevice dev,
-                                                 PFN_vkGetInstanceProcAddr gipa, PFN_vkGetDeviceProcAddr gdpa,
-                                                 NVSDK_NGX_Version ver, const NVSDK_NGX_FeatureCommonInfo* info) {
-    g_ngx_engine.store(eng);
-    note_ngx_vk(inst, phys, dev, info);
-    return real_vk_init_project(proj, eng, ver_str, path, inst, phys, dev, gipa, gdpa, ver, info);
-}
-
-NVSDK_NGX_Result RR_NGX_MSABI hk_vk_init_project_ext(const char* proj, int eng, const char* ver_str, const wchar_t* path,
-                                                     VkInstance inst, VkPhysicalDevice phys, VkDevice dev,
-                                                     PFN_vkGetInstanceProcAddr gipa, PFN_vkGetDeviceProcAddr gdpa,
-                                                     NVSDK_NGX_Version ver, const NVSDK_NGX_FeatureCommonInfo* info) {
-    g_ngx_engine.store(eng);
-    note_ngx_vk(inst, phys, dev, info);
-    return real_vk_init_project_ext(proj, eng, ver_str, path, inst, phys, dev, gipa, gdpa, ver, info);
-}
-
-NVSDK_NGX_Result RR_NGX_MSABI hk_vk_get_cap_params(NVSDK_NGX_Parameter** out) {
-    const NVSDK_NGX_Result r = real_vk_get_cap_params(out);
-    if (r == NVSDK_NGX_Result_Success && out && *out) patch_capability_params(*out, true);
-    return r;
-}
-
-NVSDK_NGX_Result RR_NGX_MSABI hk_vk_get_params(NVSDK_NGX_Parameter** out) {
-    const NVSDK_NGX_Result r = real_vk_get_params(out);
-    if (r == NVSDK_NGX_Result_Success && out && *out) patch_capability_params(*out, true);
-    return r;
-}
-
-NVSDK_NGX_Result RR_NGX_MSABI hk_vk_alloc_params(NVSDK_NGX_Parameter** out) {
-    const NVSDK_NGX_Result r = real_vk_alloc_params(out);
-    if (r == NVSDK_NGX_Result_Success && out && *out) patch_capability_params(*out, true);
-    return r;
-}
-
-NVSDK_NGX_Result RR_NGX_MSABI hk_vk_populate_params(NVSDK_NGX_Parameter* params) {
-    const NVSDK_NGX_Result r = real_vk_populate_params(params);
-    if (r == NVSDK_NGX_Result_Success && params) patch_capability_params(params, true);
-    return r;
-}
-
-NVSDK_NGX_Result RR_NGX_MSABI hk_vk_get_feat_req(VkInstance inst, VkPhysicalDevice phys,
-                                                 const NVSDK_NGX_FeatureDiscoveryInfo* info,
-                                                 NVSDK_NGX_FeatureRequirement* out) {
-    ensure_deferred_init();
-    (void)inst;
-    if (info) note_feature_common_info(info->FeatureInfo);
-    const NVSDK_NGX_Result r = real_vk_get_feat_req ? real_vk_get_feat_req(inst, phys, info, out)
-                                                    : NVSDK_NGX_Result_FAIL_FeatureNotSupported;
-    if (info && info->FeatureID == NVSDK_NGX_Feature_RayReconstruction && out && vk_rr_capable(phys)) {
-        out->FeatureSupported = NVSDK_NGX_FeatureSupportResult_Supported;
-        out->MinHWArchitecture = 0;
-        std::snprintf(out->MinOSVersion, sizeof(out->MinOSVersion), "10.0.10240.16384");
-        return NVSDK_NGX_Result_Success;
+    if (!vk_rr_capable(phys, dev)) {
+        return NVSDK_NGX_Result_FAIL_FeatureNotSupported;
     }
-    return r;
+    return NVSDK_NGX_Result_Success;
 }
 
-NVSDK_NGX_Result RR_NGX_MSABI hk_vk_get_scratch(NVSDK_NGX_Feature feat, const NVSDK_NGX_Parameter* params, size_t* out) {
+NVSDK_NGX_Result RR_NGX_MSABI provider_vk_init(unsigned long long, const wchar_t*, VkInstance inst,
+                                               VkPhysicalDevice phys, VkDevice dev,
+                                               PFN_vkGetInstanceProcAddr, PFN_vkGetDeviceProcAddr,
+                                               const NVSDK_NGX_FeatureCommonInfo* info, NVSDK_NGX_Version) {
+    try { return provider_vk_init_impl(inst, phys, dev, info); }
+    catch (...) { return NVSDK_NGX_Result_Fail; }
+}
+
+NVSDK_NGX_Result RR_NGX_MSABI provider_vk_init_ext(unsigned long long, const wchar_t*, VkInstance inst,
+                                                   VkPhysicalDevice phys, VkDevice dev, NVSDK_NGX_Version,
+                                                   const NVSDK_NGX_FeatureCommonInfo* info) {
+    try { return provider_vk_init_impl(inst, phys, dev, info); }
+    catch (...) { return NVSDK_NGX_Result_Fail; }
+}
+
+NVSDK_NGX_Result RR_NGX_MSABI provider_vk_init_ext2(unsigned long long, const wchar_t*, VkInstance inst,
+                                                    VkPhysicalDevice phys, VkDevice dev,
+                                                    PFN_vkGetInstanceProcAddr, PFN_vkGetDeviceProcAddr,
+                                                    NVSDK_NGX_Version, const NVSDK_NGX_FeatureCommonInfo* info) {
+    try { return provider_vk_init_impl(inst, phys, dev, info); }
+    catch (...) { return NVSDK_NGX_Result_Fail; }
+}
+
+NVSDK_NGX_Result RR_NGX_MSABI provider_vk_populate_params(NVSDK_NGX_Parameter* params) {
+    try {
+        ensure_deferred_init();
+        if (!params) return NVSDK_NGX_Result_FAIL_InvalidParameter;
+        if (!vk_rr_capable()) {
+            params->Set(NVSDK_NGX_Parameter_SuperSamplingDenoising_Available, 0);
+            params->Set(NVSDK_NGX_Parameter_SuperSamplingDenoising_FeatureInitResult,
+                        static_cast<int>(NVSDK_NGX_Result_FAIL_FeatureNotSupported));
+            return NVSDK_NGX_Result_FAIL_FeatureNotSupported;
+        }
+        params->Set(NVSDK_NGX_Parameter_SuperSamplingDenoising_Available, 1);
+        params->Set(NVSDK_NGX_Parameter_SuperSamplingDenoising_NeedsUpdatedDriver, 0);
+        params->Set(NVSDK_NGX_Parameter_SuperSamplingDenoising_FeatureInitResult, 1);
+        populate_dlssd_callbacks(params);
+        return NVSDK_NGX_Result_Success;
+    } catch (...) {
+        return NVSDK_NGX_Result_Fail;
+    }
+}
+
+NVSDK_NGX_Result RR_NGX_MSABI provider_vk_get_feat_req(VkInstance, VkPhysicalDevice phys,
+                                                       const NVSDK_NGX_FeatureDiscoveryInfo* info,
+                                                       NVSDK_NGX_FeatureRequirement* out) {
+    try {
+        ensure_deferred_init();
+        if (!info || !out) return NVSDK_NGX_Result_FAIL_InvalidParameter;
+        note_feature_common_info(info->FeatureInfo);
+        if (info->FeatureID != NVSDK_NGX_Feature_RayReconstruction) {
+            out->FeatureSupported = NVSDK_NGX_FeatureSupportResult_AdapterUnsupported;
+            return NVSDK_NGX_Result_FAIL_FeatureNotSupported;
+        }
+        if (vk_rr_capable(phys, VK_NULL_HANDLE, true)) {
+            out->FeatureSupported = NVSDK_NGX_FeatureSupportResult_Supported;
+            out->MinHWArchitecture = 0;
+            std::snprintf(out->MinOSVersion, sizeof(out->MinOSVersion), "10.0.10240.16384");
+            return NVSDK_NGX_Result_Success;
+        }
+        out->FeatureSupported = NVSDK_NGX_FeatureSupportResult_AdapterUnsupported;
+        return NVSDK_NGX_Result_FAIL_FeatureNotSupported;
+    } catch (...) {
+        return NVSDK_NGX_Result_Fail;
+    }
+}
+
+NVSDK_NGX_Result RR_NGX_MSABI provider_vk_get_scratch(NVSDK_NGX_Feature feat, const NVSDK_NGX_Parameter*,
+                                                      size_t* out) {
     if (!out) return NVSDK_NGX_Result_FAIL_InvalidParameter;
-    if (feat == NVSDK_NGX_Feature_RayReconstruction && vk_rr_capable()) {
-        *out = 0;
-        return NVSDK_NGX_Result_Success;
-    }
-    return real_vk_get_scratch ? real_vk_get_scratch(feat, params, out) : NVSDK_NGX_Result_Success;
+    if (feat != NVSDK_NGX_Feature_RayReconstruction) return NVSDK_NGX_Result_FAIL_FeatureNotSupported;
+    *out = 0;
+    return NVSDK_NGX_Result_Success;
 }
 
 NVSDK_NGX_Result create_vk_rr_feature(VkDevice dev, const RrCreateParams& create, NVSDK_NGX_Handle** out) {
@@ -3186,7 +3108,7 @@ NVSDK_NGX_Result create_vk_rr_feature(VkDevice dev, const RrCreateParams& create
         std::lock_guard<std::mutex> lock(g_vk_ngx_mutex);
         di.instance = g_ngx_vk_instance;
     }
-    if (!vk_rr_capable(di.physical)) {
+    if (!vk_rr_capable(di.physical, di.device)) {
         return NVSDK_NGX_Result_FAIL_FeatureNotSupported;
     }
     probe_coexist_mochi();
@@ -3241,6 +3163,23 @@ NVSDK_NGX_Result create_vk_rr_feature(VkDevice dev, const RrCreateParams& create
         block_session("Vulkan Create failed: " + err);
         return NVSDK_NGX_Result_FAIL_UnableToInitializeFeature;
     }
+    struct VkCreateCleanup {
+        RrContext* ctx;
+        bool committed = false;
+        ~VkCreateCleanup() {
+            if (!committed && ctx) {
+                if (ctx->runtime_ctx) {
+                    InternalVkScope vk_scope;
+                    g_api.Destroy(ctx->runtime_ctx);
+                    ctx->runtime_ctx = nullptr;
+                }
+                if (ctx->allocated_handle) {
+                    delete ctx->allocated_handle;
+                    ctx->allocated_handle = nullptr;
+                }
+            }
+        }
+    } cleanup{ctx.get()};
 
     const openrr::pe::Config cfg = openrr::pe::current_config();
     ctx->mode_applied = cfg.mode;
@@ -3250,63 +3189,65 @@ NVSDK_NGX_Result create_vk_rr_feature(VkDevice dev, const RrCreateParams& create
     ctx->handle_id = id;
     if (*out == nullptr) {
         ctx->allocated_handle = new NVSDK_NGX_Handle{id};
-        *out = ctx->allocated_handle;
-    } else {
-        (*out)->Id = id;
     }
 
     log("[openrr] Vulkan Ray Reconstruction feature created (handle=0x%X, render=%ux%u -> output=%ux%u)",
         id, ctx->max_render_w, ctx->max_render_h, ctx->output_w, ctx->output_h);
 
     update_status_from_context(*ctx, false);
+    NVSDK_NGX_Handle* allocated_out = ctx->allocated_handle;
     {
         std::lock_guard<std::mutex> lock(g_ctx_mutex);
         g_vk_rr[id] = std::move(ctx);
+        sync_watchdog_rr_active_locked();
+    }
+    cleanup.committed = true;
+    if (allocated_out) {
+        *out = allocated_out;
+    } else {
+        (*out)->Id = id;
     }
     return NVSDK_NGX_Result_Success;
 }
 
-NVSDK_NGX_Result RR_NGX_MSABI hk_vk_create1(VkDevice dev, VkCommandBuffer cmd, NVSDK_NGX_Feature feature,
-                                            NVSDK_NGX_Parameter* params, NVSDK_NGX_Handle** out) {
-    if (feature == NVSDK_NGX_Feature_RayReconstruction && params && out) {
+NVSDK_NGX_Result RR_NGX_MSABI provider_vk_create1(VkDevice dev, VkCommandBuffer, NVSDK_NGX_Feature feature,
+                                                  NVSDK_NGX_Parameter* params, NVSDK_NGX_Handle** out) {
+    try {
+        if (feature != NVSDK_NGX_Feature_RayReconstruction) return NVSDK_NGX_Result_FAIL_FeatureNotSupported;
+        if (!params || !out) return NVSDK_NGX_Result_FAIL_InvalidParameter;
         const RrCreateParams create = read_create_params(*params);
-        if (openrr::pe::current_config().enabled && vk_rr_capable()) {
-            const NVSDK_NGX_Result r = create_vk_rr_feature(dev, create, out);
-            if (r == NVSDK_NGX_Result_Success) return r;
-        }
+        return create_vk_rr_feature(dev, create, out);
+    } catch (...) {
+        return NVSDK_NGX_Result_Fail;
     }
-    return real_vk_create1 ? real_vk_create1(dev, cmd, feature, params, out) : NVSDK_NGX_Result_Fail;
 }
 
-NVSDK_NGX_Result RR_NGX_MSABI hk_vk_create(VkCommandBuffer cmd, NVSDK_NGX_Feature feature,
-                                           NVSDK_NGX_Parameter* params, NVSDK_NGX_Handle** out) {
-    if (feature == NVSDK_NGX_Feature_RayReconstruction && params && out) {
-        const RrCreateParams create = read_create_params(*params);
-        if (openrr::pe::current_config().enabled && vk_rr_capable()) {
-            VkDevice dev = VK_NULL_HANDLE;
-            {
-                std::lock_guard<std::mutex> lock(g_vk_ngx_mutex);
-                dev = g_ngx_vk_device;
-            }
-            const NVSDK_NGX_Result r = create_vk_rr_feature(dev, create, out);
-            if (r == NVSDK_NGX_Result_Success) return r;
+NVSDK_NGX_Result RR_NGX_MSABI provider_vk_create(VkCommandBuffer cmd, NVSDK_NGX_Feature feature,
+                                                 NVSDK_NGX_Parameter* params, NVSDK_NGX_Handle** out) {
+    try {
+        VkDevice dev = VK_NULL_HANDLE;
+        {
+            std::lock_guard<std::mutex> lock(g_vk_ngx_mutex);
+            dev = g_ngx_vk_device;
         }
+        return provider_vk_create1(dev, cmd, feature, params, out);
+    } catch (...) {
+        return NVSDK_NGX_Result_Fail;
     }
-    return real_vk_create ? real_vk_create(cmd, feature, params, out) : NVSDK_NGX_Result_Fail;
 }
 
 std::atomic<uint64_t> g_vk_skipped_frames{0};
 
-NVSDK_NGX_Result RR_NGX_MSABI hk_vk_evaluate(VkCommandBuffer cmd, const NVSDK_NGX_Handle* handle,
-                                             NVSDK_NGX_Parameter* params, void* callback) {
-    if (!handle) return real_vk_evaluate(cmd, handle, params, callback);
+NVSDK_NGX_Result evaluate_vk_rr(VkCommandBuffer cmd, const NVSDK_NGX_Handle* handle, NVSDK_NGX_Parameter* params) {
+    if (!handle) return NVSDK_NGX_Result_FAIL_InvalidParameter;
     std::unique_lock<std::mutex> lock(g_ctx_mutex);
     auto it = g_vk_rr.find(handle->Id);
     if (it == g_vk_rr.end()) {
-        lock.unlock();
-        return real_vk_evaluate(cmd, handle, params, callback);
+        return NVSDK_NGX_Result_FAIL_FeatureNotFound;
     }
-    if (!cmd || !params) return NVSDK_NGX_Result_FAIL_InvalidParameter;
+    if (!cmd || !params || !g_api5.RecordVk) return NVSDK_NGX_Result_FAIL_InvalidParameter;
+
+    openrr::pe::watchdog::beat();
 
     RrContext& ctx = *it->second;
     const openrr::pe::Config cfg = openrr::pe::current_config();
@@ -3318,7 +3259,11 @@ NVSDK_NGX_Result RR_NGX_MSABI hk_vk_evaluate(VkCommandBuffer cmd, const NVSDK_NG
     OnrRrFrame frame{};
     if (!fill_vk_frame(ctx, *params, frame)) return NVSDK_NGX_Result_Fail;
 
-    const int32_t rc = g_api5.RecordVk(ctx.runtime_ctx, &frame, cmd);
+    int32_t rc = ONR_RR_FAILED;
+    {
+        InternalVkScope vk_scope;
+        rc = g_api5.RecordVk(ctx.runtime_ctx, &frame, cmd);
+    }
     if (rc == ONR_RR_BUSY) {
         const uint64_t skip_n = ++g_vk_skipped_frames;
         if (skip_n == 1 || (skip_n & (skip_n - 1)) == 0) {
@@ -3340,31 +3285,47 @@ NVSDK_NGX_Result RR_NGX_MSABI hk_vk_evaluate(VkCommandBuffer cmd, const NVSDK_NG
     return NVSDK_NGX_Result_Success;
 }
 
-NVSDK_NGX_Result RR_NGX_MSABI hk_vk_release(NVSDK_NGX_Handle* handle) {
-    if (!handle) return real_vk_release(handle);
-    std::unique_ptr<RrContext> gone;
-    {
-        std::lock_guard<std::mutex> lock(g_ctx_mutex);
-        auto it = g_vk_rr.find(handle->Id);
-        if (it != g_vk_rr.end()) {
-            gone = std::move(it->second);
-            g_vk_rr.erase(it);
+NVSDK_NGX_Result RR_NGX_MSABI provider_vk_evaluate(VkCommandBuffer cmd, const NVSDK_NGX_Handle* handle,
+                                                   const NVSDK_NGX_Parameter* params, void*) {
+    try { return evaluate_vk_rr(cmd, handle, const_cast<NVSDK_NGX_Parameter*>(params)); }
+    catch (...) { return NVSDK_NGX_Result_Fail; }
+}
+
+NVSDK_NGX_Result RR_NGX_MSABI provider_vk_release(NVSDK_NGX_Handle* handle) {
+    try {
+        if (!handle) return NVSDK_NGX_Result_FAIL_InvalidParameter;
+        std::unique_ptr<RrContext> gone;
+        bool any_active = false;
+        {
+            std::lock_guard<std::mutex> lock(g_ctx_mutex);
+            auto it = g_vk_rr.find(handle->Id);
+            if (it != g_vk_rr.end()) {
+                gone = std::move(it->second);
+                g_vk_rr.erase(it);
+            }
+            any_active = !g_d3d12_rr.empty() || !g_vk_rr.empty();
+            sync_watchdog_rr_active_locked();
         }
+        if (!gone) return NVSDK_NGX_Result_FAIL_FeatureNotFound;
+        log("[openrr] Vulkan Ray Reconstruction feature released (handle=0x%X)", gone->handle_id);
+        if (gone->runtime_ctx) {
+            InternalVkScope vk_scope;
+            g_api.Destroy(gone->runtime_ctx);
+        }
+        if (gone->allocated_handle == handle) delete gone->allocated_handle;
+        if (!any_active) {
+            openrr::pe::control::Status st{};
+            openrr::pe::control::report(st);
+        }
+        return NVSDK_NGX_Result_Success;
+    } catch (...) {
+        return NVSDK_NGX_Result_Fail;
     }
-    if (!gone) return real_vk_release(handle);
-    log("[openrr] Vulkan Ray Reconstruction feature released (handle=0x%X)", gone->handle_id);
-    if (gone->runtime_ctx) {
-        InternalVkScope vk_scope;
-        g_api.Destroy(gone->runtime_ctx);
-    }
-    if (gone->allocated_handle == handle) delete gone->allocated_handle;
-    openrr::pe::control::Status st{};
-    openrr::pe::control::report(st);
-    return NVSDK_NGX_Result_Success;
 }
 
 void destroy_all_vk_rr(VkDevice filter_dev = VK_NULL_HANDLE) {
     std::vector<std::unique_ptr<RrContext>> list;
+    bool any_active = false;
     {
         std::lock_guard<std::mutex> lock(g_ctx_mutex);
         for (auto it = g_vk_rr.begin(); it != g_vk_rr.end();) {
@@ -3375,6 +3336,8 @@ void destroy_all_vk_rr(VkDevice filter_dev = VK_NULL_HANDLE) {
                 ++it;
             }
         }
+        any_active = !g_d3d12_rr.empty() || !g_vk_rr.empty();
+        sync_watchdog_rr_active_locked();
     }
     for (auto& ctx : list) {
         if (!ctx) continue;
@@ -3388,19 +3351,75 @@ void destroy_all_vk_rr(VkDevice filter_dev = VK_NULL_HANDLE) {
         }
         if (ctx->allocated_handle) delete ctx->allocated_handle;
     }
+    if (!list.empty() && !any_active) {
+        openrr::pe::control::Status st{};
+        openrr::pe::control::report(st);
+    }
 }
 
-NVSDK_NGX_Result RR_NGX_MSABI hk_vk_shutdown() {
-    destroy_all_vk_rr();
-    return real_vk_shutdown ? real_vk_shutdown() : NVSDK_NGX_Result_Success;
+NVSDK_NGX_Result RR_NGX_MSABI provider_vk_shutdown() {
+    try { destroy_all_vk_rr(); return NVSDK_NGX_Result_Success; }
+    catch (...) { return NVSDK_NGX_Result_Fail; }
 }
 
-NVSDK_NGX_Result RR_NGX_MSABI hk_vk_shutdown1(VkDevice dev) {
-    destroy_all_vk_rr(dev);
-    return real_vk_shutdown1 ? real_vk_shutdown1(dev) : NVSDK_NGX_Result_Success;
+NVSDK_NGX_Result RR_NGX_MSABI provider_vk_shutdown1(VkDevice dev) {
+    try { destroy_all_vk_rr(dev); return NVSDK_NGX_Result_Success; }
+    catch (...) { return NVSDK_NGX_Result_Fail; }
 }
 
-// ---- Vulkan Device & Swapchain Hooks (vkCreateDevice, vkDestroyDevice, vkQueuePresentKHR, Item #3 & #9) ----
+void* openrr_provider_get_proc(void*, const char* export_name) {
+    if (!export_name) return nullptr;
+    // D3D12 DLSSD provider exports
+    if (std::strcmp(export_name, "NVSDK_NGX_D3D12_Init") == 0)
+        return reinterpret_cast<void*>(&provider_d3d12_init);
+    if (std::strcmp(export_name, "NVSDK_NGX_D3D12_Init_Ext") == 0)
+        return reinterpret_cast<void*>(&provider_d3d12_init_ext);
+    if (std::strcmp(export_name, "NVSDK_NGX_D3D12_Shutdown") == 0)
+        return reinterpret_cast<void*>(&provider_d3d12_shutdown);
+    if (std::strcmp(export_name, "NVSDK_NGX_D3D12_Shutdown1") == 0)
+        return reinterpret_cast<void*>(&provider_d3d12_shutdown1);
+    if (std::strcmp(export_name, "NVSDK_NGX_D3D12_GetScratchBufferSize") == 0)
+        return reinterpret_cast<void*>(&provider_d3d12_get_scratch);
+    if (std::strcmp(export_name, "NVSDK_NGX_D3D12_CreateFeature") == 0)
+        return reinterpret_cast<void*>(&provider_d3d12_create);
+    if (std::strcmp(export_name, "NVSDK_NGX_D3D12_ReleaseFeature") == 0)
+        return reinterpret_cast<void*>(&provider_d3d12_release);
+    if (std::strcmp(export_name, "NVSDK_NGX_D3D12_GetFeatureRequirements") == 0)
+        return reinterpret_cast<void*>(&provider_d3d12_get_feat_req);
+    if (std::strcmp(export_name, "NVSDK_NGX_D3D12_EvaluateFeature") == 0)
+        return reinterpret_cast<void*>(&provider_d3d12_evaluate);
+    if (std::strcmp(export_name, "NVSDK_NGX_D3D12_PopulateParameters_Impl") == 0)
+        return reinterpret_cast<void*>(&provider_d3d12_populate_params);
+
+    // Vulkan DLSSD provider exports
+    if (std::strcmp(export_name, "NVSDK_NGX_VULKAN_Init") == 0)
+        return reinterpret_cast<void*>(&provider_vk_init);
+    if (std::strcmp(export_name, "NVSDK_NGX_VULKAN_Init_Ext") == 0)
+        return reinterpret_cast<void*>(&provider_vk_init_ext);
+    if (std::strcmp(export_name, "NVSDK_NGX_VULKAN_Init_Ext2") == 0)
+        return reinterpret_cast<void*>(&provider_vk_init_ext2);
+    if (std::strcmp(export_name, "NVSDK_NGX_VULKAN_Shutdown") == 0)
+        return reinterpret_cast<void*>(&provider_vk_shutdown);
+    if (std::strcmp(export_name, "NVSDK_NGX_VULKAN_Shutdown1") == 0)
+        return reinterpret_cast<void*>(&provider_vk_shutdown1);
+    if (std::strcmp(export_name, "NVSDK_NGX_VULKAN_GetScratchBufferSize") == 0)
+        return reinterpret_cast<void*>(&provider_vk_get_scratch);
+    if (std::strcmp(export_name, "NVSDK_NGX_VULKAN_CreateFeature") == 0)
+        return reinterpret_cast<void*>(&provider_vk_create);
+    if (std::strcmp(export_name, "NVSDK_NGX_VULKAN_CreateFeature1") == 0)
+        return reinterpret_cast<void*>(&provider_vk_create1);
+    if (std::strcmp(export_name, "NVSDK_NGX_VULKAN_ReleaseFeature") == 0)
+        return reinterpret_cast<void*>(&provider_vk_release);
+    if (std::strcmp(export_name, "NVSDK_NGX_VULKAN_GetFeatureRequirements") == 0)
+        return reinterpret_cast<void*>(&provider_vk_get_feat_req);
+    if (std::strcmp(export_name, "NVSDK_NGX_VULKAN_EvaluateFeature") == 0)
+        return reinterpret_cast<void*>(&provider_vk_evaluate);
+    if (std::strcmp(export_name, "NVSDK_NGX_VULKAN_PopulateParameters_Impl") == 0)
+        return reinterpret_cast<void*>(&provider_vk_populate_params);
+    return nullptr;
+}
+
+// ---- Vulkan Device & Command-Buffer Lifetime Hooks (vkCreateDevice, vkDestroyDevice, Item #3 & #9) ----
 std::mutex g_vk_dev_mutex;
 std::unordered_map<VkPhysicalDevice, VkInstance> g_phys_to_inst;
 std::unordered_map<VkInstance, uint32_t> g_inst_api_ver;
@@ -3432,15 +3451,6 @@ std::atomic<PFN_vkDestroyCommandPool> g_gdpa_destroy_pool{nullptr};
 
 void* g_vk_export_addrs[8]{};
 thread_local int t_in_vk_create_device = 0;
-
-struct SeenVkDevice {
-    VkInstance instance = VK_NULL_HANDLE;
-    VkPhysicalDevice physical = VK_NULL_HANDLE;
-    VkDevice device = VK_NULL_HANDLE;
-    std::vector<uint32_t> families;
-    std::vector<uint32_t> counts;
-};
-std::vector<SeenVkDevice> g_seen_vk_devices;
 
 VKAPI_ATTR VkResult VKAPI_CALL hk_vk_create_instance(const VkInstanceCreateInfo* ci, const VkAllocationCallbacks* a, VkInstance* out) {
     const VkResult r = real_vk_create_instance(ci, a, out);
@@ -3485,20 +3495,7 @@ VkResult do_vk_create_device(PFN_vkCreateDevice create, VkInstance inst, VkPhysi
     }
 
     openrr::pe::vkdevice::DeviceInfo di{};
-    const VkResult r = openrr::pe::vkdevice::create_with_runtime(create, inst, api_ver, phys, ci, a, out, &di);
-    if (r == VK_SUCCESS && out && *out && ci) {
-        SeenVkDevice sd{};
-        sd.instance = di.instance;
-        sd.physical = phys;
-        sd.device = *out;
-        for (uint32_t i = 0; i < ci->queueCreateInfoCount; ++i) {
-            sd.families.push_back(ci->pQueueCreateInfos[i].queueFamilyIndex);
-            sd.counts.push_back(ci->pQueueCreateInfos[i].queueCount);
-        }
-        std::lock_guard<std::mutex> lock(g_vk_dev_mutex);
-        g_seen_vk_devices.push_back(std::move(sd));
-    }
-    return r;
+    return openrr::pe::vkdevice::create_with_runtime(create, inst, api_ver, phys, ci, a, out, &di);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL hk_vk_create_device(VkPhysicalDevice phys, const VkDeviceCreateInfo* ci,
@@ -3514,14 +3511,9 @@ VKAPI_ATTR VkResult VKAPI_CALL hk_vk_export_create_device(VkPhysicalDevice phys,
 
 void on_vk_device_destroying(VkDevice device) {
     if (!device) return;
-    openrr::pe::menu::vulkan_forget(device);
     destroy_all_vk_rr(device);
     OnrRrNotifyVkDeviceDestroyed(device);
     openrr::pe::vkdevice::forget_device(device);
-    std::lock_guard<std::mutex> lock(g_vk_dev_mutex);
-    g_seen_vk_devices.erase(std::remove_if(g_seen_vk_devices.begin(), g_seen_vk_devices.end(),
-                                           [device](const SeenVkDevice& d) { return d.device == device; }),
-                            g_seen_vk_devices.end());
 }
 
 VKAPI_ATTR void VKAPI_CALL hk_vk_destroy_device(VkDevice device, const VkAllocationCallbacks* a) {
@@ -3651,7 +3643,6 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL hk_vk_gipa(VkInstance instance, const c
 }
 
 std::atomic<bool> g_vk_dev_hooks_done{false};
-std::atomic<bool> g_vk_present_hooks_done{false};
 
 HMODULE active_vk_module() {
     if (HMODULE wm = GetModuleHandleW(L"winevulkan.dll")) {
@@ -3687,112 +3678,6 @@ void hook_device_creation() {
     try_hk("vkDestroyCommandPool", reinterpret_cast<void*>(&hk_vk_export_destroy_pool), reinterpret_cast<void**>(&real_vk_export_destroy_pool), true);
 }
 
-// ---- Vulkan Swapchains & Present Heartbeat ----
-struct VkSwapRec {
-    VkDevice device = VK_NULL_HANDLE;
-    VkFormat format = VK_FORMAT_UNDEFINED;
-    VkColorSpaceKHR space = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
-    VkExtent2D extent{};
-    VkImageUsageFlags usage = 0;
-    std::vector<VkImage> images;
-};
-
-std::mutex g_vk_swap_mutex;
-std::unordered_map<VkSwapchainKHR, VkSwapRec> g_vk_swaps;
-PFN_vkCreateSwapchainKHR real_vk_create_swapchain = nullptr;
-PFN_vkDestroySwapchainKHR real_vk_destroy_swapchain = nullptr;
-PFN_vkQueuePresentKHR real_vk_queue_present = nullptr;
-
-VKAPI_ATTR VkResult VKAPI_CALL hk_vk_create_swapchain(VkDevice device, const VkSwapchainCreateInfoKHR* ci,
-                                                      const VkAllocationCallbacks* a, VkSwapchainKHR* out) {
-    VkSwapchainCreateInfoKHR mod{};
-    if (ci) {
-        mod = *ci;
-        mod.imageUsage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-    }
-    VkResult r = real_vk_create_swapchain(device, ci ? &mod : ci, a, out);
-    if (r != VK_SUCCESS && ci) r = real_vk_create_swapchain(device, ci, a, out);
-    if (r == VK_SUCCESS && out && *out && ci) {
-        std::lock_guard<std::mutex> lock(g_vk_swap_mutex);
-        g_vk_swaps[*out] = {device, ci->imageFormat, ci->imageColorSpace, ci->imageExtent,
-                            ci->imageUsage | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, {}};
-    }
-    return r;
-}
-
-VKAPI_ATTR void VKAPI_CALL hk_vk_destroy_swapchain(VkDevice device, VkSwapchainKHR sc, const VkAllocationCallbacks* a) {
-    if (sc) {
-        openrr::pe::menu::vulkan_forget(device, sc);
-        std::lock_guard<std::mutex> lock(g_vk_swap_mutex);
-        g_vk_swaps.erase(sc);
-    }
-    real_vk_destroy_swapchain(device, sc, a);
-}
-
-const VkPresentInfoKHR* try_vk_present_menu(VkQueue queue, const VkPresentInfoKHR* info) {
-    if (!info || info->swapchainCount != 1 || !info->pSwapchains) return nullptr;
-    const VkSwapchainKHR sc = info->pSwapchains[0];
-    VkSwapRec rec{};
-    {
-        std::lock_guard<std::mutex> lock(g_vk_swap_mutex);
-        auto it = g_vk_swaps.find(sc);
-        if (it == g_vk_swaps.end()) return nullptr;
-        rec = it->second;
-    }
-    if (!(rec.usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT)) return nullptr;
-
-    SeenVkDevice dev{};
-    {
-        std::lock_guard<std::mutex> lock(g_vk_dev_mutex);
-        for (const auto& d : g_seen_vk_devices) {
-            if (d.device == rec.device) { dev = d; break; }
-        }
-    }
-    if (!dev.device) return nullptr;
-
-    openrr::pe::vulkan_entry_points();
-    uint32_t family = ~0u;
-    for (size_t i = 0; i < dev.families.size() && family == ~0u; ++i) {
-        for (uint32_t j = 0; j < (i < dev.counts.size() ? dev.counts[i] : 1u); ++j) {
-            VkQueue q = VK_NULL_HANDLE;
-            vkGetDeviceQueue(dev.device, dev.families[i], j, &q);
-            if (q == queue) { family = dev.families[i]; break; }
-        }
-    }
-    if (family == ~0u) return nullptr;
-
-    if (rec.images.empty()) {
-        uint32_t count = 0;
-        if (vkGetSwapchainImagesKHR(rec.device, sc, &count, nullptr) != VK_SUCCESS || !count) return nullptr;
-        rec.images.resize(count);
-        if (vkGetSwapchainImagesKHR(rec.device, sc, &count, rec.images.data()) != VK_SUCCESS) return nullptr;
-        std::lock_guard<std::mutex> lock(g_vk_swap_mutex);
-        g_vk_swaps[sc].images = rec.images;
-    }
-    return openrr::pe::menu::vulkan_present(dev.instance, dev.physical, dev.device, queue, family, sc,
-                                            rec.format, rec.space, rec.extent, rec.images, info);
-}
-
-VKAPI_ATTR VkResult VKAPI_CALL hk_vk_queue_present(VkQueue q, const VkPresentInfoKHR* p) {
-    ensure_deferred_init();
-    openrr::pe::watchdog::beat();
-    if (const VkPresentInfoKHR* mine = try_vk_present_menu(q, p)) p = mine;
-    return real_vk_queue_present(q, p);
-}
-
-void hook_present_beat() {
-    HMODULE m = active_vk_module();
-    if (!m) return;
-    if (g_vk_present_hooks_done.exchange(true, std::memory_order_acq_rel)) return;
-    auto try_hk = [&](const char* name, void* detour, void** orig) {
-        void* fn = reinterpret_cast<void*>(GetProcAddress(m, name));
-        if (fn && MH_CreateHook(fn, detour, orig) == MH_OK) MH_EnableHook(fn);
-    };
-    try_hk("vkCreateSwapchainKHR", reinterpret_cast<void*>(&hk_vk_create_swapchain), reinterpret_cast<void**>(&real_vk_create_swapchain));
-    try_hk("vkDestroySwapchainKHR", reinterpret_cast<void*>(&hk_vk_destroy_swapchain), reinterpret_cast<void**>(&real_vk_destroy_swapchain));
-    try_hk("vkQueuePresentKHR", reinterpret_cast<void*>(&hk_vk_queue_present), reinterpret_cast<void**>(&real_vk_queue_present));
-}
-
 using PFN_D3D12CreateDevice = HRESULT(WINAPI*)(IUnknown*, D3D_FEATURE_LEVEL, REFIID, void**);
 PFN_D3D12CreateDevice real_d3d12_create_device = nullptr;
 std::atomic<bool> g_d3d12_dev_hook_done{false};
@@ -3803,8 +3688,6 @@ HRESULT WINAPI hk_d3d12_create_device(IUnknown* adapter, D3D_FEATURE_LEVEL min_l
         ID3D12Device* dev = nullptr;
         if (SUCCEEDED(static_cast<IUnknown*>(*out)->QueryInterface(IID_PPV_ARGS(&dev))) && dev) {
             ensure_cmd_sig_hook(dev);
-            openrr::pe::menu::on_present_beat(&on_dxgi_present_cb);
-            openrr::pe::menu::prepare_dxgi();
             dev->Release();
         }
     }
@@ -3821,192 +3704,7 @@ void hook_d3d12_device_creation() {
     }
 }
 
-// ---- Streamline sl.dlss_d.dll load adaptation (DXGI spoofing off, e.g. OptiPatcher) ----
-// sl.dlss_d offers RR only if sl.common's SystemCaps report a supported NVIDIA adapter. During its synchronous
-// slOnPluginLoad (slInit, before any device or present work) adapters OpenRR can serve are shown as NVIDIA in the
-// caps object sl.common shares with it; every touched field is restored on return. This covers DLSS-D's own read and
-// the sl.common callbacks it calls from there (NGXGetFeatureRequirements, updateCommonEmbeddedJSONConfig).
-// Known limits: no other thread is expected to read the caps during slInit's plugin load, and callbacks a plugin
-// might defer past slOnPluginLoad see the real caps.
-// sl::param::IParameters with the MSVC ABI: vtable[7] = get(const char*, void**).
-struct SlParametersVtable { void* slots[15]; };
-struct SlParameters { const SlParametersVtable* vtable; };
-struct SlAdapter {
-    LUID id{};
-    uint32_t vendor{};
-    uint32_t bit{};
-    uint32_t architecture{};
-    uint32_t implementation{};
-    uint32_t revision{};
-    uint32_t deviceId{};
-    void* nativeInterface{};
-};
-constexpr uint32_t kSlMaxNumSupportedGPUs = 8;
-struct SlSystemCaps {
-    uint32_t gpuCount{};
-    uint32_t osVersionMajor{};
-    uint32_t osVersionMinor{};
-    uint32_t osVersionBuild{};
-    uint32_t driverVersionMajor{};
-    uint32_t driverVersionMinor{};
-    SlAdapter adapters[kSlMaxNumSupportedGPUs]{};
-    uint32_t gpuLoad[kSlMaxNumSupportedGPUs]{};
-    bool hwsSupported{};
-    bool laptopDevice{};
-};
-
-using PFN_slGetPluginFunction = void*(RR_NGX_MSABI*)(const char*);
-using PFN_slOnPluginLoad = bool(RR_NGX_MSABI*)(SlParameters*, const char*, const char**);
-std::atomic<void*> g_dlssd_hook_target{nullptr};
-std::atomic<PFN_slGetPluginFunction> g_real_dlssd_get{nullptr};
-std::atomic<PFN_slOnPluginLoad> g_real_dlssd_load{nullptr};
-
-bool sl_caps_usable(const SlSystemCaps* c) {
-    MEMORY_BASIC_INFORMATION mbi{};
-    if (!c || !VirtualQuery(c, &mbi, sizeof(mbi)) || mbi.State != MEM_COMMIT || (mbi.Protect & PAGE_GUARD) ||
-        !(mbi.Protect & (PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)) ||
-        reinterpret_cast<uintptr_t>(c) + sizeof(*c) > reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize)
-        return false;
-    return c->gpuCount > 0 && c->gpuCount <= kSlMaxNumSupportedGPUs && c->osVersionMajor == 10;
-}
-
-struct SlCapsPatch {
-    SlSystemCaps* caps = nullptr;
-    uint32_t mask = 0;
-    uint32_t vendor[kSlMaxNumSupportedGPUs]{}, architecture[kSlMaxNumSupportedGPUs]{};
-    uint32_t driver_major = 0, driver_minor = 0;
-    bool hws = false;
-
-    explicit SlCapsPatch(SlParameters* params) {
-        if (!params || !params->vtable || !params->vtable->slots[7] || !openrr::pe::current_config().enabled) return;
-        using GetPtr = bool(RR_NGX_MSABI*)(SlParameters*, const char*, void**);
-        void* raw = nullptr;
-        if (!reinterpret_cast<GetPtr>(params->vtable->slots[7])(params, "sl.param.common.gpuInfo", &raw)) return;
-        auto* c = static_cast<SlSystemCaps*>(raw);
-        if (!sl_caps_usable(c)) return;
-        for (uint32_t i = 0; i < c->gpuCount; ++i) {
-            SlAdapter& a = c->adapters[i];
-            const bool candidate = a.vendor == 0x1002u || (a.vendor == 0x10DEu && a.architecture < 0x160u);
-            if (!candidate || !(a.id.LowPart || a.id.HighPart) || !check_usable(&a.id)) continue;
-            vendor[i] = a.vendor;
-            architecture[i] = a.architecture;
-            mask |= 1u << i;
-            a.vendor = 0x10DEu;
-            if (a.architecture < 0x160u) a.architecture = 0x190u;
-        }
-        if (!mask) return;
-        caps = c;
-        driver_major = c->driverVersionMajor;
-        driver_minor = c->driverVersionMinor;
-        hws = c->hwsSupported;
-        if (driver_major < 535u || (driver_major == 535u && driver_minor < 15u)) {
-            c->driverVersionMajor = 999u;
-            c->driverVersionMinor = 0u;
-        }
-        c->hwsSupported = true;
-    }
-    ~SlCapsPatch() {
-        if (!caps) return;
-        for (uint32_t i = 0; i < kSlMaxNumSupportedGPUs; ++i) {
-            if (!(mask & (1u << i))) continue;
-            caps->adapters[i].vendor = vendor[i];
-            caps->adapters[i].architecture = architecture[i];
-        }
-        caps->driverVersionMajor = driver_major;
-        caps->driverVersionMinor = driver_minor;
-        caps->hwsSupported = hws;
-    }
-    SlCapsPatch(const SlCapsPatch&) = delete;
-    SlCapsPatch& operator=(const SlCapsPatch&) = delete;
-};
-
-void remove_json_token(std::string& json, const char* token) {
-    const std::string quoted = std::string("\"") + token + "\"";
-    auto blank = [](char ch) { return ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n'; };
-    size_t pos = 0;
-    while ((pos = json.find(quoted, pos)) != std::string::npos) {
-        size_t start = pos, end = pos + quoted.size(), after = end;
-        while (after < json.size() && blank(json[after])) ++after;
-        if (after < json.size() && json[after] == ',') {
-            end = after + 1;
-        } else {
-            size_t before = start;
-            while (before > 0 && blank(json[before - 1])) --before;
-            if (before > 0 && json[before - 1] == ',') start = before - 1;
-        }
-        json.erase(start, end - start);
-        pos = start;
-    }
-}
-
-bool RR_NGX_MSABI hk_dlssd_on_plugin_load(SlParameters* params, const char* loader_json, const char** plugin_json) {
-    const PFN_slOnPluginLoad real = g_real_dlssd_load.load(std::memory_order_acquire);
-    if (!real) return false;
-    static thread_local bool inside = false;
-    if (inside) return real(params, loader_json, plugin_json);
-    struct Inside { Inside() { inside = true; } ~Inside() { inside = false; } } guard;
-
-    uint32_t adapted = 0;
-    bool result = false;
-    {
-        SlCapsPatch patch(params);
-        adapted = patch.mask;
-        result = real(params, loader_json, plugin_json);
-    }
-    if (!adapted) return result;
-    log("[openrr] sl.dlss_d: SystemCaps adapted during slOnPluginLoad (adapter mask 0x%x) -> %s",
-        adapted, result ? "loaded" : "refused");
-    if (result && plugin_json && *plugin_json) {
-        // OpenRR does not use NVIDIA-only Vulkan extensions; the host must not be asked to enable them.
-        std::string patched = *plugin_json;
-        remove_json_token(patched, "VK_NVX_binary_import");
-        remove_json_token(patched, "VK_NVX_image_view_handle");
-        static std::mutex mutex;
-        static std::unordered_set<std::string> pool; // Returned strings stay valid for the process lifetime.
-        std::lock_guard<std::mutex> lock(mutex);
-        *plugin_json = pool.insert(std::move(patched)).first->c_str();
-    }
-    return result;
-}
-
-void* RR_NGX_MSABI hk_dlssd_get_plugin_fn(const char* name) {
-    const PFN_slGetPluginFunction get = g_real_dlssd_get.load(std::memory_order_acquire);
-    void* fn = get ? get(name) : nullptr;
-    if (fn && name && std::strcmp(name, "slOnPluginLoad") == 0) {
-        g_real_dlssd_load.store(reinterpret_cast<PFN_slOnPluginLoad>(fn), std::memory_order_release);
-        return reinterpret_cast<void*>(&hk_dlssd_on_plugin_load);
-    }
-    return fn;
-}
-
-// sl.dlss_d exports only slGetPluginFunction; sl.interposer resolves slOnPluginLoad through it right after loading.
-void hook_sl_dlssd(HMODULE mod) {
-    void* fn = mod ? reinterpret_cast<void*>(GetProcAddress(mod, "slGetPluginFunction")) : nullptr;
-    void* expected = nullptr;
-    if (!fn || !g_dlssd_hook_target.compare_exchange_strong(expected, fn, std::memory_order_acq_rel)) return;
-    const MH_STATUS init = MH_Initialize();
-    void* orig = nullptr;
-    if ((init == MH_OK || init == MH_ERROR_ALREADY_INITIALIZED) &&
-        MH_CreateHook(fn, reinterpret_cast<void*>(&hk_dlssd_get_plugin_fn), &orig) == MH_OK) {
-        g_real_dlssd_get.store(reinterpret_cast<PFN_slGetPluginFunction>(orig), std::memory_order_release);
-        if (MH_EnableHook(fn) == MH_OK) return;
-        MH_RemoveHook(fn);
-    }
-    g_real_dlssd_get.store(nullptr, std::memory_order_release);
-    g_dlssd_hook_target.store(nullptr, std::memory_order_release);
-    log("[openrr] sl.dlss_d.dll: slGetPluginFunction could not be hooked; Streamline RR then needs DXGI spoofing");
-}
-
-void unhook_sl_dlssd(const void* base, ULONG size) {
-    void* fn = g_dlssd_hook_target.load(std::memory_order_acquire);
-    const auto at = reinterpret_cast<uintptr_t>(fn), begin = reinterpret_cast<uintptr_t>(base);
-    if (!fn || at < begin || at - begin >= size) return;
-    MH_RemoveHook(fn); // The image is still mapped while the unload notification runs.
-    g_real_dlssd_load.store(nullptr, std::memory_order_release);
-    g_real_dlssd_get.store(nullptr, std::memory_order_release);
-    g_dlssd_hook_target.store(nullptr, std::memory_order_release);
-}
-
+// ---- NVAPI NvAPI_GPU_GetGPUInfo (0xafd1b02c) fallback ----
 openrr::pe::nvapi::QueryInterfaceHooks<4> g_nvapi_hooks;
 
 bool nvapi_can_provide() {
@@ -4019,7 +3717,7 @@ void nvapi_log_msg(const char* msg) {
     if (msg) log("[openrr] %s", msg);
 }
 
-// Late vulkan-1.dll / d3d12.dll load notification via LdrRegisterDllNotification (Item #9)
+// Late vulkan-1.dll / d3d12.dll / nvapi64.dll load notification via LdrRegisterDllNotification (Item #9)
 struct UNICODE_STRING_LDR {
     USHORT Length;
     USHORT MaximumLength;
@@ -4043,11 +3741,6 @@ VOID NTAPI on_dll_loaded_notification(ULONG reason, const LDR_DLL_NOTIFICATION_D
     // 1 = LDR_DLL_NOTIFICATION_REASON_LOADED, 2 = LDR_DLL_NOTIFICATION_REASON_UNLOADED
     if ((reason != 1 && reason != 2) || !data || !data->Loaded.BaseDllName || !data->Loaded.BaseDllName->Buffer) return;
     const USHORT chars = data->Loaded.BaseDllName->Length / sizeof(wchar_t);
-    if (chars == 13 && _wcsnicmp(data->Loaded.BaseDllName->Buffer, L"sl.dlss_d.dll", 13) == 0) {
-        if (reason == 1) hook_sl_dlssd(static_cast<HMODULE>(data->Loaded.DllBase));
-        else unhook_sl_dlssd(data->Loaded.DllBase, data->Loaded.SizeOfImage);
-        return;
-    }
     if (chars == 11 && _wcsnicmp(data->Loaded.BaseDllName->Buffer, L"nvapi64.dll", 11) == 0) {
         if (reason == 1) g_nvapi_hooks.hook_module(static_cast<HMODULE>(data->Loaded.DllBase));
         else g_nvapi_hooks.unhook_module(data->Loaded.DllBase, data->Loaded.SizeOfImage);
@@ -4057,26 +3750,30 @@ VOID NTAPI on_dll_loaded_notification(ULONG reason, const LDR_DLL_NOTIFICATION_D
     if ((chars == 12 && _wcsnicmp(data->Loaded.BaseDllName->Buffer, L"vulkan-1.dll", 12) == 0) ||
         (chars == 14 && _wcsnicmp(data->Loaded.BaseDllName->Buffer, L"winevulkan.dll", 14) == 0)) {
         hook_device_creation();
-        hook_present_beat();
     } else if (chars == 9 && _wcsnicmp(data->Loaded.BaseDllName->Buffer, L"d3d12.dll", 9) == 0) {
         hook_d3d12_device_creation();
     }
 }
 
-void register_vulkan_dll_notification() {
+using PFN_LdrUnregisterDllNotification = LONG(NTAPI*)(PVOID);
+
+void register_dll_notification() {
     HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
     if (!ntdll) return;
     auto reg = reinterpret_cast<PFN_LdrRegisterDllNotification>(GetProcAddress(ntdll, "LdrRegisterDllNotification"));
     if (reg) reg(0, &on_dll_loaded_notification, nullptr, &g_dll_notif_cookie);
 }
 
-// ---- Present Heartbeat Callbacks (registered with openrr::pe::menu) ----
-void on_dxgi_present_cb() {
-    ensure_deferred_init();
-    openrr::pe::watchdog::beat();
+void unregister_dll_notification() {
+    if (!g_dll_notif_cookie) return;
+    if (HMODULE ntdll = GetModuleHandleW(L"ntdll.dll")) {
+        auto unreg = reinterpret_cast<PFN_LdrUnregisterDllNotification>(GetProcAddress(ntdll, "LdrUnregisterDllNotification"));
+        if (unreg) unreg(g_dll_notif_cookie);
+    }
+    g_dll_notif_cookie = nullptr;
 }
 
-// ---- Process Termination Watch & Hook Helper ----
+// ---- Process Termination Watch ----
 using PFN_NtTerminateProcess = LONG(NTAPI*)(HANDLE, LONG);
 PFN_NtTerminateProcess real_terminate = nullptr;
 std::atomic<bool> g_terminate_said{false}, g_exiting{false};
@@ -4098,196 +3795,71 @@ void watch_termination() {
     }
 }
 
-bool hook(const char* name, void* detour, void** real, bool required = false) {
-    void* fn = reinterpret_cast<void*>(GetProcAddress(g_opti, name));
-    if (!fn) {
-        if (required) log("[openrr] OptiScaler exports no %s", name);
-        return false;
-    }
-    // NR's relay is private executable memory; the detour it points at belongs to NR.
-    void* target = fn;
-    if (openrr::pe::readable_code(fn, 5) && *static_cast<uint8_t*>(fn) == 0xe9) {
-        int32_t rel = 0;
-        std::memcpy(&rel, static_cast<uint8_t*>(fn) + 1, sizeof(rel));
-        const auto relay = reinterpret_cast<uintptr_t>(fn) + 5 + rel;
-        const auto next = openrr::pe::absolute_jump(reinterpret_cast<uint8_t*>(relay));
-        HMODULE owner = nullptr;
-        if (next && GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
-                                      GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                                      reinterpret_cast<LPCWSTR>(next), &owner)) {
-            auto base = std::filesystem::path(openrr::u8::module_file(owner)).filename().string();
-            for (char& c : base) if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
-            if (base.starts_with("dlssnr-amd") && base.ends_with(".asi")) {
-                const Range range = range_of(owner);
-                if (void* inner = openrr::pe::minhook_inner_target(fn, range.begin, range.end)) {
-                    target = inner;
-                    log("[openrr] %s: NR wrapper preserved; hooking trampoline %p (export %p)", name, target, fn);
-                } else {
-                    log("[openrr] %s: unsupported NR trampoline; ordinary hook fallback (NR before/after compatibility NOT enabled)", name);
-                }
-            }
-        }
-    }
-    const MH_STATUS c = MH_CreateHook(target, detour, real);
-    const MH_STATUS e = c == MH_OK ? MH_EnableHook(target) : c;
-    if (e != MH_OK) log("[openrr] %s could not be hooked (%s)", name, MH_StatusToString(e));
-    return e == MH_OK;
-}
-
-#ifdef OPENRR_EXPERIMENTAL_OPTIFG_HOST
-#include "optifg_provider_locator.hpp"
-bool prepare_optifg_host() {
-    static std::once_flag once;
-    std::call_once(once, [] {
-        char flag[16]{};
-        const auto ini = std::string(openrr::pe::module_folder()) + "\\openrr-amd.ini";
-        openrr::u8::profile("OpenRR", "OptiFGHost", "false", flag, sizeof(flag), ini.c_str());
-        if (_stricmp(flag, "true") && std::strcmp(flag, "1")) return;
-        auto at=optifg_probe::locate(g_opti);
-        if (!at) { log("[openrr-host] locator rejected; independent ASI retained"); return; }
-        auto path=std::filesystem::path(openrr::u8::module_file(g_opti)).parent_path()/L"openrr-ngx-host.dll";
-        // NvngxPath must have loaded the companion into NVNGXProxy already.
-        // Loading it here would not establish that binding.
-        auto proxy=GetModuleHandleW(path.c_str());
-        // OptiDllPath / NvngxPath may place the companion in another directory.
-        // Retain the marker and export checks below for either lookup.
-        if (!proxy) proxy=GetModuleHandleW(L"openrr-ngx-host.dll");
-        using Marker = unsigned int (*)();
-        auto marker = proxy ? reinterpret_cast<Marker>(GetProcAddress(proxy, "OpenRrNgxProxyMarker")) : nullptr;
-        if (!marker || marker() != 0x4f520001u ||
-            !GetProcAddress(proxy, "NVSDK_NGX_D3D12_CreateFeature") ||
-            !GetProcAddress(proxy, "NVSDK_NGX_D3D12_EvaluateFeature") ||
-            !GetProcAddress(proxy, "NVSDK_NGX_D3D12_ReleaseFeature")) {
-            log("[openrr-host] compatible openrr-ngx-host.dll not loaded; check Libraries.NvngxPath; independent ASI retained"); return;
-        }
-        DWORD old=0;
-        if (!VirtualProtect(at,6,PAGE_EXECUTE_READWRITE,&old)) return;
-        std::memset(at,0x90,6);
-        DWORD ignored; VirtualProtect(at,6,old,&ignored); FlushInstructionCache(GetCurrentProcess(),at,6);
-        g_optifg_host_active=true;
-        log("[openrr-host] EXPERIMENT enabled; capability branch bypassed, path branch preserved");
-    });
-    return g_optifg_host_active;
-}
-#endif
 } // namespace
 
-// Called by OptiScaler from its DllMain, under the loader lock: hooks and INI read only (Item #8).
-#ifdef OPENRR_EXPERIMENTAL_OPTIFG_HOST
-// Prototype-only inner NGX endpoints. Never call outer NGX trampolines on failure.
-extern "C" __declspec(dllexport) NVSDK_NGX_Result RR_NGX_MSABI OpenRrHostCreateD3D12(
-    ID3D12GraphicsCommandList* cmd, NVSDK_NGX_Feature feature, NVSDK_NGX_Parameter* params, NVSDK_NGX_Handle** out) {
-    try { return create_d3d12_rr(cmd, feature, params, out, true); }
-    catch (...) { return NVSDK_NGX_Result_Fail; }
-}
-extern "C" __declspec(dllexport) NVSDK_NGX_Result RR_NGX_MSABI OpenRrHostEvaluateD3D12(
-    ID3D12GraphicsCommandList* cmd, const NVSDK_NGX_Handle* handle, NVSDK_NGX_Parameter* params, void* callback) {
-    try { return evaluate_d3d12_rr(cmd, handle, params, callback, true); }
-    catch (...) { return NVSDK_NGX_Result_Fail; }
-}
-extern "C" __declspec(dllexport) NVSDK_NGX_Result RR_NGX_MSABI OpenRrHostReleaseD3D12(NVSDK_NGX_Handle* handle) {
-    try { return release_d3d12_rr(handle, true); }
-    catch (...) { return NVSDK_NGX_Result_Fail; }
-}
-#endif
-
+std::once_flag g_asi_init_once;
 std::atomic<bool> g_asi_initialized{false};
 
-extern "C" __declspec(dllexport) void InitializeASI() {
-    static bool done = false;
-    if (done) return;
-    done = true;
-    g_asi_initialized.store(true, std::memory_order_relaxed);
+void initialize_asi_from(void* caller) {
+    std::call_once(g_asi_init_once, [caller] {
+        GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           reinterpret_cast<LPCWSTR>(caller), &g_opti);
+        if (!g_opti || g_opti == g_self) g_opti = GetModuleHandleW(nullptr);
 
-    GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                       reinterpret_cast<LPCWSTR>(__builtin_return_address(0)), &g_opti);
-    if (!g_opti) g_opti = GetModuleHandleW(nullptr);
-    g_opti_range = range_of(g_opti);
-    g_self_range = range_of(g_self);
+        openrr::pe::set_module(g_opti);
+        openrr::pe::enable_d3d12_dred();
+        openrr::pe::install_crash_watch(g_opti);
+        std::set_terminate([] {
+            log("[openrr] std::terminate: an unhandled exception terminated an OpenRR thread");
+            std::abort();
+        });
 
-    openrr::pe::set_module(g_opti);
-    openrr::pe::enable_d3d12_dred();
-    openrr::pe::install_crash_watch(g_opti);
-    std::set_terminate([] {
-        log("[openrr] std::terminate: an unhandled exception terminated an OpenRR thread");
-        std::abort();
+        log("[openrr] openrr-amd.asi v%s (%s) loaded by %s",
+            ONR_RR_RUNTIME_VERSION, OPENRR_BUILD_STAMP, openrr::u8::module_file(g_opti).c_str());
+
+        judge_executable();
+        read_ini_barriers();
+        probe_coexist_mochi();
+        (void)openrr::pe::current_config();
+
+        const MH_STATUS init = MH_Initialize();
+        if (init != MH_OK && init != MH_ERROR_ALREADY_INITIALIZED) {
+            log("[openrr] MinHook could not start (%s): OpenRR device hooks unavailable", MH_StatusToString(init));
+            g_asi_initialized.store(true, std::memory_order_release);
+            return;
+        }
+        watch_termination();
+        hook_device_creation();
+        hook_d3d12_device_creation();
+        register_dll_notification();
+
+        g_nvapi_hooks.set_callbacks(&nvapi_can_provide, &nvapi_log_msg);
+        if (g_opti && GetProcAddress(g_opti, "nvapi_QueryInterface") && !g_nvapi_hooks.hook_module(g_opti)) {
+            log("[openrr] nvapi_QueryInterface could not be hooked in host module");
+        }
+        g_nvapi_hooks.hook_module(GetModuleHandleW(L"nvapi64.dll"));
+
+        g_asi_initialized.store(true, std::memory_order_release);
+        log("[openrr] native OptiScaler plugin hooks ready (UnrealByExe=%s)", g_unreal_by_exe ? "yes" : "no");
     });
+}
 
-    log("[openrr] openrr-amd.asi v%s (%s) loaded by %s",
-        ONR_RR_RUNTIME_VERSION, OPENRR_BUILD_STAMP, openrr::u8::module_file(g_opti).c_str());
-
-    judge_executable();
-    read_ini_barriers();
-    probe_coexist_mochi();
-    (void)openrr::pe::current_config();
-
-    const MH_STATUS init = MH_Initialize();
-    if (init != MH_OK && init != MH_ERROR_ALREADY_INITIALIZED) {
-        log("[openrr] MinHook could not start (%s): OpenRR does not run", MH_StatusToString(init));
-        return;
+// Called by OptiScaler from its DllMain, under the loader lock: hooks and INI read only (Item #8).
+extern "C" __declspec(dllexport) void InitializeASI() {
+    try {
+        initialize_asi_from(__builtin_return_address(0));
+    } catch (...) {
     }
-    watch_termination();
+}
 
-    // D3D12 NGX hooks
-    const bool d3d12_ok =
-        hook("NVSDK_NGX_D3D12_CreateFeature", reinterpret_cast<void*>(&hk_d3d12_create), reinterpret_cast<void**>(&real_d3d12_create), true) &&
-        hook("NVSDK_NGX_D3D12_EvaluateFeature", reinterpret_cast<void*>(&hk_d3d12_evaluate), reinterpret_cast<void**>(&real_d3d12_evaluate), true) &&
-        hook("NVSDK_NGX_D3D12_ReleaseFeature", reinterpret_cast<void*>(&hk_d3d12_release), reinterpret_cast<void**>(&real_d3d12_release), true);
-
-    hook("NVSDK_NGX_D3D12_Init", reinterpret_cast<void*>(&hk_d3d12_init), reinterpret_cast<void**>(&real_d3d12_init), false);
-    hook("NVSDK_NGX_D3D12_Init_Ext", reinterpret_cast<void*>(&hk_d3d12_init_ext), reinterpret_cast<void**>(&real_d3d12_init_ext), false);
-    hook("NVSDK_NGX_D3D12_Init_ProjectID", reinterpret_cast<void*>(&hk_d3d12_init_project), reinterpret_cast<void**>(&real_d3d12_init_project), false);
-    hook("NVSDK_NGX_D3D12_Init_with_ProjectID", reinterpret_cast<void*>(&hk_d3d12_init_with_project), reinterpret_cast<void**>(&real_d3d12_init_with_project), false);
-    hook("NVSDK_NGX_D3D12_GetCapabilityParameters", reinterpret_cast<void*>(&hk_d3d12_get_cap_params), reinterpret_cast<void**>(&real_d3d12_get_cap_params), false);
-    hook("NVSDK_NGX_D3D12_GetParameters", reinterpret_cast<void*>(&hk_d3d12_get_params), reinterpret_cast<void**>(&real_d3d12_get_params), false);
-    hook("NVSDK_NGX_D3D12_AllocateParameters", reinterpret_cast<void*>(&hk_d3d12_alloc_params), reinterpret_cast<void**>(&real_d3d12_alloc_params), false);
-    if (!hook("NVSDK_NGX_D3D12_PopulateParameters_Impl", reinterpret_cast<void*>(&hk_d3d12_populate_params), reinterpret_cast<void**>(&real_d3d12_populate_params), false)) {
-        hook("NVSDK_NGX_D3D12_PopulateParameters", reinterpret_cast<void*>(&hk_d3d12_populate_params), reinterpret_cast<void**>(&real_d3d12_populate_params), false);
+// Called by OptiScaler right after InitializeASI (still under loader lock for normal ASI plugins).
+extern "C" __declspec(dllexport) bool OptiPluginInit(const OptiPluginApi* api, OptiPlugin* plugin) {
+    try {
+        initialize_asi_from(__builtin_return_address(0));
+        return openrr::pe::opti_plugin::init(api, plugin, &openrr_provider_get_proc, &ensure_deferred_init);
+    } catch (...) {
+        return false;
     }
-    hook("NVSDK_NGX_D3D12_GetFeatureRequirements", reinterpret_cast<void*>(&hk_d3d12_get_feat_req), reinterpret_cast<void**>(&real_d3d12_get_feat_req), false);
-    hook("NVSDK_NGX_D3D12_GetScratchBufferSize", reinterpret_cast<void*>(&hk_d3d12_get_scratch), reinterpret_cast<void**>(&real_d3d12_get_scratch), false);
-    hook("NVSDK_NGX_D3D12_Shutdown", reinterpret_cast<void*>(&hk_d3d12_shutdown), reinterpret_cast<void**>(&real_d3d12_shutdown), false);
-    hook("NVSDK_NGX_D3D12_Shutdown1", reinterpret_cast<void*>(&hk_d3d12_shutdown1), reinterpret_cast<void**>(&real_d3d12_shutdown1), false);
-
-    // Vulkan NGX hooks
-    const bool vk_ok =
-        hook("NVSDK_NGX_VULKAN_EvaluateFeature", reinterpret_cast<void*>(&hk_vk_evaluate), reinterpret_cast<void**>(&real_vk_evaluate), false) &&
-        hook("NVSDK_NGX_VULKAN_ReleaseFeature", reinterpret_cast<void*>(&hk_vk_release), reinterpret_cast<void**>(&real_vk_release), false);
-
-    hook("NVSDK_NGX_VULKAN_CreateFeature1", reinterpret_cast<void*>(&hk_vk_create1), reinterpret_cast<void**>(&real_vk_create1), false);
-    hook("NVSDK_NGX_VULKAN_CreateFeature", reinterpret_cast<void*>(&hk_vk_create), reinterpret_cast<void**>(&real_vk_create), false);
-    hook("NVSDK_NGX_VULKAN_Init", reinterpret_cast<void*>(&hk_vk_init), reinterpret_cast<void**>(&real_vk_init), false);
-    hook("NVSDK_NGX_VULKAN_Init_Ext", reinterpret_cast<void*>(&hk_vk_init_ext), reinterpret_cast<void**>(&real_vk_init_ext), false);
-    hook("NVSDK_NGX_VULKAN_Init_Ext2", reinterpret_cast<void*>(&hk_vk_init_ext2), reinterpret_cast<void**>(&real_vk_init_ext2), false);
-    hook("NVSDK_NGX_VULKAN_Init_ProjectID", reinterpret_cast<void*>(&hk_vk_init_project), reinterpret_cast<void**>(&real_vk_init_project), false);
-    hook("NVSDK_NGX_VULKAN_Init_ProjectID_Ext", reinterpret_cast<void*>(&hk_vk_init_project_ext), reinterpret_cast<void**>(&real_vk_init_project_ext), false);
-    hook("NVSDK_NGX_VULKAN_GetCapabilityParameters", reinterpret_cast<void*>(&hk_vk_get_cap_params), reinterpret_cast<void**>(&real_vk_get_cap_params), false);
-    hook("NVSDK_NGX_VULKAN_GetParameters", reinterpret_cast<void*>(&hk_vk_get_params), reinterpret_cast<void**>(&real_vk_get_params), false);
-    hook("NVSDK_NGX_VULKAN_AllocateParameters", reinterpret_cast<void*>(&hk_vk_alloc_params), reinterpret_cast<void**>(&real_vk_alloc_params), false);
-    if (!hook("NVSDK_NGX_VULKAN_PopulateParameters_Impl", reinterpret_cast<void*>(&hk_vk_populate_params), reinterpret_cast<void**>(&real_vk_populate_params), false)) {
-        hook("NVSDK_NGX_VULKAN_PopulateParameters", reinterpret_cast<void*>(&hk_vk_populate_params), reinterpret_cast<void**>(&real_vk_populate_params), false);
-    }
-    hook("NVSDK_NGX_VULKAN_GetFeatureRequirements", reinterpret_cast<void*>(&hk_vk_get_feat_req), reinterpret_cast<void**>(&real_vk_get_feat_req), false);
-    hook("NVSDK_NGX_VULKAN_GetScratchBufferSize", reinterpret_cast<void*>(&hk_vk_get_scratch), reinterpret_cast<void**>(&real_vk_get_scratch), false);
-    hook("NVSDK_NGX_VULKAN_Shutdown", reinterpret_cast<void*>(&hk_vk_shutdown), reinterpret_cast<void**>(&real_vk_shutdown), false);
-    hook("NVSDK_NGX_VULKAN_Shutdown1", reinterpret_cast<void*>(&hk_vk_shutdown1), reinterpret_cast<void**>(&real_vk_shutdown1), false);
-
-    hook_device_creation();
-    hook_d3d12_device_creation();
-    hook_present_beat();
-    register_vulkan_dll_notification();
-    hook_sl_dlssd(GetModuleHandleW(L"sl.dlss_d.dll")); // Normally loaded later by slInit (notification path).
-    g_nvapi_hooks.set_callbacks(&nvapi_can_provide, &nvapi_log_msg);
-    if (g_opti && GetProcAddress(g_opti, "nvapi_QueryInterface") && !g_nvapi_hooks.hook_module(g_opti)) {
-        log("[openrr] nvapi_QueryInterface could not be hooked in host module");
-    }
-    g_nvapi_hooks.hook_module(GetModuleHandleW(L"nvapi64.dll"));
-    // No CreateDXGIFactory* export hooks: on OptiScaler 10 they sit on OptiScaler's own exports (which decide by
-    // caller module) and make the game's swapchain creation fail. Present is reached through the menu's
-    // swapchain methods; system factory methods retain the actual present queue.
-
-    log("[openrr] NGX hooks installed (D3D12=%s, Vulkan=%s, UnrealByExe=%s)",
-        d3d12_ok ? "ok" : "failed", vk_ok ? "ok" : "failed", g_unreal_by_exe ? "yes" : "no");
 }
 
 BOOL WINAPI DllMain(HINSTANCE module, DWORD reason, LPVOID reserved) {
@@ -4300,11 +3872,11 @@ BOOL WINAPI DllMain(HINSTANCE module, DWORD reason, LPVOID reserved) {
         if (g_asi_initialized.load(std::memory_order_relaxed))
             log("[openrr] process is ending (ExitProcess)");
         openrr::pe::remove_crash_watch();
-        openrr::pe::menu::abandon_at_exit();
         for (auto& [id, ctx] : g_d3d12_rr) (void)ctx.release();
         for (auto& [id, ctx] : g_vk_rr) (void)ctx.release();
         openrr::pe::flush_log();
     } else if (reason == DLL_PROCESS_DETACH) {
+        unregister_dll_notification();
         openrr::pe::remove_crash_watch();
         openrr::pe::flush_log();
     }

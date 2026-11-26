@@ -32,10 +32,6 @@ bool get_device_info(VkDevice device, DeviceInfo* out);
 bool latest_device_info(DeviceInfo* out);
 void forget_device(VkDevice device);
 
-// Per-queue lock helpers for Vulkan menu overlay submission.
-bool lock_queue_held(VkQueue queue);
-void unlock_queue_held(VkQueue queue, bool held);
-
 void set_adapter_names(const std::string& gpu, const std::string& driver);
 std::string gpu_name();
 std::string driver_name();

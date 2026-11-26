@@ -1,5 +1,5 @@
 // Unit and D3D12 harness tests for openrr-amd.asi components:
-// - Item #13: single-digit and numeric virtual-key parsing in openrr::pe::parse_key
+// - Item R7/R8: UTF-8 BOM and missing trailing newline handling in openrr::pe::load_config_file & Ini
 // - Item #11: split vtable fallback self-recursion guard & CreateCommandList fallback on copied vtables
 // - Item #12: split prepare() rejection of open split barriers, enhanced barriers, RTAS, meta commands, and bundles
 #define NOMINMAX
@@ -96,30 +96,6 @@ static int test_installed_data_paths() {
 }
 
 static int test_key_parsing() {
-    int vk = 0, mods = 0;
-
-    if (!openrr::pe::parse_key("1", &vk, &mods) || vk != 0x31 || mods != 0) {
-        std::fprintf(stderr, "FAIL: '1' -> vk=0x%X mods=0x%X (expected 0x31, 0)\n", vk, mods);
-        return 1;
-    }
-    if (!openrr::pe::parse_key("45", &vk, &mods) || vk != 0x2D || mods != 0) {
-        std::fprintf(stderr, "FAIL: '45' -> vk=0x%X mods=0x%X (expected 0x2D, 0)\n", vk, mods);
-        return 1;
-    }
-    if (!openrr::pe::parse_key("0x2D", &vk, &mods) || vk != 0x2D || mods != 0) {
-        std::fprintf(stderr, "FAIL: '0x2D' -> vk=0x%X mods=0x%X (expected 0x2D, 0)\n", vk, mods);
-        return 1;
-    }
-    if (!openrr::pe::parse_key("ctrl+5", &vk, &mods) || vk != 0x35 || mods != MOD_CONTROL) {
-        std::fprintf(stderr, "FAIL: 'ctrl+5' -> vk=0x%X mods=0x%X (expected 0x35, MOD_CONTROL)\n", vk, mods);
-        return 1;
-    }
-    if (!openrr::pe::parse_key("f5", &vk, &mods) || vk != VK_F5 || mods != 0) {
-        std::fprintf(stderr, "FAIL: 'f5' -> vk=0x%X mods=0x%X (expected VK_F5, 0)\n", vk, mods);
-        return 1;
-    }
-    std::printf("[PASS] Item #13: parse_key ('1'->0x31, '45'->0x2D, '0x2D'->0x2D, 'ctrl+5'->0x35+MOD_CONTROL, 'f5'->VK_F5)\n");
-
     // ---- R7 & R8: UTF-8 BOM + missing trailing newline in INI parser & editor ----
     {
         const std::filesystem::path tmp_ini = std::filesystem::temp_directory_path() / L"openrr_test_bom_nl.ini";

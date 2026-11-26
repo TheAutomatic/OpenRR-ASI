@@ -3,7 +3,7 @@
 #
 # The letters: msgid "@font" names a font file beside this file (fonts\NotoSansCJKsc-Regular.ttf of the
 # OpenRR language pack, SIL Open Font License 1.1); without it the Windows CJK fonts are used, and if
-# none has the letters the menu stays English.
+# OptiScaler has no CJK TTFFontPath configured, the tab falls back to English until configured and restarted.
 
 msgid "@language"
 msgstr "日本語"
@@ -11,14 +11,17 @@ msgstr "日本語"
 msgid "@font"
 msgstr "fonts/NotoSansCJKsc-Regular.ttf"
 
-msgid "Enable OpenRR (Ray Reconstruction)"
-msgstr "OpenRR（レイ再構成）を有効化"
-
-msgid "(Menu key: %s)"
-msgstr "（メニューキー：%s）"
-
 msgid "Status"
 msgstr "状態"
+
+msgid "OptiScaler Plugin API v3 (RegisterProvider) is unavailable. Please update to OptiScaler v0.10 nightly."
+msgstr "OptiScaler Plugin API v3（RegisterProvider）が利用できません。OptiScaler v0.10 nightly に更新してください。"
+
+msgid "OpenRR provider registration was disabled at startup ([OpenRR] Enabled = false). Enable it below and restart the game."
+msgstr "起動時に OpenRR プロバイダー登録が無効でした（[OpenRR] Enabled = false）。下で有効化してゲームを再起動してください。"
+
+msgid "OpenRR could not register as an OptiScaler DLSSD provider. Check openrr-amd.log."
+msgstr "OpenRR を OptiScaler DLSSD プロバイダーとして登録できませんでした。openrr-amd.log を確認してください。"
 
 msgid "Idle: waiting for the game to create a DLSS Ray Reconstruction feature."
 msgstr "待機中：ゲームが DLSS レイ再構成機能を作成するのを待っています。"
@@ -38,6 +41,9 @@ msgstr "失敗"
 msgid "Unknown"
 msgstr "不明"
 
+msgid "State: %s%s%s%s"
+msgstr "状態：%s%s%s%s"
+
 msgid "D3D12 Direct ELF"
 msgstr "D3D12 直接 ELF"
 
@@ -46,9 +52,6 @@ msgstr "Vulkan ホスト（RecordVk）"
 
 msgid "Vulkan Interop Bridge"
 msgstr "Vulkan 相互運用ブリッジ"
-
-msgid "State: %s%s%s%s"
-msgstr "状態：%s%s%s%s"
 
 msgid "Backend: %s"
 msgstr "バックエンド：%s"
@@ -74,14 +77,17 @@ msgstr "共存：dlssnr-amd.asi を検出（直接パス有効）"
 msgid "Execution & Backend"
 msgstr "実行とバックエンド"
 
-msgid "D3D12 Backend"
-msgstr "D3D12 バックエンド"
+msgid "Enable OpenRR (Ray Reconstruction)"
+msgstr "OpenRR（レイ再構成）を有効化"
+
+msgid "Registers OpenRR as an OptiScaler Ray Reconstruction provider (restart required when toggling). Use OptiScaler's Upscalers -> RR Upscaler selector to switch providers live."
+msgstr "OpenRR を OptiScaler のレイ再構成プロバイダーとして登録します（切替時は再起動が必要）。リアルタイム切替は OptiScaler の Upscalers -> RR Upscaler を使用してください。"
 
 msgid "Auto (D3D12 Direct preferred)"
 msgstr "自動（D3D12 直接優先）"
 
-msgid "Network Mode"
-msgstr "ネットワークモード"
+msgid "D3D12 Backend"
+msgstr "D3D12 バックエンド"
 
 msgid "Legacy"
 msgstr "レガシー（Legacy）"
@@ -91,6 +97,9 @@ msgstr "標準高速（New・推奨）"
 
 msgid "Fast (experimental)"
 msgstr "最速（Fast・実験的）"
+
+msgid "Network Mode"
+msgstr "ネットワークモード"
 
 msgid "New"
 msgstr "標準高速（New）"
@@ -104,17 +113,14 @@ msgstr "高速カーネル利用不可"
 msgid "Runtime: %s"
 msgstr "ランタイム：%s"
 
-msgid "Coexist Split"
-msgstr "共存時分割設定"
-
 msgid "Auto (disable split when dlssnr-amd is present)"
 msgstr "自動（dlssnr-amd 検出時は分割を無効化）"
 
 msgid "Off (never split command lists)"
 msgstr "オフ（コマンドリストを分割しない）"
 
-msgid "Depth Type"
-msgstr "深度タイプ"
+msgid "Coexist Split"
+msgstr "共存時分割設定"
 
 msgid "Auto"
 msgstr "自動"
@@ -125,8 +131,8 @@ msgstr "ハードウェア深度（NDC）"
 msgid "Linear Depth"
 msgstr "線形深度"
 
-msgid "Vulkan Input Layout"
-msgstr "Vulkan 入力レイアウト"
+msgid "Depth Type"
+msgstr "深度タイプ"
 
 msgid "Shader Read Optimal"
 msgstr "シェーダー読取最適（Shader Read Optimal）"
@@ -134,11 +140,17 @@ msgstr "シェーダー読取最適（Shader Read Optimal）"
 msgid "General"
 msgstr "汎用（General）"
 
-msgid "OptiFG Frame Gen Compat (experimental)"
-msgstr "OptiFG フレーム生成互換（実験的）"
+msgid "Vulkan Input Layout"
+msgstr "Vulkan 入力レイアウト"
 
-msgid "Restart required. Set OptiScaler's [Libraries] NvngxPath to load openrr-ngx-host.dll."
-msgstr "再起動が必要です。OptiScaler の [Libraries] NvngxPath で openrr-ngx-host.dll を読み込むように設定してください。"
+msgid "Re-init Upscaler"
+msgstr "Upscaler を再初期化"
+
+msgid "Recreates active upscalers so backend or depth changes take effect without restarting."
+msgstr "実行中の Upscaler を再作成し、再起動せずにバックエンドや深度の変更を反映します。"
+
+msgid "Re-init requested"
+msgstr "再初期化を要求しました"
 
 msgid "Guides"
 msgstr "ガイド"
@@ -173,53 +185,23 @@ msgstr "反射モーションベクターを使用"
 msgid "Use Transparency Layer Opacity & Motion"
 msgstr "半透明レイヤー不透明度・モーションを使用"
 
-msgid "Menu & Hotkeys"
-msgstr "メニューとホットキー"
-
-msgid "Menu Key"
-msgstr "メニューキー"
-
-msgid "Enter a key such as F7 or Ctrl+F7, then press Enter."
-msgstr "F7 や Ctrl+F7 などのキーを入力して Enter を押してください。"
-
-msgid "Use OptiScaler Shortcut"
-msgstr "OptiScaler のショートカットを使用"
-
-msgid "Pass OptiScaler Key (Insert) while open"
-msgstr "開いている間 OptiScaler キー（Insert）を通す"
-
-msgid "Menu Size"
-msgstr "メニューの大きさ"
-
-msgid "Text Size"
-msgstr "文字の大きさ"
-
-msgid "Theme"
-msgstr "テーマ"
-
-msgid "Blue"
-msgstr "ブルー"
-
-msgid "Teal"
-msgstr "ティール"
-
-msgid "Violet"
-msgstr "バイオレット"
-
-msgid "Amber"
-msgstr "アンバー"
-
-msgid "Crimson"
-msgstr "クリムゾン"
-
-msgid "Graphite"
-msgstr "グラファイト"
-
 msgid "Language"
 msgstr "言語"
 
 msgid "openrr-amd\\lang\\<name>.txt; the file reloads when it changes."
 msgstr "openrr-amd\\lang\\<name>.txt を読み込みます。ファイル変更時は自動再読込されます。"
 
-msgid "Close"
-msgstr "閉じる"
+msgid "Updated OptiScaler.ini ([Menu] TTFFontPath). Restart the game (without clicking OptiScaler's Save INI) to display non-Latin text."
+msgstr "OptiScaler.ini（[Menu] TTFFontPath）を更新しました。OptiScaler の Save INI を押さずにそのままゲームを再起動してください。"
+
+msgid "OptiScaler's built-in font has Latin glyphs only. Configure [Menu] TTFFontPath in OptiScaler.ini and restart to display this language."
+msgstr "OptiScaler の内蔵フォントはラテン文字のみ対応です。この言語を表示するには OptiScaler.ini に [Menu] TTFFontPath を設定して再起動してください。"
+
+msgid "Configure CJK Font in OptiScaler.ini"
+msgstr "OptiScaler.ini に CJK フォントを設定"
+
+msgid "No CJK font file found in openrr-amd\\lang\\fonts or C:\\Windows\\Fonts."
+msgstr "openrr-amd\\lang\\fonts または C:\\Windows\\Fonts に CJK フォントファイルが見つかりません。"
+
+msgid "Could not write OptiScaler.ini. Check file permissions."
+msgstr "OptiScaler.ini に書き込めませんでした。ファイルの権限を確認してください。"

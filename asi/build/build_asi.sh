@@ -9,7 +9,7 @@ stage="$out/stage"
 if [[ "${OPENRR_CLEAN_STAGE:-0}" == "1" ]]; then
     rm -rf -- "$stage"
 fi
-rm -rf -- "$stage/plugins" "$stage/LICENSE" "$stage/NOTICE" "$stage/THIRD_PARTY.md" "$stage/OptiScaler/plugins/"*.log "$stage/"*.log "$out"/bench-* "$out/occ_ab" "$out/occ_nopad" "$out/occ_pad16k" "$out/b2_base" "$out/b2_post_exp" "$out/b2_post_log" "$out/b2_attr_rcp" "$out/b2_attr_same" "$out/b2_c64_far3"
+rm -rf -- "$stage/plugins" "$stage/openrr-ngx-host.dll" "$stage/LICENSE" "$stage/NOTICE" "$stage/THIRD_PARTY.md" "$stage/OptiScaler/plugins/"*.log "$stage/"*.log "$out"/bench-* "$out/occ_ab" "$out/occ_nopad" "$out/occ_pad16k" "$out/b2_base" "$out/b2_post_exp" "$out/b2_post_log" "$out/b2_attr_rcp" "$out/b2_attr_same" "$out/b2_c64_far3"
 mkdir -p -- "$out" "$stage/OptiScaler/plugins" "$stage/openrr-amd/shaders" "$stage/openrr-amd/shaders-gfx11"
 
 jobs=${OPENRR_BUILD_JOBS:-$(nproc 2>/dev/null || echo 4)}
@@ -104,51 +104,31 @@ pool_wait() {
     return 0
 }
 
-compile_spv_header() {
-    local src="$1" var="$2" out_h="$3"
-    "$glslang" -V --target-env vulkan1.0 --vn "$var" "$src" -o "$out_h" > /dev/null
-}
-
 minhook="asi/third_party/minhook"
-imgui="asi/third_party/imgui"
 vk_inc="asi/third_party/vulkan/include"
-font="asi/third_party/inter/Inter-Regular.ttf"
-
-# Stage 0: shared generated headers before C/C++ compile units start.
-pool_run python3 asi/build/embed_font.py "$font" "$out/rr_menu_font.hpp" kMenuFont
-pool_run compile_spv_header asi/shaders/menu_compose.vert kMenuComposeVert "$out/menu_compose_vert.h"
-pool_run compile_spv_header asi/shaders/menu_compose.frag kMenuComposeFrag "$out/menu_compose_frag.h"
-pool_wait
 
 common_cxx=(-std=c++20 -mf16c -O2 -fno-strict-aliasing -DNDEBUG
             -DOPENRR_BUILD_STAMP="\"$stamp\""
             -DONR_LT_DEEP="\"2,4,2,4\""
-            -DONR_RR_BUILDING -DONR_RR_STATIC -DOPENRR_EXPERIMENTAL_OPTIFG_HOST
+            -DONR_RR_BUILDING -DONR_RR_STATIC
             -I"$vk_inc" -Igpu/include -Igpu/src -Iruntime/include -Iruntime/src
-            -Iasi/src -I"$minhook/include" -I"$imgui" -I"$out")
+            -Iasi/src -I"$minhook/include" -I"$out")
 
 echo "[1/4] Compiling GPU & Runtime sources..."
-echo "[2/4] Compiling ASI shell, ImGui, MinHook & tools (jobs=$jobs)..."
-# Longest-job-first: heavy ImGui/ASI/test translation units launch immediately so no core idles on a late tail.
-pool_run "$cxx" -std=c++17 -O2 -DNDEBUG -I"$vk_inc" -I"$imgui" -c "$imgui/imgui.cpp" -o "$out/im_imgui.o"
-pool_run "$cxx" -std=c++17 -O2 -DNDEBUG -I"$vk_inc" -I"$imgui" -c "$imgui/imgui_widgets.cpp" -o "$out/im_imgui_widgets.o"
-pool_run "$cxx" -std=c++17 -O2 -DNDEBUG -I"$vk_inc" -I"$imgui" -c "$imgui/imgui_draw.cpp" -o "$out/im_imgui_draw.o"
+echo "[2/4] Compiling ASI shell, OptiScaler plugin, MinHook & tools (jobs=$jobs)..."
+# Longest-job-first: heavy ASI/test/runtime translation units launch immediately so no core idles on a late tail.
 pool_run "$cxx" "${common_cxx[@]}" -DOPENRR_TEST_HOOKS=1 -c asi/tests/test_asi_units.cpp -o "$out/test_asi_units.o"
-pool_run "$cxx" -std=c++17 -O2 -DNDEBUG -I"$vk_inc" -I"$imgui" -c "$imgui/imgui_tables.cpp" -o "$out/im_imgui_tables.o"
 pool_run "$cxx" "${common_cxx[@]}" -c asi/src/rr_asi_main.cpp -o "$out/rr_asi_main.o"
 pool_run "$cxx" "${common_cxx[@]}" -c runtime/src/runtime.cpp -o "$out/rt_runtime.o"
 pool_run "$cxx" "${common_cxx[@]}" -DOPENRR_TEST_HOOKS=1 -c runtime/src/runtime.cpp -o "$out/rt_runtime_test.o"
-pool_run "$cxx" -std=c++17 -O2 -DNDEBUG -I"$vk_inc" -I"$imgui" -c "$imgui/imgui_impl_vulkan.cpp" -o "$out/im_imgui_impl_vulkan.o"
 pool_run "$cxx" "${common_cxx[@]}" -c gpu/src/vk.cpp -o "$out/gpu_vk.o"
 pool_run "$cxx" "${common_cxx[@]}" -DOPENRR_TEST_HOOKS=1 -c gpu/src/vk.cpp -o "$out/gpu_vk_test.o"
 pool_run "$cxx" "${common_cxx[@]}" -c asi/src/rr_pe_d3d12split.cpp -o "$out/rr_pe_d3d12split.o"
-pool_run "$cxx" "${common_cxx[@]}" -c asi/src/rr_pe_menu.cpp -o "$out/rr_pe_menu.o"
-pool_run "$cxx" -std=c++17 -O2 -DNDEBUG -I"$imgui" -include asi/src/mingw_d3d12_compat.h -c "$imgui/imgui_impl_dx12.cpp" -o "$out/im_imgui_impl_dx12.o"
+pool_run "$cxx" "${common_cxx[@]}" -c asi/src/rr_opti_plugin.cpp -o "$out/rr_opti_plugin.o"
 pool_run "$cxx" "${common_cxx[@]}" -c gpu/src/d3d12.cpp -o "$out/gpu_d3d12.o"
 pool_run "$cxx" "${common_cxx[@]}" -DOPENRR_TEST_HOOKS=1 -c gpu/src/d3d12.cpp -o "$out/gpu_d3d12_test.o"
 pool_run "$cxx" "${common_cxx[@]}" -c gpu/src/engine.cpp -o "$out/gpu_engine.o"
 pool_run "$cxx" -std=c++20 -O2 -DNDEBUG -Iruntime/include -c runtime/bench/openrr_bench.cpp -o "$out/openrr_bench.o"
-pool_run "$cxx" -std=c++17 -O2 -DNDEBUG -I"$vk_inc" -I"$imgui" -c "$imgui/imgui_impl_dx11.cpp" -o "$out/im_imgui_impl_dx11.o"
 pool_run "$cxx" "${common_cxx[@]}" -c asi/src/rr_pe_log.cpp -o "$out/rr_pe_log.o"
 pool_run "$cc" -O2 -I"$minhook/include" -I"$minhook/src" -c "$minhook/src/hook.c" -o "$out/mh_hook.o"
 pool_run "$cxx" "${common_cxx[@]}" -c runtime/src/vk_host.cpp -o "$out/rt_vk_host.o"
@@ -159,25 +139,23 @@ pool_run "$cc" -O2 -I"$minhook/include" -I"$minhook/src" -c "$minhook/src/trampo
 pool_run "$cc" -O2 -I"$minhook/include" -I"$minhook/src" -c "$minhook/src/buffer.c" -o "$out/mh_buffer.o"
 pool_run "$cc" -O2 -I"$minhook/include" -I"$minhook/src" -c "$minhook/src/hde/hde64.c" -o "$out/mh_hde.o"
 pool_run "$cxx" "${common_cxx[@]}" -c asi/src/rr_pe_crash.cpp -o "$out/rr_pe_crash.o"
-pool_run "$cxx" -std=c++17 -O2 -Iasi/src -c asi/src/optifg_ngx_proxy.cpp -o "$out/optifg_ngx_proxy.o"
 pool_run "$cxx" "${common_cxx[@]}" -c asi/src/rr_pe_vkdevice.cpp -o "$out/rr_pe_vkdevice.o"
 pool_run "$cxx" "${common_cxx[@]}" -c gpu/src/kernels.cpp -o "$out/gpu_kernels.o"
-pool_run "$cxx" -std=c++20 -O2 -Iasi/src -I"$minhook/include" -c asi/tests/test_dxgi_queue.cpp -o "$out/test_dxgi_queue.o"
-pool_run "$cxx" -std=c++20 -O2 -Iasi/src -c asi/tests/test_present_scope.cpp -o "$out/test_present_scope.o"
 pool_wait
 
-objs=("$out/rr_asi_main.o" "$out/rr_pe_menu.o" "$out/rr_pe_control.o" "$out/rr_pe_config.o"
+objs=("$out/rr_asi_main.o" "$out/rr_opti_plugin.o" "$out/rr_pe_control.o" "$out/rr_pe_config.o"
       "$out/rr_pe_vkdevice.o" "$out/rr_pe_d3d12split.o" "$out/rr_pe_log.o" "$out/rr_pe_crash.o"
       "$out/rt_runtime.o" "$out/rt_vk_host.o"
       "$out/gpu_vk.o" "$out/gpu_d3d12.o" "$out/gpu_kernels.o" "$out/gpu_weights.o" "$out/gpu_engine.o"
-      "$out"/im_*.o "$out"/mh_*.o)
+      "$out"/mh_*.o)
 
-ldflags=(-ld3d12 -ld3d11 -ldxgi -lole32 -lbcrypt -lversion -static -static-libgcc -static-libstdc++)
+ldflags=(-ld3d12 -ldxgi -lole32 -lbcrypt -lversion -static -static-libgcc -static-libstdc++)
 
 cat > "$out/openrr.def" << 'EOF'
 LIBRARY "openrr-amd.asi"
 EXPORTS
     InitializeASI
+    OptiPluginInit
     OnrRrGetApi
     OnrRrSetFastMode
     OnrRrGetFastMode
@@ -208,21 +186,24 @@ link_and_strip_asi() {
     "$objcopy" --add-gnu-debuglink="$out/openrr-amd.debug" "$stage/OptiScaler/plugins/openrr-amd.asi"
 }
 
+test_objs=("$out/test_asi_units.o"
+           "$out/rr_pe_config.o" "$out/rr_pe_d3d12split.o" "$out/rr_pe_vkdevice.o" "$out/rr_pe_log.o" "$out/rr_pe_crash.o"
+           "$out/rt_runtime_test.o" "$out/rt_vk_host.o" "$out/gpu_vk_test.o" "$out/gpu_d3d12_test.o" "$out/gpu_kernels.o"
+           "$out/gpu_weights.o" "$out/gpu_engine.o" "$out"/mh_*.o)
+
+link_test_units() {
+    mkdir -p -- "$out/test_vk_lazy"
+    bash asi/build/vulkan_lazy.sh "$out/test_vk_lazy" "$cxx" -std=c++20 -O2 "${test_objs[@]}" "${ldflags[@]}" >/dev/null
+    "$cxx" -std=c++20 -O2 "${test_objs[@]}" "$out/test_vk_lazy/vulkan_lazy_s.o" "$out/test_vk_lazy/vulkan_lazy_c.o" "${ldflags[@]}" -o "$out/test_asi_units.exe"
+}
+
 echo "[4/4] Linking binaries, building runtime SPIR-V shaders & staging package..."
 mkdir -p -- "$stage/openrr-amd/lang/fonts"
 pool_run link_and_strip_asi
-pool_run "$cxx" -std=c++20 -O2 "$out/test_asi_units.o" \
-    "$out/rr_pe_config.o" "$out/rr_pe_d3d12split.o" "$out/rr_pe_vkdevice.o" "$out/rr_pe_log.o" "$out/rr_pe_crash.o" \
-    "$out/rt_runtime_test.o" "$out/rt_vk_host.o" "$out/gpu_vk_test.o" "$out/gpu_d3d12_test.o" "$out/gpu_kernels.o" \
-    "$out/gpu_weights.o" "$out/gpu_engine.o" "$out/vulkan_lazy_s.o" "$out/vulkan_lazy_c.o" \
-    "$out"/mh_*.o "${ldflags[@]}" -o "$out/test_asi_units.exe"
+pool_run link_test_units
 pool_run "$cxx" -std=c++20 -O2 "$out/openrr_bench.o" \
     -ld3d12 -ldxgi -lole32 -lshell32 -static -static-libgcc -static-libstdc++ -o "$out/openrr_bench.exe"
-pool_run "$cxx" -std=c++17 -O2 -shared -static "$out/optifg_ngx_proxy.o" -o "$stage/openrr-ngx-host.dll"
-pool_run "$cxx" -std=c++20 -O2 "$out/test_dxgi_queue.o" \
-    "$out"/mh_*.o -ld3d12 -ldxgi -lole32 -static -static-libgcc -static-libstdc++ -o "$out/test_dxgi_queue.exe"
-pool_run "$cxx" -std=c++20 -O2 "$out/test_present_scope.o" -static -o "$out/test_present_scope.exe"
-pool_run python3 asi/build/make_lang.py "$stage/openrr-amd/lang/English.txt" asi/src/rr_pe_menu.cpp
+pool_run python3 asi/build/make_lang.py "$stage/openrr-amd/lang/English.txt" asi/src/rr_opti_plugin.cpp
 pool_wait
 
 python3 asi/build/build_shaders.py "$glslang" gpu "$stage/openrr-amd/shaders" --jobs "$jobs"
@@ -260,7 +241,12 @@ if [[ "${OPENRR_BUILD_ACO:-1}" == "1" ]]; then
     done
 fi
 echo "Built $stage/OptiScaler/plugins/openrr-amd.asi ($(stat -c %s "$stage/OptiScaler/plugins/openrr-amd.asi") bytes, $count Vulkan entry points resolved lazily)"
-echo "Exports: $("$objdump" -p "$stage/OptiScaler/plugins/openrr-amd.asi" | grep -c 'InitializeASI')  Imports: $("$objdump" -p "$stage/OptiScaler/plugins/openrr-amd.asi" | grep 'DLL Name' | awk '{print $3}' | tr '\n' ' ')"
+export_count=$("$objdump" -p "$stage/OptiScaler/plugins/openrr-amd.asi" | grep -Ec '[[:space:]](InitializeASI|OptiPluginInit)$')
+echo "Exports: $export_count  Imports: $("$objdump" -p "$stage/OptiScaler/plugins/openrr-amd.asi" | grep 'DLL Name' | awk '{print $3}' | tr '\n' ' ')"
+if [[ "$export_count" -ne 2 ]]; then
+    echo "FATAL: expected both InitializeASI and OptiPluginInit exports in openrr-amd.asi (found $export_count)" >&2
+    exit 1
+fi
 pkg_zip=${OPENRR_PACKAGE_ZIP:-auto}
 if [[ "$pkg_zip" == "1" || ( "$pkg_zip" == "auto" && -f "$stage/openrr-amd/aco/gfx1201/openrr-d3d12-v1/manifest.json" && -f "$stage/openrr-amd/aco/gfx1200/openrr-d3d12-v1/manifest.json" ) ]]; then
     pkg_args=(--stage "$stage" --out-dir "${OPENRR_DIST_DIR:-dist}" --jobs "$jobs")

@@ -11,25 +11,24 @@
 
 ---
 
-当前发行版本 **v0.1.7plus6** 在 **v0.1.7plus5**（`NvAPI_GPU_GetGPUInfo` `0xafd1b02c` 通用回退兼容与并行化构建打包链）与 **v0.1.7plus4** / **v0.1.7plus3**（ReShade + RenoDX D3D12 包装层兼容性修复与 D3D12 装钩加固）基础上，修复了 **Linux Wine / Proton + `vkd3d-proton` 直通 Vulkan interop 误拒问题**：由于 `vkd3d-proton` 的 `GetDeviceExtensions()` 返回的是调用 `vkCreateDevice` 之前缓存的旧扩展列表，不包含 OpenRR 通过 `vkCreateDevice` hook（`PrepareVkDevice`）注入的 `VK_KHR_workgroup_memory_explicit_layout` 与 `VK_EXT_shader_float8`，此前会误判已准备好的 `VkDevice` 缺少必需扩展而中止初始化；现对已由 OpenRR 准备成功的 `VkDevice` 跳过该过期列表拦截，并在 interop 日志中准确反映实际 `VK_EXT_shader_float8` 启用状态。同时继续完整整合上游 **v0.1.7**（含 RDNA4 固定 ACO 路线、RX 7000 / RDNA3 `shaders-gfx11` 路径，以及通用 Windows + Linux Wine / Proton 系统 Mesa RADV >= 26.3 原生支持），并保留本分支的 ASI 集成、菜单和 GPU 资源生命周期保护。v0.1.7plus 完整速度、画质与显存实测对比见 **[v017plus-speed-quality-eval.md](docs/test-evidence/v017plus-speed-quality-eval.md)**（[English](docs/test-evidence/v017plus-speed-quality-eval.en.md)），Stage 10 审计与复测证据见 [v017-stage10-audit.md](docs/test-evidence/v017-stage10-audit.md)，旧版本历史验证记录保留于文末表格。
+当前发行版本 **v0.1.7plus7** 完成了面向 **OptiScaler v0.10 nightly（Plugin API v1–v3）** 的原生插件化重构，在保留 **v0.1.7plus6**（Linux Wine / Proton + `vkd3d-proton` 直通 Vulkan interop 修复）、**v0.1.7plus5**（`NvAPI_GPU_GetGPUInfo` `0xafd1b02c` 通用回退兼容与并行化构建打包链）与 **v0.1.7plus4** / **v0.1.7plus3**（ReShade + RenoDX D3D12 包装层兼容性修复与 D3D12 装钩加固）全部成果的基础上，实现了以下架构升级：
+- **原生 `OptiProvider_Dlssd` 提供者注册**：通过 OptiScaler Plugin API v3 `RegisterProvider(..., "OpenRR", OptiProvider_Dlssd, ...)` 直接作为 OptiScaler 官方一级 Ray Reconstruction 提供者接入，彻底移除外层 ~30 个 `NVSDK_NGX_*` MinHook、`SlCapsPatch` 及独立的 `openrr-ngx-host.dll` 宿主桥接，原生兼容 OptiScaler 全部下游特性（`OptiFG`、`XeFG`、`HUDfix`、`OutputScaling`、`RCAS`、DLSS-D / FSR / XeSS 实时切换），无需任何额外配置或重启切宿主模式。
+- **原生嵌入 OptiScaler `PLUGINS -> OpenRR` 标签页**：彻底移除自建 DX11/DX12/Vulkan ImGui 叠加层、SwapChain / `Present` hook、WndProc / User32 按键拦截及内置字体，界面直接嵌入 OptiScaler 主菜单左侧 `PLUGINS -> OpenRR` 标签页；内置一键 `Re-init Upscaler` 按钮与零 Hook 中文/日文/韩文字体配置（自动写入 `OptiScaler.ini [Menu] UseHQFont=true` 与 `TTFFontPath`，未配置时安全回退英文避免乱码），剥离后体积大幅缩减且完全消除跨渲染后端叠加层冲突。
+- **版本要求**：本版本起仅适配 **OptiScaler v0.10 nightly**（需支持 Plugin API v3 `RegisterProvider`）；不再需要旧版 `openrr-ngx-host.dll`、`MenuKey`、`OptiFGHost` 等旧配置项，升级前建议清理旧版 `openrr-ngx-host.dll` 并使用新版 `openrr-amd.ini`。
+
+同时继续完整整合上游 **v0.1.7**（含 RDNA4 固定 ACO 路线、RX 7000 / RDNA3 `shaders-gfx11` 路径，以及通用 Windows + Linux Wine / Proton 系统 Mesa RADV >= 26.3 原生支持），并保留本分支的 GPU 资源生命周期保护与性能/显存优化。v0.1.7plus 完整速度、画质与显存实测对比见 **[v017plus-speed-quality-eval.md](docs/test-evidence/v017plus-speed-quality-eval.md)**（[English](docs/test-evidence/v017plus-speed-quality-eval.en.md)），Stage 10 审计与复测证据见 [v017-stage10-audit.md](docs/test-evidence/v017-stage10-audit.md)，旧版本历史验证记录保留于文末表格。
 
 ## 本仓库做了什么
 
-### 可选 OptiFG 帧生成兼容
+上游 OpenRR 默认编译为外部 `OpenNrRrRuntime.dll`，需要搭配专门修改过的定制版 OptiScaler 才能调用。本仓库将其封装为面向**官方原版 [OptiScaler](https://github.com/optiscaler/OptiScaler) v0.10 nightly** 的单文件原生插件 `openrr-amd.asi`，并补充了以下核心特性与修复：
 
-通用发行配置保持 `openrr-amd.ini` 中 `[OpenRR] OptiFGHost=false`，默认走独立 RR 路径。需要 **Upscaler 输入帧生成**（例如 `FGInput=upscaler`、`FGOutput=xefg`）的用户，可按 [OptiFG 安装说明](asi/OPTIFG.md) 配置额外的 `openrr-ngx-host.dll`，再将 `OptiFGHost` 设为 `true` 并重启游戏。不要使用旧测试包的 `_nvngx.dll`。
-
-启用宿主模式后，在菜单关闭 FG 不会自动退出宿主模式；恢复独立 RR 需设回 `false` 并重启。宿主包装和参数处理可能增加开销，FG 本身另有资源准备与插帧成本，尚未量化相对独立 RR 的性能差异。仅替换新版 ASI、保持开关关闭，不会启动这条帧生成兼容桥接。
-
-上游 OpenRR 默认编译为外部 `OpenNrRrRuntime.dll`，需要搭配专门修改过的定制版 OptiScaler 才能调用。本仓库将其封装为面向**官方原版 [OptiScaler](https://github.com/optiscaler/OptiScaler)** 的单文件插件 `openrr-amd.asi`，并补充了以下核心特性与修复：
-
-### 1. 单文件 `.asi` 插件与纯 MinGW 构建链
-- **零外部运行时 DLL**：将 `OpenNrRrRuntime` 与 `gpu` 引擎直接静态内嵌进单个 `openrr-amd.asi`（Release strip 后约 3.4 MB），放入任何官方原版 OptiScaler 的 `OptiScaler\plugins\`（或旧版 `plugins\`）目录即可直接接管 DLSS Ray Reconstruction（DLSS-D）。
-- **极简依赖与跨平台兼容**：提供纯 MinGW-w64 一键构建脚本（`asi/build/build_asi.sh`），静态链接运行时库并通过汇编桩按需延迟解析 Vulkan 入口函数；PE 导入表仅含 5 个系统基础 DLL（`KERNEL32` / `USER32` / `SHELL32` / `msvcrt` / `bcrypt`），同时兼容 Windows 原生与 Linux Wine / Proton（RADV）。
+### 1. 单文件原生 `.asi` 插件与纯 MinGW 构建链
+- **零外部运行时 DLL**：将 `OpenNrRrRuntime` 与 `gpu` 引擎直接静态内嵌进单个 `openrr-amd.asi`（移除独立 ImGui 与 DX11/DX12/Vulkan 渲染叠加层后，体积更轻、依赖更少），放入官方 OptiScaler v0.10 nightly 的 `OptiScaler\plugins\` 目录即可通过 `OptiPluginInit` 自动注册为 `OpenRR` 光线重建提供者与设置标签页。
+- **极简依赖与跨平台兼容**：提供纯 MinGW-w64 一键构建脚本（`asi/build/build_asi.sh`），静态链接运行时库并通过汇编桩按需延迟解析 Vulkan 入口函数；同时兼容 Windows 原生与 Linux Wine / Proton（RADV）。
 
 #### 三档网络模式与实测表现（RX 9070 XT，`v0.1.7plus`）
 
-可在游戏内侧边栏或 `openrr-amd.ini` 的 `[OpenRR] Mode`（`new` / `fast` / `legacy`）中实时无感切换（首次启动在后台编译 `New` / `Fast` 管线，就绪前暂以 `Legacy` 过渡）：
+可在 OptiScaler 主菜单 `PLUGINS -> OpenRR` 标签页或 `openrr-amd.ini` 的 `[OpenRR] Mode`（`new` / `fast` / `legacy`）中实时无感切换（首次启动在后台编译 `New` / `Fast` 管线，就绪前暂以 `Legacy` 过渡）：
 
 | 模式 | 1080p Quality | 1440p Quality | 4K Quality | 相对官方 `v0.1.7` 提速（`3×ABBA`） | 相对 RTX 5090 画质（47 帧均值 `PSNR_01` / Reinhard） |
 |---|---|---|---|---|---|
@@ -40,19 +39,20 @@
 - **显存占用不到 RTX 5090 一半**：单一生命周期复用池（`Engine::arena_`）使三档模式在 1080p Qual / 1440p Qual / 4K Perf / 4K Qual 下仅占 **`209 / 361 / 586 / 791 MB`** 显存——在画质与 RTX 5090 高度接近的前提下，**4K 显存比 RTX 5090 官方 NGX（常驻 `1.32 ~ 1.71 GiB`，含 DRS 峰值 `2.45 GiB`）立省 `0.7 ~ 1.1 GB`（节省 `48% ~ 70%`）**；原生 Vulkan（`RecordVk`）全直通下比上游原版额外再省 `60 ~ 130 MB`。
 - 全 6 档分辨率预设、`84` 腿 `3×ABBA` 交错基准、三方显存明细及 `v1 + v2_motion` 画质真值对比，请参阅 **[v0.1.7plus 速度、画质与显存综合测评报告](docs/test-evidence/v017plus-speed-quality-eval.md)**（[English](docs/test-evidence/v017plus-speed-quality-eval.en.md)）。
 
-### 2. 完整的 NGX 拦截、状态恢复与多后端路由
-- **非阻塞能力探测**：自动改写 NGX `SuperSamplingDenoising` 能力参数；首次查询仅做同步轻量检查（校验 `nvngx_dlssd.dll` 310.9.1 版本号 + 实例级 Vulkan RDNA4 特性查询，带 30 秒失败缓存），将权重解析与管线编译全部放到 `CreateFeature` 后台线程，不阻塞游戏主线程。
-- **D3D12 Direct 无侵入 Compute 状态恢复**：录制全程不调用 `SetDescriptorHeaps`、不触碰 Graphics Root 状态（描述符通过 Root Constant 裸地址直读）；在发现 D3D12 设备时通过 MinHook 挂钩 `D3D12Core` 底层函数（不触碰对象虚表），只读观测宿主 Heap 切换以剔除失效表句柄，并在 `Record` 后完整恢复游戏的 Compute Root Signature、全部 Compute Root 实参（Descriptor Table / CBV / SRV / UAV / 32-bit Root Constants）以及 PSO / State Object。无需依赖定制版 OptiScaler 内部恢复逻辑，即可原生支持《生化危机 9 (`re9.exe`)》《007 First Light》等游戏。
+### 2. 原生 OptiScaler DLSSD 提供者、状态恢复与多后端路由
+- **原生 `OptiProvider_Dlssd` 接入**：不再在外部拦截游戏/Streamline 的 `NVSDK_NGX_*` 调用，而是直接通过 OptiScaler Plugin API v3 注册 `"OpenRR"` DLSSD 提供者。OptiScaler 负责上游游戏输入适配、Streamline `sl.dlss_d` 能力伪装以及下游 `OptiFG` / `XeFG` / `HUDfix` / `OutputScaling` / `RCAS` 编排；用户可在 OptiScaler `Upscalers -> RR Upscaler` 中实时切换提供者（`auto` 模式下 AMD 显卡自动优先选中 OpenRR）。
+- **非阻塞能力探测**：首次查询仅做同步轻量检查（校验 `nvngx_dlssd.dll` 310.9.1 版本号 + 实例级 Vulkan 特性查询，带 30 秒失败缓存），将权重解析与管线编译全部放到 `CreateFeature` 后台线程，不阻塞游戏主线程。
+- **D3D12 Direct 无侵入 Compute 状态恢复**：录制全程不调用 `SetDescriptorHeaps`、不触碰 Graphics Root 状态（描述符通过 Root Constant 裸地址直读）；在发现 D3D12 设备时通过 MinHook 挂钩 `D3D12Core` 底层函数（不触碰对象虚表），只读观测宿主 Heap 切换以剔除失效表句柄，并在 `Record` 后完整恢复游戏的 Compute Root Signature、全部 Compute Root 实参（Descriptor Table / CBV / SRV / UAV / 32-bit Root Constants）以及 PSO / State Object。原生支持《生化危机 9 (`re9.exe`)》《007 First Light》等游戏。
 - **D3D12 ↔ Vulkan 桥接自动回退与硬化**：在无 `amdxc64.dll` ELF 直通的环境（如 Linux vkd3d-proton，或手动指定 `Backend = vulkan`）下自动回退至命令列表切分（Split）+ Vulkan 共享资源互操作桥接；补齐防自递归回退保护以及 Split Barrier / Enhanced Barrier / RTAS / MetaCommand 拒绝规则。
-- **原生 Vulkan 游戏直通（`RecordVk`）**：通过 `LdrRegisterDllNotification` 监听晚加载的 `vulkan-1.dll`，在游戏 `vkCreateDevice` 时自动注入所需扩展、特性与独立计算队列，并在设备未就绪时自动隐藏 RR 选项避免崩溃。
-- **无全局 DXGI 伪装时的 Streamline RR**：配合 `OptiPatcher.asi`（`Dxgi=auto/false`）时，OpenRR 仅在 `sl.dlss_d.dll` 的 `slOnPluginLoad` 同步调用期间，把 OpenRR 可用的 AMD 适配器在 `sl.common` 的 SystemCaps 中临时显示为 NVIDIA，返回后逐字段恢复，并从插件返回的 JSON 中去掉两个 NVX 专用 Vulkan 扩展。已知限制：假定 slInit 加载插件期间没有其他线程读取这份 caps。
+- **原生 Vulkan 游戏直通（`RecordVk`）**：通过 `LdrRegisterDllNotification` 监听晚加载的 `vulkan-1.dll`，在游戏 `vkCreateDevice` 时自动注入所需扩展、特性与独立计算队列，并在设备未就绪时自动拒绝创建避免崩溃。
 
 ### 3. 与 [`dlssnr-amd.asi`](https://gitlab.com/mochizuki0323/DLSSNR-AMD) 无缝共存
-- 当 `OptiScaler\plugins\` 目录下同时存在 [`dlssnr-amd.asi`](https://gitlab.com/mochizuki0323/DLSSNR-AMD) 与 `openrr-amd.asi` 时，无需修改任何一方配置：OpenRR 会自动启用 D3D12 Direct 模式（不叠加第二层命令列表 vtable hook），自动识别并追踪切分后的 continuation 命令列表，并在菜单打开时透传 `Insert`（OptiScaler）与 `End`（`dlssnr-amd`）快捷键。
+- 当 `OptiScaler\plugins\` 目录下同时存在 [`dlssnr-amd.asi`](https://gitlab.com/mochizuki0323/DLSSNR-AMD) 与 `openrr-amd.asi` 时，无需修改任何一方配置：OpenRR 会自动检测共存并启用 D3D12 Direct 模式（不叠加第二层命令列表 vtable hook），自动识别并追踪切分后的 continuation 命令列表。
 
-### 4. 内置 ImGui 停靠侧边栏
-- 默认跟随 `OptiScaler.ini [Menu] ShortcutKey`（默认 `Insert`）同步开关，并根据 OptiScaler 的菜单缩放比例自动停靠在 OptiScaler 主面板右侧（支持 SDR、HDR10 PQ 与 scRGB 合成）。
-- 支持游戏内实时切换 `New` / `Fast` / `Legacy` 网络模式、D3D12 后端、深度类型及各项附加引导图（Guides），修改自动保存至 `openrr-amd.ini`。
+### 4. 原生集成 OptiScaler `PLUGINS -> OpenRR` 标签页
+- 通过 `OptiPluginInit` + `RegisterTab` 直接嵌入 OptiScaler 主菜单左侧 `PLUGINS` 栏，跟随 OptiScaler 的快捷键（默认 `Insert`）、主题与 DPI 缩放，彻底消除独立叠加层的 DX11/DX12/Vulkan/HDR 合成与按键冲突。
+- 支持游戏内实时查看状态/双轨 GPU 耗时、切换 `New` / `Fast` / `Legacy` 网络模式、D3D12 后端、深度类型、各项附加引导图（Guides），点击 `Re-init Upscaler` 即刻触发 `ReInitUpscalers` 使后端/深度变更免重启生效；所有配置依然独立保存在 `openrr-amd.ini`。
+- **零 Hook 多语言（含简中/日文/韩文）**：依托 OptiScaler nightly 的动态字形后端，在 `Language` 卡片中选择中文/日文/韩文后，可一键点击 `Configure CJK Font in OptiScaler.ini` 自动写入 `OptiScaler.ini` 的 `[Menu] UseHQFont=true` 与 `TTFFontPath`（优先指向随包附带的 `openrr-amd\lang\fonts\NotoSansCJKsc-Regular.ttf`，未找到时回退系统字体）；重启游戏后即正常显示 CJK 文字，配置生效前安全回退英文避免方块乱码。
 
 ### 5. 底层 `gpu/` 与 `runtime/` 修复（已独立提交，便于上游合入）
 - **严格 GPU 退休证明与 Overflow 复用池**：移除按录制次数或超时猜测的槽位回收，改为结合 GPU 时间戳写回与游戏侧 `ID3D12CommandAllocator::Reset` / `VkCommandPool` 重置证明；64 个主槽位（自建列表独立占用 `kOwnSlot`）配合 64 个按需复用的 Overflow 槽池，满载时安全跳帧不抛异常。
@@ -63,6 +63,7 @@
 
 ## 运行要求
 
+- **OptiScaler 版本**：必须使用 **OptiScaler v0.10 nightly**（支持 Plugin API v3 `RegisterProvider` 与 `RegisterTab`）。
 - **显卡与驱动**：
   - **Windows RDNA4（RX 9000 系列，`gfx1201`/`gfx1200`）**：固定严格走离线预编译 **ACO** 路径；Vulkan 需支持 `VK_KHR_cooperative_matrix`、`VK_EXT_shader_float8`（`shaderFloat8` + `shaderFloat8CooperativeMatrix`）、`VK_KHR_workgroup_memory_explicit_layout`、`VK_KHR_pipeline_binary` 与 `maintenance5`，Windows D3D12 Direct 模式需 `amdxc64.dll` 提供 `IAmdExtD3DDevice5`。
   - **Linux Wine / Proton（Mesa RADV >= 26.3）**：直接调用系统 Mesa RADV（无需自定义 `libvulkan_radeon.so` 或启动包装脚本）；RDNA4 原生运行 ACO 并对 `shaders/` 执行内存级 `SpvDecorationNoContraction` 硬化，通过 `winevulkan.dll` 与 `vkd3d-proton` `RecordVk` 互操作运行。
@@ -78,13 +79,15 @@
 
 推荐使用 **[dlss-5-amd-project](https://github.com/TheAutomatic/dlss-5-amd-project)** 启动器进行自动部署、配置管理以及与 [`dlssnr-amd.asi`](https://gitlab.com/mochizuki0323/DLSSNR-AMD) 的共存安装。
 
-### 方式二：手动配合官方原版 OptiScaler（Windows / Linux 通用发行包）
+### 方式二：手动配合官方 OptiScaler v0.10 nightly（Windows / Linux 通用发行包）
 
-将构建产物（共 `393` 个文件的通用 `stage/` 包，或直接解压 `dist/OpenRR-v0.1.7plus6-OptiScaler.zip`）放入游戏目录（即 OptiScaler 的 `dxgi.dll` / `OptiScaler.ini` 所在目录）：
+> 从旧版本（`<= v0.1.7plus6`）升级前，请先删除游戏目录下旧版遗留的 `openrr-ngx-host.dll`（如曾安装），并清理 `OptiScaler.ini` 中手动设置的 `[Libraries] NvngxPath` 覆盖项；建议使用新版 `openrr-amd.ini`。
+
+将构建产物（共 `392` 个文件的通用 `stage/` 包，或直接解压 `dist/OpenRR-v0.1.7plus7-OptiScaler.zip`）放入游戏目录（即 OptiScaler 的 `dxgi.dll` / `OptiScaler.ini` 所在目录）：
 
 | 文件 / 目录 | 放置位置（相对于 `OptiScaler.ini` 所在目录） |
 |---|---|
-| `openrr-amd.asi` | `OptiScaler\plugins\openrr-amd.asi`（旧版 0.7/0.8 无 `OptiScaler\` 子目录时放入 `plugins\openrr-amd.asi`） |
+| `openrr-amd.asi` | `OptiScaler\plugins\openrr-amd.asi` |
 | `openrr-amd.ini` | `openrr-amd.ini` |
 | `openrr-amd\shaders\*.spv` | `openrr-amd\shaders\*.spv`（共 `94` 个 `.spv`） |
 | `openrr-amd\shaders-gfx11\*.spv` | `openrr-amd\shaders-gfx11\*.spv`（共 `94` 个 `.spv`，RDNA3 / RDNA3.5 必需） |
@@ -103,11 +106,11 @@ LoadAsiPlugins=true
 
 - 使用同一份通用发行包即可直接在 Linux Wine / Proton 下运行：**只需系统安装 Mesa RADV >= 26.3**（无需打包或注入自定义 `libvulkan_radeon.so`，也无需 `with_mesa263.sh` / `VK_ICD_FILENAMES` 包装脚本）。
 - 运行时优先通过 `winevulkan.dll` 解析 Vulkan 入口、使用 `vkd3d-proton` 原生 `RecordVk` 互操作，并在加载阶段对 `shaders/*.spv` 注入 `SpvDecorationNoContraction` 硬化直接交由系统 RADV 编译（自动跳过 Windows PAL 专用的 `aco\*.nrp` 离线记录）。
-- 部署要点：游戏目录下除 OptiScaler（`dxgi.dll`、`OptiScaler.ini` 设 `LoadAsiPlugins=true`）与游戏自带或自备的 `nvngx_dlssd.dll`（**310.9.1**）外，仍需将 **`OptiScaler/plugins/openrr-amd.asi`**（注意 Linux 下 `OptiScaler` 必须保持首字母和 `S` 大写，才能与 OptiScaler v10 官方 `OptiScaler/plugins/` 目录合并）、`openrr-amd/`（`shaders/`、`shaders-gfx11/`、`lang/`）与 `openrr-amd.ini` 完整复制到游戏目录（不能只放单个 `.asi`；直接解压发布压缩包即可），并在 Steam 启动选项设置 `WINEDLLOVERRIDES="dxgi=n,b" %command%`。
+- 部署要点：游戏目录下除 OptiScaler v0.10 nightly（`dxgi.dll`、`OptiScaler.ini` 设 `LoadAsiPlugins=true`）与游戏自带或自备的 `nvngx_dlssd.dll`（**310.9.1**）外，仍需将 **`OptiScaler/plugins/openrr-amd.asi`**（注意 Linux 下 `OptiScaler` 必须保持首字母和 `S` 大写，才能与 OptiScaler v0.10 官方 `OptiScaler/plugins/` 目录合并）、`openrr-amd/`（`shaders/`、`shaders-gfx11/`、`lang/`）与 `openrr-amd.ini` 完整复制到游戏目录（不能只放单个 `.asi`；直接解压发布压缩包即可），并在 Steam 启动选项设置 `WINEDLLOVERRIDES="dxgi=n,b" %command%`。
 
 > **重要提示**：
-> 1. **切勿将插件改名为 `*-loadlate.asi`**：OptiScaler 会将 `loadlate` 插件放到独立线程并延迟 `LateAsiPluginsDelay`（默认 30 秒）再加载。届时游戏早已完成 NGX 能力查询与 `vkCreateDevice`，OpenRR 无法改写光线重建能力或准备 Vulkan 设备。
-> 2. **与 [`dlssnr-amd.asi`](https://gitlab.com/mochizuki0323/DLSSNR-AMD) 共存**：将 `dlssnr-amd.asi` 与 `openrr-amd.asi` 直接同放在 `OptiScaler\plugins\`（或旧版 `plugins\`）下即可（均不要加 `loadlate`）。OptiScaler 按文件名字母顺序加载，`dlssnr-amd` 在 `openrr-amd` 之前，因此 OpenRR 后装 hook、处于 NGX 钩子链最外层，优先接管光线重建调用，无需改动 `dlssnr-amd` 的任何配置。
+> 1. **切勿将插件改名为 `*-loadlate.asi`**：OptiScaler 会将 `loadlate` 插件放到独立线程并延迟 `LateAsiPluginsDelay`（默认 30 秒）再加载。届时游戏早已完成 NGX 能力查询与 `vkCreateDevice`，OpenRR 无法注册为 DLSSD 提供者或准备 Vulkan 设备。
+> 2. **与 [`dlssnr-amd.asi`](https://gitlab.com/mochizuki0323/DLSSNR-AMD) 共存**：将 `dlssnr-amd.asi` 与 `openrr-amd.asi` 直接同放在 `OptiScaler\plugins\` 下即可（均不要加 `loadlate`）。OpenRR 通过 OptiScaler 原生提供者通道接入并自动切换 D3D12 Direct 模式，无需改动 `dlssnr-amd` 的任何配置。
 
 ---
 
@@ -145,8 +148,8 @@ bash asi/build/build_asi.sh
 基于本项目的**非商业二次修改、重打包与衍生作品必须遵守 [NOTICE](NOTICE)**：二改作者可以署上自己的名字，但必须完整保留原始作者（`TheAutomatic`）署名、所有上游开源项目作者的版权声明、官方仓库链接以及全部 `Required Notice:` 行，**严禁抹除署名或仅修改二进制信息/版本号冒充原创**。
 
 ### 许可范围与上游归属
-- **[本项目 (TheAutomatic / OpenRR-ASI)](https://github.com/TheAutomatic/OpenRR-ASI)** — **[PolyForm Noncommercial License 1.0.0](LICENSE)**（见 [NOTICE](NOTICE)）：本分支的新增实现、独立 ASI 插件、宿主桥接、构建/打包脚本与编译发行产物（`openrr-amd.asi`、`openrr-ngx-host.dll`、预编译着色器/ACO 记录）。
+- **[本项目 (TheAutomatic / OpenRR-ASI)](https://github.com/TheAutomatic/OpenRR-ASI)** — **[PolyForm Noncommercial License 1.0.0](LICENSE)**（见 [NOTICE](NOTICE)）：本分支的新增实现、独立 ASI 插件、构建/打包脚本与编译发行产物（`openrr-amd.asi`、预编译着色器/ACO 记录）。
 - **[上游 OpenRR (OpenNeuralRendering/OpenRR)](https://github.com/OpenNeuralRendering/OpenRR)** — **MIT License**（© 2026 OpenNR）：核心 GPU 着色器、引擎、运行时与验证器（完整上游 MIT 许可正文保留于 [THIRD_PARTY.md](THIRD_PARTY.md)）。
-- **其他上游与第三方组件**（`mochizuki0323/DLSSNR-AMD`、Dear ImGui、MinHook、Inter 字体、Vulkan-Headers、Mesa RADV/ACO、Noto Sans CJK SC 等）各自保留原有开源许可，详见 [NOTICE](NOTICE) 与 [THIRD_PARTY.md](THIRD_PARTY.md)。
+- **其他上游与第三方组件**（`mochizuki0323/DLSSNR-AMD`、OptiScaler Plugin SDK、MinHook、Vulkan-Headers、Mesa RADV/ACO、Noto Sans CJK SC 等）各自保留原有开源许可，详见 [NOTICE](NOTICE) 与 [THIRD_PARTY.md](THIRD_PARTY.md)。
 
 > 本仓库与发布包**不包含**任何 NVIDIA 专有二进制文件（如 `nvngx_dlssd.dll`）、提取的模型权重或 OptiScaler 二进制文件。用户需自行提供合法持有的 `nvngx_dlssd.dll`（`310.9.1`）。

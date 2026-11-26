@@ -7,7 +7,6 @@
 #include <windows.h>
 #include <algorithm>
 #include <cstring>
-#include <map>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -25,7 +24,6 @@ namespace {
 
 std::mutex g_mutex;
 std::vector<DeviceInfo> g_devices;
-std::map<VkQueue, std::unique_ptr<std::mutex>> g_queue_locks;
 std::string g_gpu_name;
 std::string g_driver_name;
 
@@ -140,30 +138,6 @@ void forget_device(VkDevice device) {
     g_devices.erase(std::remove_if(g_devices.begin(), g_devices.end(),
                                    [device](const DeviceInfo& x) { return x.device == device; }),
                     g_devices.end());
-}
-
-bool lock_queue_held(VkQueue queue) {
-    if (!queue) return false;
-    std::mutex* m = nullptr;
-    {
-        std::lock_guard<std::mutex> lock(g_mutex);
-        auto& ptr = g_queue_locks[queue];
-        if (!ptr) ptr = std::make_unique<std::mutex>();
-        m = ptr.get();
-    }
-    m->lock();
-    return true;
-}
-
-void unlock_queue_held(VkQueue queue, bool held) {
-    if (!queue || !held) return;
-    std::mutex* m = nullptr;
-    {
-        std::lock_guard<std::mutex> lock(g_mutex);
-        auto it = g_queue_locks.find(queue);
-        if (it != g_queue_locks.end()) m = it->second.get();
-    }
-    if (m) m->unlock();
 }
 
 void set_adapter_names(const std::string& gpu, const std::string& driver) {
