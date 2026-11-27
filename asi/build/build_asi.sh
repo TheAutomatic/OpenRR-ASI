@@ -24,6 +24,7 @@ cc=${OPENRR_MINGW_CC:-x86_64-w64-mingw32-gcc}
 objdump=${OPENRR_OBJDUMP:-x86_64-w64-mingw32-objdump}
 objcopy=${OPENRR_OBJCOPY:-x86_64-w64-mingw32-objcopy}
 strip=${OPENRR_STRIP:-x86_64-w64-mingw32-strip}
+windres=${OPENRR_WINDRES:-x86_64-w64-mingw32-windres}
 glslang=${OPENRR_GLSLANG:-$(command -v glslangValidator || command -v glslang)}
 
 command -v "$cxx" >/dev/null || { echo "missing mingw cross compiler ($cxx)" >&2; exit 1; }
@@ -141,6 +142,7 @@ pool_run "$cc" -O2 -I"$minhook/include" -I"$minhook/src" -c "$minhook/src/hde/hd
 pool_run "$cxx" "${common_cxx[@]}" -c asi/src/rr_pe_crash.cpp -o "$out/rr_pe_crash.o"
 pool_run "$cxx" "${common_cxx[@]}" -c asi/src/rr_pe_vkdevice.cpp -o "$out/rr_pe_vkdevice.o"
 pool_run "$cxx" "${common_cxx[@]}" -c gpu/src/kernels.cpp -o "$out/gpu_kernels.o"
+pool_run "$windres" -Iruntime/include -O coff runtime/src/version.rc -o "$out/version_rc.o"
 pool_wait
 
 objs=("$out/rr_asi_main.o" "$out/rr_opti_plugin.o" "$out/rr_pe_control.o" "$out/rr_pe_config.o"
@@ -179,7 +181,7 @@ echo "[3/4] Generating Vulkan lazy loader & linking openrr-amd.asi..."
 count=$(bash asi/build/vulkan_lazy.sh "$out" "$cxx" -shared "${objs[@]}" "${ldflags[@]}" | grep -o '[0-9]*$')
 
 link_and_strip_asi() {
-    "$cxx" -shared -o "$stage/OptiScaler/plugins/openrr-amd.asi" "$out/openrr.def" "${objs[@]}" "$out/vulkan_lazy_s.o" "$out/vulkan_lazy_c.o" "${ldflags[@]}"
+    "$cxx" -shared -o "$stage/OptiScaler/plugins/openrr-amd.asi" "$out/openrr.def" "${objs[@]}" "$out/version_rc.o" "$out/vulkan_lazy_s.o" "$out/vulkan_lazy_c.o" "${ldflags[@]}"
     rm -f "$out/openrr-amd.debug"
     "$objcopy" --only-keep-debug "$stage/OptiScaler/plugins/openrr-amd.asi" "$out/openrr-amd.debug"
     "$strip" --strip-unneeded "$stage/OptiScaler/plugins/openrr-amd.asi"

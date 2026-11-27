@@ -394,8 +394,10 @@ struct TabState {
                                 : st.state == ONR_RR_STATE_BUILDING ? tr("Building network...")
                                 : st.state == ONR_RR_STATE_FAILED   ? tr("Failed")
                                                                     : tr("Unknown");
+            const bool show_msg = st.message[0] &&
+                                  !(st.state == ONR_RR_STATE_READY && lower(trim(st.message)) == "ready");
             const std::string state_line = fmt(tr("State: %s%s%s%s"), st_name,
-                                               st.message[0] ? " (" : "", st.message, st.message[0] ? ")" : "");
+                                               show_msg ? " (" : "", show_msg ? st.message : "", show_msg ? ")" : "");
             if (st.state == ONR_RR_STATE_READY) {
                 g_api->TextColored(0.45f, 0.85f, 0.45f, 1.0f, state_line.c_str());
             } else if (st.state == ONR_RR_STATE_BUILDING) {
