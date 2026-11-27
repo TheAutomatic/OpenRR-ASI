@@ -173,6 +173,7 @@ EXPORTS
     OnrRrNotifyVkCommandPoolReset
     OnrRrNotifyVkCommandPoolDestroyed
     OnrRrNotifyVkDeviceDestroyed
+    OpenRR_IsInDirectRecord
     rr_vk_load
 EOF
 

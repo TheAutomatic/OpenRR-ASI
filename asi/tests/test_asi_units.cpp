@@ -5417,6 +5417,94 @@ static int test_nvapi_gpu_info_fallback() {
     return 0;
 }
 
+int test_cross_plugin_coexist_helpers() {
+    if (!openrr::pe::is_internal_vk_app_name("dlssnr-amd") ||
+        !openrr::pe::is_internal_vk_app_name("DLSSNR-AMD-bridge") ||
+        !openrr::pe::is_internal_vk_app_name("openrr") ||
+        !openrr::pe::is_internal_vk_app_name("openrr-probe")) {
+        std::fprintf(stderr, "FAIL: is_internal_vk_app_name missed internal plugin app name\n");
+        return 1;
+    }
+    if (openrr::pe::is_internal_vk_app_name(nullptr) ||
+        openrr::pe::is_internal_vk_app_name("") ||
+        openrr::pe::is_internal_vk_app_name("Cyberpunk 2077") ||
+        openrr::pe::is_internal_vk_app_name("my_openrr_game")) {
+        std::fprintf(stderr, "FAIL: is_internal_vk_app_name false positive on game app name\n");
+        return 1;
+    }
+
+    int dummy_hookable = 0;
+    int dummy_wrapped = 0;
+    int dummy_bad_unwrap = 0;
+    void* const p_hookable = &dummy_hookable;
+    void* const p_wrapped = &dummy_wrapped;
+    void* const p_bad = &dummy_bad_unwrap;
+    auto is_hookable = [&](const void* fn, std::string* mod) -> bool {
+        if (fn == p_hookable) {
+            if (mod) *mod = "D3D12Core.dll";
+            return true;
+        }
+        if (mod) *mod = "dlssnr-amd.asi";
+        return false;
+    };
+
+    std::string mod;
+    if (openrr::pe::resolve_hookable_d3d12_target(
+            p_hookable, is_hookable, [&](void*) -> void* { return p_bad; }, &mod) != p_hookable ||
+        mod != "D3D12Core.dll") {
+        std::fprintf(stderr, "FAIL: resolve_hookable_d3d12_target broke fast path\n");
+        return 1;
+    }
+    mod.clear();
+    if (openrr::pe::resolve_hookable_d3d12_target(
+            p_wrapped, is_hookable, [&](void*) -> void* { return p_hookable; }, &mod) != p_hookable ||
+        mod != "D3D12Core.dll") {
+        std::fprintf(stderr, "FAIL: resolve_hookable_d3d12_target did not unwrap to hookable target\n");
+        return 1;
+    }
+    mod.clear();
+    if (openrr::pe::resolve_hookable_d3d12_target(
+            p_wrapped, is_hookable, [&](void*) -> void* { return p_bad; }, &mod) != p_wrapped ||
+        openrr::pe::resolve_hookable_d3d12_target(
+            p_wrapped, is_hookable, [&](void*) -> void* { return nullptr; }, &mod) != p_wrapped) {
+        std::fprintf(stderr, "FAIL: resolve_hookable_d3d12_target accepted non-hookable unwrap result\n");
+        return 1;
+    }
+
+    int dummy_jit_stub = 0;
+    void* const p_jit_stub = &dummy_jit_stub;
+    auto is_hookable_with_jit = [&](const void* fn, std::string* m) -> bool {
+        if (fn == p_hookable) {
+            if (m) *m = "D3D12Core.dll";
+            return true;
+        }
+        if (fn == p_jit_stub) {
+            if (m) *m = "private memory";
+            return false;
+        }
+        if (m) *m = "dlssnr-amd.asi";
+        return false;
+    };
+    mod.clear();
+    if (openrr::pe::resolve_hookable_d3d12_target(
+            p_jit_stub, is_hookable_with_jit, [&](void*) -> void* { return p_hookable; }, &mod) != p_hookable ||
+        mod != "D3D12Core.dll") {
+        std::fprintf(stderr, "FAIL: resolve_hookable_d3d12_target did not unwrap private-memory JIT stub\n");
+        return 1;
+    }
+    mod.clear();
+    if (openrr::pe::resolve_hookable_d3d12_target(
+            p_jit_stub, is_hookable_with_jit, [&](void*) -> void* { return p_bad; }, &mod) != p_jit_stub ||
+        mod != "private memory") {
+        std::fprintf(stderr, "FAIL: resolve_hookable_d3d12_target clobbered out_mod on failed unwrap (got '%s')\n",
+                     mod.c_str());
+        return 1;
+    }
+
+    std::printf("[PASS] openrr::pe internal Vulkan app match & split vtable target unwrap\n");
+    return 0;
+}
+
 int main() {
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
     std::set_terminate([] {
@@ -5447,6 +5535,7 @@ int main() {
     if (test_d3d12_direct_hook_safety() != 0) return 1;
     if (test_d3d12_wrapper_compat() != 0) return 1;
     if (test_nvapi_gpu_info_fallback() != 0) return 1;
+    if (test_cross_plugin_coexist_helpers() != 0) return 1;
     std::printf("ALL ASI UNIT TESTS PASSED\n");
     return 0;
 }

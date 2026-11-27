@@ -45,6 +45,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -78,12 +79,49 @@ void ensure_deferred_init() {
 
 // ---- Coexistence detection (dlssnr-amd*.asi, Item #7) ----
 std::atomic<int> g_coexist_mochi{-1};
+using PeerInRecordFn = int (*)();
+using PeerOrigListMethodFn = void* (*)(void**, unsigned);
+using PeerOrigDevCreateCLFn = void* (*)(void**);
+std::atomic<PeerInRecordFn> g_dlssnr_in_record{nullptr};
+std::atomic<PeerOrigListMethodFn> g_dlssnr_orig_list_method{nullptr};
+std::atomic<PeerOrigDevCreateCLFn> g_dlssnr_orig_dev_create_cl{nullptr};
+std::atomic<HMODULE> g_dlssnr_module{nullptr};
+
+void bind_dlssnr_peer_exports(HMODULE mod) {
+    if (!mod) return;
+    g_dlssnr_module.store(mod, std::memory_order_release);
+    g_coexist_mochi.store(1, std::memory_order_release);
+    if (auto fn = reinterpret_cast<PeerInRecordFn>(GetProcAddress(mod, "NR_IsInDirectRecord"))) {
+        g_dlssnr_in_record.store(fn, std::memory_order_release);
+    }
+    if (auto fn = reinterpret_cast<PeerOrigListMethodFn>(GetProcAddress(mod, "NR_OrigD3D12ListMethod"))) {
+        g_dlssnr_orig_list_method.store(fn, std::memory_order_release);
+    }
+    if (auto fn = reinterpret_cast<PeerOrigDevCreateCLFn>(GetProcAddress(mod, "NR_OrigD3D12DeviceCreateCL"))) {
+        g_dlssnr_orig_dev_create_cl.store(fn, std::memory_order_release);
+    }
+}
+
+void unbind_dlssnr_peer_exports(HMODULE mod) {
+    if (!mod || g_dlssnr_module.load(std::memory_order_acquire) == mod) {
+        g_dlssnr_in_record.store(nullptr, std::memory_order_release);
+        g_dlssnr_orig_list_method.store(nullptr, std::memory_order_release);
+        g_dlssnr_orig_dev_create_cl.store(nullptr, std::memory_order_release);
+        g_dlssnr_module.store(nullptr, std::memory_order_release);
+        g_coexist_mochi.store(0, std::memory_order_release);
+    }
+}
 
 bool probe_coexist_mochi() {
-    const bool found = GetModuleHandleW(L"dlssnr-amd.asi") != nullptr ||
-                       GetModuleHandleW(L"dlssnr-amd-loadlate.asi") != nullptr;
-    g_coexist_mochi.store(found ? 1 : 0, std::memory_order_release);
-    return found;
+    HMODULE mod = g_dlssnr_module.load(std::memory_order_acquire);
+    if (!mod) mod = GetModuleHandleW(L"dlssnr-amd.asi");
+    if (!mod) mod = GetModuleHandleW(L"dlssnr-amd-loadlate.asi");
+    if (mod) {
+        bind_dlssnr_peer_exports(mod);
+        return true;
+    }
+    g_coexist_mochi.store(0, std::memory_order_release);
+    return false;
 }
 
 bool coexist_mochi_detected() {
@@ -386,6 +424,11 @@ openrr::pe::EntryHookRegistry<4> g_ca_release_hooks;
 std::atomic<void**> g_alloc_probed_dev_vts[8]{};
 std::atomic<size_t> g_alloc_probed_count{0};
 thread_local int t_in_openrr_record = 0;
+inline bool in_openrr_or_peer_record() {
+    if (t_in_openrr_record != 0) return true;
+    const PeerInRecordFn fn = g_dlssnr_in_record.load(std::memory_order_acquire);
+    return fn && fn() != 0;
+}
 thread_local int t_in_internal_vk = 0;
 
 struct InternalVkScope {
@@ -483,7 +526,7 @@ ULONG STDMETHODCALLTYPE hk_cl_release(void* cl) {
 
 HRESULT STDMETHODCALLTYPE hk_cl_reset(ID3D12GraphicsCommandList* cl, ID3D12CommandAllocator* alloc, ID3D12PipelineState* pso) {
     const HRESULT hr = real_cl_reset(cl, alloc, pso);
-    if (SUCCEEDED(hr) && cl && !t_in_openrr_record) {
+    if (SUCCEEDED(hr) && cl && !in_openrr_or_peer_record()) {
         OnrRrNotifyD3d12ListReset(cl, alloc);
         if (VkCommandBuffer vk_cb = openrr::pe::vkd3d::peek_vk_cmd(cl)) {
             OnrRrNotifyVkCommandBufferReset(vk_cb);
@@ -496,14 +539,14 @@ HRESULT STDMETHODCALLTYPE hk_cl_reset(ID3D12GraphicsCommandList* cl, ID3D12Comma
 }
 
 void STDMETHODCALLTYPE hk_cl_clear_state(ID3D12GraphicsCommandList* cl, ID3D12PipelineState* pso) {
-    if (cl && !t_in_openrr_record) {
+    if (cl && !in_openrr_or_peer_record()) {
         direct_state_of(cl)->clear_state(pso);
     }
     real_cl_clear_state(cl, pso);
 }
 
 void STDMETHODCALLTYPE hk_cl_set_pso(ID3D12GraphicsCommandList* cl, ID3D12PipelineState* pso) {
-    if (cl && !t_in_openrr_record) {
+    if (cl && !in_openrr_or_peer_record()) {
         DirectListState* s = direct_state_of(cl);
         s->pso = pso;
         s->pso_set = true;
@@ -513,7 +556,7 @@ void STDMETHODCALLTYPE hk_cl_set_pso(ID3D12GraphicsCommandList* cl, ID3D12Pipeli
 }
 
 void STDMETHODCALLTYPE hk_cl_set_pso1(ID3D12GraphicsCommandList* cl, ID3D12StateObject* so) {
-    if (cl && !t_in_openrr_record) {
+    if (cl && !in_openrr_or_peer_record()) {
         DirectListState* s = direct_state_of(cl);
         s->state_object = so;
         s->so_set = true;
@@ -523,7 +566,7 @@ void STDMETHODCALLTYPE hk_cl_set_pso1(ID3D12GraphicsCommandList* cl, ID3D12State
 }
 
 void STDMETHODCALLTYPE hk_cl_exec_bundle(ID3D12GraphicsCommandList* cl, ID3D12GraphicsCommandList* bundle) {
-    if (cl && !t_in_openrr_record) {
+    if (cl && !in_openrr_or_peer_record()) {
         DirectListState* s = direct_state_of(cl);
         const DirectListState* bs = (bundle && bundle != cl) ? direct_state_of(bundle) : nullptr;
         // Point the thread-local cache back at the primary command list (Item #1).
@@ -551,7 +594,7 @@ void STDMETHODCALLTYPE hk_cl_exec_bundle(ID3D12GraphicsCommandList* cl, ID3D12Gr
 }
 
 void STDMETHODCALLTYPE hk_cl_set_heaps(ID3D12GraphicsCommandList* cl, UINT count, ID3D12DescriptorHeap* const* heaps) {
-    if (cl && !t_in_openrr_record) {
+    if (cl && !in_openrr_or_peer_record()) {
         DirectListState* s = direct_state_of(cl);
         const UINT n = std::min<UINT>(count, 2u);
         bool same = (n == s->heap_count);
@@ -574,7 +617,7 @@ LegacyBarrierFn real_cl_barrier = nullptr;
 EnhancedBarrierFn real_cl_barrier7 = nullptr;
 
 void STDMETHODCALLTYPE hk_cl_barrier(ID3D12GraphicsCommandList* cl, UINT count, const D3D12_RESOURCE_BARRIER* barriers) {
-    if (cl && barriers && !t_in_openrr_record) {
+    if (cl && barriers && !in_openrr_or_peer_record()) {
         auto* state = direct_state_of(cl);
         for (UINT i = 0; i < count; ++i) {
             const auto& b = barriers[i];
@@ -591,7 +634,7 @@ void STDMETHODCALLTYPE hk_cl_barrier(ID3D12GraphicsCommandList* cl, UINT count, 
 }
 
 void STDMETHODCALLTYPE hk_cl_barrier7(ID3D12GraphicsCommandList7* cl, UINT32 count, const D3D12_BARRIER_GROUP* groups) {
-    if (cl && groups && !t_in_openrr_record) {
+    if (cl && groups && !in_openrr_or_peer_record()) {
         auto* state = direct_state_of(static_cast<ID3D12GraphicsCommandList*>(cl));
         for (UINT32 i = 0; i < count; ++i) {
             const auto& group = groups[i];
@@ -607,28 +650,28 @@ void STDMETHODCALLTYPE hk_cl_barrier7(ID3D12GraphicsCommandList7* cl, UINT32 cou
 }
 
 void STDMETHODCALLTYPE hk_cl_set_compute_rs(ID3D12GraphicsCommandList* cl, ID3D12RootSignature* rs) {
-    if (cl && !t_in_openrr_record) {
+    if (cl && !in_openrr_or_peer_record()) {
         direct_state_of(cl)->compute_root.set_rs(rs);
     }
     real_cl_set_compute_rs(cl, rs);
 }
 
 void STDMETHODCALLTYPE hk_cl_set_compute_table(ID3D12GraphicsCommandList* cl, UINT index, D3D12_GPU_DESCRIPTOR_HANDLE h) {
-    if (cl && !t_in_openrr_record) {
+    if (cl && !in_openrr_or_peer_record()) {
         direct_state_of(cl)->compute_root.set(index, 1, h.ptr);
     }
     real_cl_set_compute_table(cl, index, h);
 }
 
 void STDMETHODCALLTYPE hk_cl_set_compute_const(ID3D12GraphicsCommandList* cl, UINT index, UINT val, UINT offset) {
-    if (cl && !t_in_openrr_record) {
+    if (cl && !in_openrr_or_peer_record()) {
         direct_state_of(cl)->compute_root.constant(index, offset, val);
     }
     real_cl_set_compute_const(cl, index, val, offset);
 }
 
 void STDMETHODCALLTYPE hk_cl_set_compute_consts(ID3D12GraphicsCommandList* cl, UINT index, UINT count, const void* data, UINT offset) {
-    if (cl && data && !t_in_openrr_record) {
+    if (cl && data && !in_openrr_or_peer_record()) {
         DirectRootArgs& r = direct_state_of(cl)->compute_root;
         const auto* v = static_cast<const uint32_t*>(data);
         for (UINT i = 0; i < count; ++i) r.constant(index, offset + i, v[i]);
@@ -637,21 +680,21 @@ void STDMETHODCALLTYPE hk_cl_set_compute_consts(ID3D12GraphicsCommandList* cl, U
 }
 
 void STDMETHODCALLTYPE hk_cl_set_compute_cbv(ID3D12GraphicsCommandList* cl, UINT index, D3D12_GPU_VIRTUAL_ADDRESS va) {
-    if (cl && !t_in_openrr_record) {
+    if (cl && !in_openrr_or_peer_record()) {
         direct_state_of(cl)->compute_root.set(index, 2, va);
     }
     real_cl_set_compute_cbv(cl, index, va);
 }
 
 void STDMETHODCALLTYPE hk_cl_set_compute_srv(ID3D12GraphicsCommandList* cl, UINT index, D3D12_GPU_VIRTUAL_ADDRESS va) {
-    if (cl && !t_in_openrr_record) {
+    if (cl && !in_openrr_or_peer_record()) {
         direct_state_of(cl)->compute_root.set(index, 3, va);
     }
     real_cl_set_compute_srv(cl, index, va);
 }
 
 void STDMETHODCALLTYPE hk_cl_set_compute_uav(ID3D12GraphicsCommandList* cl, UINT index, D3D12_GPU_VIRTUAL_ADDRESS va) {
-    if (cl && !t_in_openrr_record) {
+    if (cl && !in_openrr_or_peer_record()) {
         direct_state_of(cl)->compute_root.set(index, 4, va);
     }
     real_cl_set_compute_uav(cl, index, va);
@@ -660,7 +703,7 @@ void STDMETHODCALLTYPE hk_cl_set_compute_uav(ID3D12GraphicsCommandList* cl, UINT
 void STDMETHODCALLTYPE hk_cl_exec_indirect(ID3D12GraphicsCommandList* cl, ID3D12CommandSignature* sig,
                                            UINT max_count, ID3D12Resource* arg_buf, UINT64 arg_offset,
                                            ID3D12Resource* count_buf, UINT64 count_offset) {
-    if (cl && !t_in_openrr_record) {
+    if (cl && !in_openrr_or_peer_record()) {
         apply_direct_execute_indirect(direct_state_of(cl), sig);
     }
     real_cl_exec_indirect(cl, sig, max_count, arg_buf, arg_offset, count_buf, count_offset);
@@ -702,7 +745,7 @@ void* const kCmdSigDetours[8] = {
 HRESULT STDMETHODCALLTYPE hk_dev_create_cl(ID3D12Device* dev, UINT mask, D3D12_COMMAND_LIST_TYPE type,
                                            ID3D12CommandAllocator* alloc, ID3D12PipelineState* pso, REFIID riid, void** out) {
     const HRESULT hr = real_dev_create_cl(dev, mask, type, alloc, pso, riid, out);
-    if (SUCCEEDED(hr) && out && *out && !t_in_openrr_record) {
+    if (SUCCEEDED(hr) && out && *out && !in_openrr_or_peer_record()) {
         ID3D12GraphicsCommandList* list = nullptr;
         if (SUCCEEDED(static_cast<IUnknown*>(*out)->QueryInterface(IID_PPV_ARGS(&list))) && list) {
             OnrRrNotifyD3d12ListReset(list, alloc);
@@ -718,7 +761,7 @@ HRESULT STDMETHODCALLTYPE hk_dev_create_cl(ID3D12Device* dev, UINT mask, D3D12_C
 HRESULT STDMETHODCALLTYPE hk_dev4_create_cl1(void* dev4, UINT mask, D3D12_COMMAND_LIST_TYPE type, UINT flags,
                                              REFIID riid, void** out) {
     const HRESULT hr = real_dev4_create_cl1(dev4, mask, type, flags, riid, out);
-    if (SUCCEEDED(hr) && out && *out && !t_in_openrr_record) {
+    if (SUCCEEDED(hr) && out && *out && !in_openrr_or_peer_record()) {
         ID3D12GraphicsCommandList* list = nullptr;
         if (SUCCEEDED(static_cast<IUnknown*>(*out)->QueryInterface(IID_PPV_ARGS(&list))) && list) {
             OnrRrNotifyD3d12ListReset(list, nullptr);
@@ -819,6 +862,59 @@ bool ensure_allocator_reset_hook(ID3D12Device* dev) {
     return cmd_sig_ok;
 }
 
+void* unwrap_dlssnr_list_slot(void** vt, unsigned slot) {
+    if (!vt || !vt[slot]) return nullptr;
+    HMODULE mod = nullptr;
+    using Fn = void* (*)(void**, unsigned);
+    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           reinterpret_cast<LPCSTR>(vt[slot]), &mod) &&
+        mod) {
+        if (auto fn = reinterpret_cast<Fn>(GetProcAddress(mod, "NR_OrigD3D12ListMethod"))) {
+            bind_dlssnr_peer_exports(mod);
+            return fn(vt, slot);
+        }
+    }
+    if (auto fn = g_dlssnr_orig_list_method.load(std::memory_order_acquire)) return fn(vt, slot);
+    if (probe_coexist_mochi()) {
+        if (auto fn = g_dlssnr_orig_list_method.load(std::memory_order_acquire)) return fn(vt, slot);
+    }
+    // DLSSNR-AMD split wraps non-typed slots (e.g. ExecuteIndirect) with VirtualAlloc JIT stubs;
+    // recover its module from a slot that holds a C++ typed hook (e.g. Reset or SetDescriptorHeaps).
+    constexpr unsigned probe_slots[] = {10u, 28u, 29u, 25u};
+    for (unsigned ps : probe_slots) {
+        if (!vt[ps]) continue;
+        HMODULE pmod = nullptr;
+        if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                               reinterpret_cast<LPCSTR>(vt[ps]), &pmod) &&
+            pmod) {
+            if (auto fn = reinterpret_cast<Fn>(GetProcAddress(pmod, "NR_OrigD3D12ListMethod"))) {
+                bind_dlssnr_peer_exports(pmod);
+                return fn(vt, slot);
+            }
+        }
+    }
+    return nullptr;
+}
+
+void* unwrap_dlssnr_dev_create_cl(void** dvt) {
+    if (!dvt || !dvt[12]) return nullptr;
+    HMODULE mod = nullptr;
+    using Fn = void* (*)(void**);
+    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           reinterpret_cast<LPCSTR>(dvt[12]), &mod) &&
+        mod) {
+        if (auto fn = reinterpret_cast<Fn>(GetProcAddress(mod, "NR_OrigD3D12DeviceCreateCL"))) {
+            bind_dlssnr_peer_exports(mod);
+            return fn(dvt);
+        }
+    }
+    if (auto fn = g_dlssnr_orig_dev_create_cl.load(std::memory_order_acquire)) return fn(dvt);
+    if (probe_coexist_mochi()) {
+        if (auto fn = g_dlssnr_orig_dev_create_cl.load(std::memory_order_acquire)) return fn(dvt);
+    }
+    return nullptr;
+}
+
 bool ensure_direct_state_hooks(ID3D12Device* dev, ID3D12GraphicsCommandList* cl = nullptr) {
     const bool cmd_sig_ok = (!dev) ? true : ensure_allocator_reset_hook(dev);
     if (g_direct_hooks_installed.load(std::memory_order_acquire))
@@ -856,21 +952,28 @@ bool ensure_direct_state_hooks(ID3D12Device* dev, ID3D12GraphicsCommandList* cl 
 
     if (!cl) return false;
 
+    auto resolve_list_fn = [&](void** table, unsigned slot) -> void* {
+        return openrr::pe::resolve_hookable_d3d12_target(
+            table ? table[slot] : nullptr,
+            [&](const void* fn, std::string* out_m) { return in_hookable_d3d12_module(fn, out_m); },
+            [&](void*) { return unwrap_dlssnr_list_slot(table, slot); });
+    };
+
     void** vt = *reinterpret_cast<void***>(cl);
     const openrr::pe::BatchHookItem cl_items[] = {
-        {"Reset",                             10, vt[10], reinterpret_cast<void*>(&hk_cl_reset),             reinterpret_cast<void**>(&real_cl_reset)},
-        {"ClearState",                        11, vt[11], reinterpret_cast<void*>(&hk_cl_clear_state),       reinterpret_cast<void**>(&real_cl_clear_state)},
-        {"SetPipelineState",                  25, vt[25], reinterpret_cast<void*>(&hk_cl_set_pso),           reinterpret_cast<void**>(&real_cl_set_pso)},
-        {"ExecuteBundle",                     27, vt[27], reinterpret_cast<void*>(&hk_cl_exec_bundle),       reinterpret_cast<void**>(&real_cl_exec_bundle)},
-        {"SetDescriptorHeaps",                28, vt[28], reinterpret_cast<void*>(&hk_cl_set_heaps),          reinterpret_cast<void**>(&real_cl_set_heaps)},
-        {"SetComputeRootSignature",           29, vt[29], reinterpret_cast<void*>(&hk_cl_set_compute_rs),     reinterpret_cast<void**>(&real_cl_set_compute_rs)},
-        {"SetComputeRootDescriptorTable",     31, vt[31], reinterpret_cast<void*>(&hk_cl_set_compute_table),  reinterpret_cast<void**>(&real_cl_set_compute_table)},
-        {"SetComputeRoot32BitConstant",       33, vt[33], reinterpret_cast<void*>(&hk_cl_set_compute_const),  reinterpret_cast<void**>(&real_cl_set_compute_const)},
-        {"SetComputeRoot32BitConstants",      35, vt[35], reinterpret_cast<void*>(&hk_cl_set_compute_consts), reinterpret_cast<void**>(&real_cl_set_compute_consts)},
-        {"SetComputeRootConstantBufferView",  37, vt[37], reinterpret_cast<void*>(&hk_cl_set_compute_cbv),    reinterpret_cast<void**>(&real_cl_set_compute_cbv)},
-        {"SetComputeRootShaderResourceView",  39, vt[39], reinterpret_cast<void*>(&hk_cl_set_compute_srv),    reinterpret_cast<void**>(&real_cl_set_compute_srv)},
-        {"SetComputeRootUnorderedAccessView", 41, vt[41], reinterpret_cast<void*>(&hk_cl_set_compute_uav),    reinterpret_cast<void**>(&real_cl_set_compute_uav)},
-        {"ExecuteIndirect",                   59, vt[59], reinterpret_cast<void*>(&hk_cl_exec_indirect),      reinterpret_cast<void**>(&real_cl_exec_indirect)},
+        {"Reset",                             10, resolve_list_fn(vt, 10), reinterpret_cast<void*>(&hk_cl_reset),             reinterpret_cast<void**>(&real_cl_reset)},
+        {"ClearState",                        11, resolve_list_fn(vt, 11), reinterpret_cast<void*>(&hk_cl_clear_state),       reinterpret_cast<void**>(&real_cl_clear_state)},
+        {"SetPipelineState",                  25, resolve_list_fn(vt, 25), reinterpret_cast<void*>(&hk_cl_set_pso),           reinterpret_cast<void**>(&real_cl_set_pso)},
+        {"ExecuteBundle",                     27, resolve_list_fn(vt, 27), reinterpret_cast<void*>(&hk_cl_exec_bundle),       reinterpret_cast<void**>(&real_cl_exec_bundle)},
+        {"SetDescriptorHeaps",                28, resolve_list_fn(vt, 28), reinterpret_cast<void*>(&hk_cl_set_heaps),          reinterpret_cast<void**>(&real_cl_set_heaps)},
+        {"SetComputeRootSignature",           29, resolve_list_fn(vt, 29), reinterpret_cast<void*>(&hk_cl_set_compute_rs),     reinterpret_cast<void**>(&real_cl_set_compute_rs)},
+        {"SetComputeRootDescriptorTable",     31, resolve_list_fn(vt, 31), reinterpret_cast<void*>(&hk_cl_set_compute_table),  reinterpret_cast<void**>(&real_cl_set_compute_table)},
+        {"SetComputeRoot32BitConstant",       33, resolve_list_fn(vt, 33), reinterpret_cast<void*>(&hk_cl_set_compute_const),  reinterpret_cast<void**>(&real_cl_set_compute_const)},
+        {"SetComputeRoot32BitConstants",      35, resolve_list_fn(vt, 35), reinterpret_cast<void*>(&hk_cl_set_compute_consts), reinterpret_cast<void**>(&real_cl_set_compute_consts)},
+        {"SetComputeRootConstantBufferView",  37, resolve_list_fn(vt, 37), reinterpret_cast<void*>(&hk_cl_set_compute_cbv),    reinterpret_cast<void**>(&real_cl_set_compute_cbv)},
+        {"SetComputeRootShaderResourceView",  39, resolve_list_fn(vt, 39), reinterpret_cast<void*>(&hk_cl_set_compute_srv),    reinterpret_cast<void**>(&real_cl_set_compute_srv)},
+        {"SetComputeRootUnorderedAccessView", 41, resolve_list_fn(vt, 41), reinterpret_cast<void*>(&hk_cl_set_compute_uav),    reinterpret_cast<void**>(&real_cl_set_compute_uav)},
+        {"ExecuteIndirect",                   59, resolve_list_fn(vt, 59), reinterpret_cast<void*>(&hk_cl_exec_indirect),      reinterpret_cast<void**>(&real_cl_exec_indirect)},
     };
 
     std::vector<void*> batch_seen;
@@ -936,19 +1039,19 @@ bool ensure_direct_state_hooks(ID3D12Device* dev, ID3D12GraphicsCommandList* cl 
         return true;
     };
 
-    create_optional("Release", 2, vt[2], reinterpret_cast<void*>(&hk_cl_release), reinterpret_cast<void**>(&real_cl_release));
+    create_optional("Release", 2, resolve_list_fn(vt, 2), reinterpret_cast<void*>(&hk_cl_release), reinterpret_cast<void**>(&real_cl_release));
 
     bool diag_enabled = false;
     bool legacy_created = false;
     bool enhanced_created = false;
     if (openrr::pe::d3d12_diagnostics_enabled()) {
         diag_enabled = true;
-        legacy_created = create_optional("ResourceBarrier", 26, vt[26], reinterpret_cast<void*>(&hk_cl_barrier),
+        legacy_created = create_optional("ResourceBarrier", 26, resolve_list_fn(vt, 26), reinterpret_cast<void*>(&hk_cl_barrier),
                                          reinterpret_cast<void**>(&real_cl_barrier));
         ID3D12GraphicsCommandList7* cl7 = nullptr;
         if (SUCCEEDED(cl->QueryInterface(IID_PPV_ARGS(&cl7))) && cl7) {
             void** vt7 = *reinterpret_cast<void***>(cl7);
-            enhanced_created = create_optional("Barrier", 80, vt7[80], reinterpret_cast<void*>(&hk_cl_barrier7),
+            enhanced_created = create_optional("Barrier", 80, resolve_list_fn(vt7, 80), reinterpret_cast<void*>(&hk_cl_barrier7),
                                                reinterpret_cast<void**>(&real_cl_barrier7));
             cl7->Release();
         }
@@ -957,14 +1060,18 @@ bool ensure_direct_state_hooks(ID3D12Device* dev, ID3D12GraphicsCommandList* cl 
     IUnknown* cl4 = nullptr;
     if (SUCCEEDED(cl->QueryInterface(kIID_List4, reinterpret_cast<void**>(&cl4))) && cl4) {
         void** vt4 = *reinterpret_cast<void***>(cl4);
-        create_optional("SetPipelineState1", 75, vt4[75], reinterpret_cast<void*>(&hk_cl_set_pso1),
+        create_optional("SetPipelineState1", 75, resolve_list_fn(vt4, 75), reinterpret_cast<void*>(&hk_cl_set_pso1),
                         reinterpret_cast<void**>(&real_cl_set_pso1));
         cl4->Release();
     }
 
     if (dev) {
         void** dvt = *reinterpret_cast<void***>(dev);
-        create_optional("CreateCommandList", 12, dvt[12], reinterpret_cast<void*>(&hk_dev_create_cl),
+        void* create_cl_fn = openrr::pe::resolve_hookable_d3d12_target(
+            dvt[12],
+            [&](const void* fn, std::string* out_m) { return in_hookable_d3d12_module(fn, out_m); },
+            [&](void*) { return unwrap_dlssnr_dev_create_cl(dvt); });
+        create_optional("CreateCommandList", 12, create_cl_fn, reinterpret_cast<void*>(&hk_dev_create_cl),
                         reinterpret_cast<void**>(&real_dev_create_cl));
         IUnknown* dev4 = nullptr;
         if (SUCCEEDED(dev->QueryInterface(kIID_Dev4, reinterpret_cast<void**>(&dev4))) && dev4) {
@@ -1260,6 +1367,7 @@ bool check_gpu_cheap_vulkan(const LUID* luid, std::string& out_gpu_name, std::st
     InternalVkScope vk_scope;
     openrr::pe::vulkan_entry_points();
     VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
+    app.pApplicationName = "openrr-probe";
     app.apiVersion = VK_API_VERSION_1_3;
     VkInstanceCreateInfo ici{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
     ici.pApplicationInfo = &app;
@@ -3381,11 +3489,21 @@ void* openrr_provider_get_proc(void*, const char* export_name) {
 std::mutex g_vk_dev_mutex;
 std::unordered_map<VkPhysicalDevice, VkInstance> g_phys_to_inst;
 std::unordered_map<VkInstance, uint32_t> g_inst_api_ver;
+std::unordered_set<VkInstance> g_internal_vk_instances;
+std::unordered_map<VkPhysicalDevice, VkInstance> g_internal_vk_phys_to_inst;
+std::unordered_set<VkDevice> g_internal_vk_devices;
+std::unordered_map<VkInstance, PFN_vkDestroyInstance> g_inst_destroy_procs;
+std::unordered_map<VkInstance, PFN_vkEnumeratePhysicalDevices> g_inst_enum_phys_procs;
+std::unordered_map<VkInstance, PFN_vkCreateDevice> g_internal_inst_create_dev_procs;
+std::unordered_map<VkDevice, PFN_vkDestroyDevice> g_dev_destroy_procs;
 std::atomic<VkInstance> g_last_vk_instance{VK_NULL_HANDLE};
 std::atomic<PFN_vkCreateDevice> g_next_vk_create_device{nullptr};
 std::atomic<PFN_vkGetDeviceProcAddr> g_next_vk_gdpa{nullptr};
+std::atomic<PFN_vkDestroyInstance> g_next_vk_destroy_instance{nullptr};
+std::atomic<PFN_vkEnumeratePhysicalDevices> g_next_vk_enum_phys{nullptr};
 
 PFN_vkCreateInstance real_vk_create_instance = nullptr;
+PFN_vkDestroyInstance real_vk_destroy_instance = nullptr;
 PFN_vkEnumeratePhysicalDevices real_vk_enum_phys = nullptr;
 PFN_vkGetInstanceProcAddr real_vk_gipa = nullptr;
 PFN_vkGetDeviceProcAddr real_vk_export_gdpa = nullptr;
@@ -3407,37 +3525,142 @@ std::atomic<PFN_vkFreeCommandBuffers> g_gdpa_free_cbs{nullptr};
 std::atomic<PFN_vkResetCommandPool> g_gdpa_reset_pool{nullptr};
 std::atomic<PFN_vkDestroyCommandPool> g_gdpa_destroy_pool{nullptr};
 
-void* g_vk_export_addrs[8]{};
+void* g_vk_export_addrs[16]{};
+void* g_vk_enum_phys_export_addr = nullptr;
 thread_local int t_in_vk_create_device = 0;
+thread_local int t_in_vk_destroy_instance = 0;
+thread_local int t_in_vk_destroy_device = 0;
+thread_local int t_in_vk_enum_phys = 0;
+
+bool is_internal_vk_device(VkDevice dev) {
+    if (!dev) return false;
+    std::lock_guard<std::mutex> lock(g_vk_dev_mutex);
+    return g_internal_vk_devices.count(dev) != 0;
+}
+
+void destroy_vk_instance_common(PFN_vkDestroyInstance destroy, VkInstance instance, const VkAllocationCallbacks* a) {
+    struct Inside { Inside() { ++t_in_vk_destroy_instance; } ~Inside() { --t_in_vk_destroy_instance; } } inside;
+    if (instance) {
+        VkInstance expected = instance;
+        g_last_vk_instance.compare_exchange_strong(expected, VK_NULL_HANDLE, std::memory_order_acq_rel);
+        std::lock_guard<std::mutex> lock(g_vk_dev_mutex);
+        g_inst_api_ver.erase(instance);
+        g_inst_destroy_procs.erase(instance);
+        g_inst_enum_phys_procs.erase(instance);
+        g_internal_inst_create_dev_procs.erase(instance);
+        g_internal_vk_instances.erase(instance);
+        for (auto it = g_phys_to_inst.begin(); it != g_phys_to_inst.end();) {
+            if (it->second == instance) it = g_phys_to_inst.erase(it);
+            else ++it;
+        }
+        for (auto it = g_internal_vk_phys_to_inst.begin(); it != g_internal_vk_phys_to_inst.end();) {
+            if (it->second == instance) it = g_internal_vk_phys_to_inst.erase(it);
+            else ++it;
+        }
+    }
+    if (destroy) destroy(instance, a);
+}
+
+VKAPI_ATTR void VKAPI_CALL hk_vk_export_destroy_instance(VkInstance instance, const VkAllocationCallbacks* a) {
+    if (t_in_vk_destroy_instance) {
+        if (real_vk_destroy_instance) real_vk_destroy_instance(instance, a);
+        return;
+    }
+    destroy_vk_instance_common(real_vk_destroy_instance, instance, a);
+}
+
+VKAPI_ATTR void VKAPI_CALL hk_vk_gipa_destroy_instance(VkInstance instance, const VkAllocationCallbacks* a) {
+    PFN_vkDestroyInstance next = nullptr;
+    if (instance) {
+        std::lock_guard<std::mutex> lock(g_vk_dev_mutex);
+        if (const auto it = g_inst_destroy_procs.find(instance); it != g_inst_destroy_procs.end()) {
+            next = it->second;
+            g_inst_destroy_procs.erase(it);
+        }
+    }
+    if (!next) next = g_next_vk_destroy_instance.load(std::memory_order_acquire);
+    if (!next) next = real_vk_destroy_instance;
+    if (!next) return;
+    if (t_in_vk_destroy_instance) {
+        next(instance, a);
+        return;
+    }
+    destroy_vk_instance_common(next, instance, a);
+}
 
 VKAPI_ATTR VkResult VKAPI_CALL hk_vk_create_instance(const VkInstanceCreateInfo* ci, const VkAllocationCallbacks* a, VkInstance* out) {
     const VkResult r = real_vk_create_instance(ci, a, out);
-    if (t_in_internal_vk > 0) return r;
+    const char* app_name = (ci && ci->pApplicationInfo) ? ci->pApplicationInfo->pApplicationName : nullptr;
+    const bool internal = (t_in_internal_vk > 0) || openrr::pe::is_internal_vk_app_name(app_name);
     if (r == VK_SUCCESS && out && *out) {
-        const uint32_t ver = (ci && ci->pApplicationInfo && ci->pApplicationInfo->apiVersion)
-                                 ? ci->pApplicationInfo->apiVersion
-                                 : VK_API_VERSION_1_3;
         std::lock_guard<std::mutex> lock(g_vk_dev_mutex);
-        g_inst_api_ver[*out] = ver;
-        g_last_vk_instance.store(*out);
+        if (internal) {
+            g_internal_vk_instances.insert(*out);
+        } else {
+            const uint32_t ver = (ci && ci->pApplicationInfo && ci->pApplicationInfo->apiVersion)
+                                     ? ci->pApplicationInfo->apiVersion
+                                     : VK_API_VERSION_1_3;
+            g_inst_api_ver[*out] = ver;
+            g_last_vk_instance.store(*out);
+        }
+    }
+    return r;
+}
+
+VkResult enum_phys_common(PFN_vkEnumeratePhysicalDevices enumerate, VkInstance instance, uint32_t* count, VkPhysicalDevice* list) {
+    struct Inside { Inside() { ++t_in_vk_enum_phys; } ~Inside() { --t_in_vk_enum_phys; } } inside;
+    const VkResult r = enumerate(instance, count, list);
+    if ((r == VK_SUCCESS || r == VK_INCOMPLETE) && instance && list && count) {
+        std::lock_guard<std::mutex> lock(g_vk_dev_mutex);
+        const bool internal = (t_in_internal_vk > 0) || (g_internal_vk_instances.count(instance) != 0);
+        if (internal) {
+            for (uint32_t i = 0; i < *count; ++i)
+                if (list[i] != VK_NULL_HANDLE) g_internal_vk_phys_to_inst[list[i]] = instance;
+        } else {
+            g_last_vk_instance.store(instance);
+            for (uint32_t i = 0; i < *count; ++i)
+                if (list[i] != VK_NULL_HANDLE) g_phys_to_inst[list[i]] = instance;
+        }
     }
     return r;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL hk_vk_enum_phys(VkInstance instance, uint32_t* count, VkPhysicalDevice* list) {
-    const VkResult r = real_vk_enum_phys(instance, count, list);
-    if (t_in_internal_vk > 0) return r;
-    if ((r == VK_SUCCESS || r == VK_INCOMPLETE) && instance && list && count) {
+    if (t_in_vk_enum_phys) return real_vk_enum_phys(instance, count, list);
+    return enum_phys_common(real_vk_enum_phys, instance, count, list);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL hk_vk_gipa_enum_phys(VkInstance instance, uint32_t* count, VkPhysicalDevice* list) {
+    PFN_vkEnumeratePhysicalDevices next = nullptr;
+    if (instance) {
         std::lock_guard<std::mutex> lock(g_vk_dev_mutex);
-        g_last_vk_instance.store(instance);
-        for (uint32_t i = 0; i < *count; ++i) g_phys_to_inst[list[i]] = instance;
+        if (const auto it = g_inst_enum_phys_procs.find(instance); it != g_inst_enum_phys_procs.end())
+            next = it->second;
     }
-    return r;
+    if (!next) next = g_next_vk_enum_phys.load(std::memory_order_acquire);
+    if (!next) next = real_vk_enum_phys;
+    if (!next) return VK_ERROR_INITIALIZATION_FAILED;
+    if (t_in_vk_enum_phys) return next(instance, count, list);
+    return enum_phys_common(next, instance, count, list);
 }
 
 VkResult do_vk_create_device(PFN_vkCreateDevice create, VkInstance inst, VkPhysicalDevice phys,
                              const VkDeviceCreateInfo* ci, const VkAllocationCallbacks* a, VkDevice* out) {
-    if (t_in_internal_vk > 0) return create(phys, ci, a, out);
+    bool internal = (t_in_internal_vk > 0);
+    if (!internal) {
+        std::lock_guard<std::mutex> lock(g_vk_dev_mutex);
+        internal = (phys && g_internal_vk_phys_to_inst.count(phys) != 0) ||
+                   (inst && g_internal_vk_instances.count(inst) != 0);
+    }
+    if (internal) {
+        struct Inside { Inside() { ++t_in_vk_create_device; } ~Inside() { --t_in_vk_create_device; } } inside;
+        const VkResult r = create(phys, ci, a, out);
+        if (r == VK_SUCCESS && out && *out) {
+            std::lock_guard<std::mutex> lock(g_vk_dev_mutex);
+            g_internal_vk_devices.insert(*out);
+        }
+        return r;
+    }
     ensure_deferred_init();
     openrr::pe::watchdog::Phase phase("vkCreateDevice (OpenRR)");
     struct Inside { Inside() { ++t_in_vk_create_device; } ~Inside() { --t_in_vk_create_device; } } inside;
@@ -3452,7 +3675,12 @@ VkResult do_vk_create_device(PFN_vkCreateDevice create, VkInstance inst, VkPhysi
         if (vit != g_inst_api_ver.end()) api_ver = vit->second;
     }
 
-    return openrr::pe::vkdevice::create_with_runtime(create, inst, api_ver, phys, ci, a, out, nullptr);
+    const VkResult r = openrr::pe::vkdevice::create_with_runtime(create, inst, api_ver, phys, ci, a, out, nullptr);
+    if (r == VK_SUCCESS && out && *out) {
+        std::lock_guard<std::mutex> lock(g_vk_dev_mutex);
+        g_internal_vk_devices.erase(*out);
+    }
+    return r;
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL hk_vk_create_device(VkPhysicalDevice phys, const VkDeviceCreateInfo* ci,
@@ -3462,8 +3690,35 @@ VKAPI_ATTR VkResult VKAPI_CALL hk_vk_create_device(VkPhysicalDevice phys, const 
 
 VKAPI_ATTR VkResult VKAPI_CALL hk_vk_export_create_device(VkPhysicalDevice phys, const VkDeviceCreateInfo* ci,
                                                           const VkAllocationCallbacks* a, VkDevice* out) {
-    if (t_in_vk_create_device || t_in_internal_vk > 0) return real_vk_export_create_device(phys, ci, a, out);
+    if (t_in_vk_create_device) return real_vk_export_create_device(phys, ci, a, out);
     return do_vk_create_device(real_vk_export_create_device, VK_NULL_HANDLE, phys, ci, a, out);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL hk_vk_gipa_internal_create_device(VkPhysicalDevice phys, const VkDeviceCreateInfo* ci,
+                                                                 const VkAllocationCallbacks* a, VkDevice* out) {
+    PFN_vkCreateDevice next = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(g_vk_dev_mutex);
+        if (phys) {
+            if (const auto pit = g_internal_vk_phys_to_inst.find(phys); pit != g_internal_vk_phys_to_inst.end()) {
+                if (const auto cit = g_internal_inst_create_dev_procs.find(pit->second);
+                    cit != g_internal_inst_create_dev_procs.end()) {
+                    next = cit->second;
+                }
+            }
+        }
+        if (!next && g_internal_inst_create_dev_procs.size() == 1)
+            next = g_internal_inst_create_dev_procs.begin()->second;
+    }
+    if (!next) next = real_vk_export_create_device;
+    if (!next) return VK_ERROR_INITIALIZATION_FAILED;
+    struct Inside { Inside() { ++t_in_vk_create_device; } ~Inside() { --t_in_vk_create_device; } } inside;
+    const VkResult r = next(phys, ci, a, out);
+    if (r == VK_SUCCESS && out && *out) {
+        std::lock_guard<std::mutex> lock(g_vk_dev_mutex);
+        g_internal_vk_devices.insert(*out);
+    }
+    return r;
 }
 
 void on_vk_device_destroying(VkDevice device) {
@@ -3473,22 +3728,54 @@ void on_vk_device_destroying(VkDevice device) {
     openrr::pe::vkdevice::forget_device(device);
 }
 
+void destroy_vk_device_common(PFN_vkDestroyDevice destroy, VkDevice device, const VkAllocationCallbacks* a) {
+    struct Inside { Inside() { ++t_in_vk_destroy_device; } ~Inside() { --t_in_vk_destroy_device; } } inside;
+    bool internal = false;
+    if (device) {
+        std::lock_guard<std::mutex> lock(g_vk_dev_mutex);
+        internal = g_internal_vk_devices.erase(device) != 0;
+        g_dev_destroy_procs.erase(device);
+    }
+    if (device && !internal && t_in_internal_vk == 0) on_vk_device_destroying(device);
+    if (destroy) destroy(device, a);
+}
+
 VKAPI_ATTR void VKAPI_CALL hk_vk_destroy_device(VkDevice device, const VkAllocationCallbacks* a) {
-    if (t_in_internal_vk == 0) on_vk_device_destroying(device);
-    real_vk_destroy_device(device, a);
+    if (t_in_vk_destroy_device) {
+        if (real_vk_destroy_device) real_vk_destroy_device(device, a);
+        return;
+    }
+    destroy_vk_device_common(real_vk_destroy_device, device, a);
 }
 
 VKAPI_ATTR void VKAPI_CALL hk_vk_gdpa_destroy_device(VkDevice device, const VkAllocationCallbacks* a) {
-    if (t_in_internal_vk == 0) on_vk_device_destroying(device);
-    if (auto fn = g_gdpa_destroy_device.load()) fn(device, a);
+    PFN_vkDestroyDevice next = nullptr;
+    if (device) {
+        std::lock_guard<std::mutex> lock(g_vk_dev_mutex);
+        if (const auto it = g_dev_destroy_procs.find(device); it != g_dev_destroy_procs.end()) {
+            next = it->second;
+            g_dev_destroy_procs.erase(it);
+        }
+    }
+    if (!next) next = g_gdpa_destroy_device.load(std::memory_order_acquire);
+    if (!next) next = real_vk_destroy_device;
+    if (!next) return;
+    if (t_in_vk_destroy_device) {
+        next(device, a);
+        return;
+    }
+    destroy_vk_device_common(next, device, a);
 }
 
 // Command buffer / pool reset hooks for Vulkan retirement proofs (Item #3)
 VKAPI_ATTR VkResult VKAPI_CALL hk_vk_export_alloc_cbs(VkDevice dev, const VkCommandBufferAllocateInfo* ai, VkCommandBuffer* out) {
+    if (is_internal_vk_device(dev)) return real_vk_export_alloc_cbs(dev, ai, out);
     return openrr::pe::vkreset::track_alloc_cbs(real_vk_export_alloc_cbs, &OnrRrNotifyVkCommandBuffersAllocated, dev, ai, out);
 }
 VKAPI_ATTR VkResult VKAPI_CALL hk_vk_gdpa_alloc_cbs(VkDevice dev, const VkCommandBufferAllocateInfo* ai, VkCommandBuffer* out) {
-    return openrr::pe::vkreset::track_alloc_cbs(g_gdpa_alloc_cbs.load(), &OnrRrNotifyVkCommandBuffersAllocated, dev, ai, out);
+    auto fn = g_gdpa_alloc_cbs.load();
+    if (is_internal_vk_device(dev)) return fn ? fn(dev, ai, out) : VK_ERROR_INITIALIZATION_FAILED;
+    return openrr::pe::vkreset::track_alloc_cbs(fn, &OnrRrNotifyVkCommandBuffersAllocated, dev, ai, out);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL hk_vk_export_begin_cb(VkCommandBuffer cb, const VkCommandBufferBeginInfo* bi) {
@@ -3506,41 +3793,64 @@ VKAPI_ATTR VkResult VKAPI_CALL hk_vk_gdpa_reset_cb(VkCommandBuffer cb, VkCommand
 }
 
 VKAPI_ATTR void VKAPI_CALL hk_vk_export_free_cbs(VkDevice dev, VkCommandPool pool, uint32_t count, const VkCommandBuffer* cbs) {
+    if (is_internal_vk_device(dev)) {
+        real_vk_export_free_cbs(dev, pool, count, cbs);
+        return;
+    }
     openrr::pe::vkreset::track_free_cbs(real_vk_export_free_cbs, &OnrRrNotifyVkCommandBuffersFreed, dev, pool, count, cbs);
 }
 VKAPI_ATTR void VKAPI_CALL hk_vk_gdpa_free_cbs(VkDevice dev, VkCommandPool pool, uint32_t count, const VkCommandBuffer* cbs) {
-    openrr::pe::vkreset::track_free_cbs(g_gdpa_free_cbs.load(), &OnrRrNotifyVkCommandBuffersFreed, dev, pool, count, cbs);
+    auto fn = g_gdpa_free_cbs.load();
+    if (is_internal_vk_device(dev)) {
+        if (fn) fn(dev, pool, count, cbs);
+        return;
+    }
+    openrr::pe::vkreset::track_free_cbs(fn, &OnrRrNotifyVkCommandBuffersFreed, dev, pool, count, cbs);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL hk_vk_export_reset_pool(VkDevice dev, VkCommandPool pool, VkCommandPoolResetFlags flags) {
+    if (is_internal_vk_device(dev)) return real_vk_export_reset_pool(dev, pool, flags);
     return openrr::pe::vkreset::track_reset_pool(real_vk_export_reset_pool, &OnrRrNotifyVkCommandPoolReset, dev, pool, flags);
 }
 VKAPI_ATTR VkResult VKAPI_CALL hk_vk_gdpa_reset_pool(VkDevice dev, VkCommandPool pool, VkCommandPoolResetFlags flags) {
-    return openrr::pe::vkreset::track_reset_pool(g_gdpa_reset_pool.load(), &OnrRrNotifyVkCommandPoolReset, dev, pool, flags);
+    auto fn = g_gdpa_reset_pool.load();
+    if (is_internal_vk_device(dev)) return fn ? fn(dev, pool, flags) : VK_SUCCESS;
+    return openrr::pe::vkreset::track_reset_pool(fn, &OnrRrNotifyVkCommandPoolReset, dev, pool, flags);
 }
 
 VKAPI_ATTR void VKAPI_CALL hk_vk_export_destroy_pool(VkDevice dev, VkCommandPool pool, const VkAllocationCallbacks* a) {
+    if (is_internal_vk_device(dev)) {
+        real_vk_export_destroy_pool(dev, pool, a);
+        return;
+    }
     openrr::pe::vkreset::track_destroy_pool(real_vk_export_destroy_pool, &OnrRrNotifyVkCommandPoolDestroyed, dev, pool, a);
 }
 VKAPI_ATTR void VKAPI_CALL hk_vk_gdpa_destroy_pool(VkDevice dev, VkCommandPool pool, const VkAllocationCallbacks* a) {
-    openrr::pe::vkreset::track_destroy_pool(g_gdpa_destroy_pool.load(), &OnrRrNotifyVkCommandPoolDestroyed, dev, pool, a);
+    auto fn = g_gdpa_destroy_pool.load();
+    if (is_internal_vk_device(dev)) {
+        if (fn) fn(dev, pool, a);
+        return;
+    }
+    openrr::pe::vkreset::track_destroy_pool(fn, &OnrRrNotifyVkCommandPoolDestroyed, dev, pool, a);
 }
 
-PFN_vkVoidFunction wrap_vk_device_proc(const char* name, PFN_vkVoidFunction f);
+PFN_vkVoidFunction wrap_vk_device_proc(VkDevice dev, const char* name, PFN_vkVoidFunction f);
 
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL hk_vk_gdpa(VkDevice dev, const char* name) {
     PFN_vkGetDeviceProcAddr next = g_next_vk_gdpa.load();
     if (!next) next = real_vk_export_gdpa;
     const PFN_vkVoidFunction f = next ? next(dev, name) : nullptr;
-    return wrap_vk_device_proc(name, f);
+    if (name && std::strcmp(name, "vkDestroyDevice") != 0 && is_internal_vk_device(dev)) return f;
+    return wrap_vk_device_proc(dev, name, f);
 }
 
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL hk_vk_export_gdpa(VkDevice dev, const char* name) {
     const PFN_vkVoidFunction f = real_vk_export_gdpa ? real_vk_export_gdpa(dev, name) : nullptr;
-    return wrap_vk_device_proc(name, f);
+    if (name && std::strcmp(name, "vkDestroyDevice") != 0 && is_internal_vk_device(dev)) return f;
+    return wrap_vk_device_proc(dev, name, f);
 }
 
-PFN_vkVoidFunction wrap_vk_device_proc(const char* name, PFN_vkVoidFunction f) {
+PFN_vkVoidFunction wrap_vk_device_proc(VkDevice dev, const char* name, PFN_vkVoidFunction f) {
     if (!f || !name) return f;
     const void* fp = reinterpret_cast<const void*>(f);
     for (void* exp : g_vk_export_addrs) {
@@ -3552,8 +3862,18 @@ PFN_vkVoidFunction wrap_vk_device_proc(const char* name, PFN_vkVoidFunction f) {
         return reinterpret_cast<PFN_vkVoidFunction>(&hk_vk_gdpa);
     }
     if (std::strcmp(name, "vkDestroyDevice") == 0) {
-        if (f != reinterpret_cast<PFN_vkVoidFunction>(&hk_vk_destroy_device) && f != reinterpret_cast<PFN_vkVoidFunction>(&hk_vk_gdpa_destroy_device))
-            g_gdpa_destroy_device.store(reinterpret_cast<PFN_vkDestroyDevice>(f));
+        if (f != reinterpret_cast<PFN_vkVoidFunction>(&hk_vk_destroy_device) &&
+            f != reinterpret_cast<PFN_vkVoidFunction>(&hk_vk_gdpa_destroy_device)) {
+            if (dev) {
+                std::lock_guard<std::mutex> lock(g_vk_dev_mutex);
+                g_dev_destroy_procs[dev] = reinterpret_cast<PFN_vkDestroyDevice>(f);
+                if (g_internal_vk_devices.count(dev) == 0) {
+                    g_gdpa_destroy_device.store(reinterpret_cast<PFN_vkDestroyDevice>(f), std::memory_order_release);
+                }
+            } else {
+                g_gdpa_destroy_device.store(reinterpret_cast<PFN_vkDestroyDevice>(f), std::memory_order_release);
+            }
+        }
         return reinterpret_cast<PFN_vkVoidFunction>(&hk_vk_gdpa_destroy_device);
     }
     if (std::strcmp(name, "vkAllocateCommandBuffers") == 0) {
@@ -3590,13 +3910,77 @@ PFN_vkVoidFunction wrap_vk_device_proc(const char* name, PFN_vkVoidFunction f) {
 }
 
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL hk_vk_gipa(VkInstance instance, const char* name) {
-    if (instance) g_last_vk_instance.store(instance);
+    bool internal_inst = (t_in_internal_vk > 0);
+    if (instance) {
+        std::lock_guard<std::mutex> lock(g_vk_dev_mutex);
+        internal_inst = internal_inst || (g_internal_vk_instances.count(instance) != 0);
+        if (!internal_inst) g_last_vk_instance.store(instance);
+    }
     const PFN_vkVoidFunction f = real_vk_gipa(instance, name);
-    if (f && name && std::strcmp(name, "vkCreateDevice") == 0) {
+    if (!f || !name) return f;
+    if (internal_inst) {
+        if (std::strcmp(name, "vkDestroyInstance") == 0) {
+            if (f != reinterpret_cast<PFN_vkVoidFunction>(&hk_vk_gipa_destroy_instance) &&
+                f != reinterpret_cast<PFN_vkVoidFunction>(&hk_vk_export_destroy_instance)) {
+                if (instance) {
+                    std::lock_guard<std::mutex> lock(g_vk_dev_mutex);
+                    g_inst_destroy_procs[instance] = reinterpret_cast<PFN_vkDestroyInstance>(f);
+                }
+            }
+            return reinterpret_cast<PFN_vkVoidFunction>(&hk_vk_gipa_destroy_instance);
+        }
+        if (std::strcmp(name, "vkEnumeratePhysicalDevices") == 0) {
+            const void* fp = reinterpret_cast<const void*>(f);
+            if (fp == g_vk_enum_phys_export_addr ||
+                f == reinterpret_cast<PFN_vkVoidFunction>(&hk_vk_gipa_enum_phys) ||
+                f == reinterpret_cast<PFN_vkVoidFunction>(&hk_vk_enum_phys))
+                return f;
+            if (instance) {
+                std::lock_guard<std::mutex> lock(g_vk_dev_mutex);
+                g_inst_enum_phys_procs[instance] = reinterpret_cast<PFN_vkEnumeratePhysicalDevices>(f);
+            }
+            return reinterpret_cast<PFN_vkVoidFunction>(&hk_vk_gipa_enum_phys);
+        }
+        if (std::strcmp(name, "vkCreateDevice") == 0) {
+            if (f == reinterpret_cast<PFN_vkVoidFunction>(&hk_vk_gipa_internal_create_device) ||
+                f == reinterpret_cast<PFN_vkVoidFunction>(&hk_vk_export_create_device))
+                return f;
+            if (instance) {
+                std::lock_guard<std::mutex> lock(g_vk_dev_mutex);
+                g_internal_inst_create_dev_procs[instance] = reinterpret_cast<PFN_vkCreateDevice>(f);
+            }
+            return reinterpret_cast<PFN_vkVoidFunction>(&hk_vk_gipa_internal_create_device);
+        }
+        return f;
+    }
+    if (std::strcmp(name, "vkDestroyInstance") == 0) {
+        if (f != reinterpret_cast<PFN_vkVoidFunction>(&hk_vk_gipa_destroy_instance)) {
+            if (instance) {
+                std::lock_guard<std::mutex> lock(g_vk_dev_mutex);
+                g_inst_destroy_procs[instance] = reinterpret_cast<PFN_vkDestroyInstance>(f);
+            }
+            g_next_vk_destroy_instance.store(reinterpret_cast<PFN_vkDestroyInstance>(f), std::memory_order_release);
+        }
+        return reinterpret_cast<PFN_vkVoidFunction>(&hk_vk_gipa_destroy_instance);
+    }
+    if (std::strcmp(name, "vkEnumeratePhysicalDevices") == 0) {
+        const void* fp = reinterpret_cast<const void*>(f);
+        if (fp == g_vk_enum_phys_export_addr ||
+            f == reinterpret_cast<PFN_vkVoidFunction>(&hk_vk_gipa_enum_phys) ||
+            f == reinterpret_cast<PFN_vkVoidFunction>(&hk_vk_enum_phys))
+            return f;
+        if (instance) {
+            std::lock_guard<std::mutex> lock(g_vk_dev_mutex);
+            g_inst_enum_phys_procs[instance] = reinterpret_cast<PFN_vkEnumeratePhysicalDevices>(f);
+        }
+        g_next_vk_enum_phys.store(reinterpret_cast<PFN_vkEnumeratePhysicalDevices>(f), std::memory_order_release);
+        return reinterpret_cast<PFN_vkVoidFunction>(&hk_vk_gipa_enum_phys);
+    }
+    if (std::strcmp(name, "vkCreateDevice") == 0) {
         g_next_vk_create_device.store(reinterpret_cast<PFN_vkCreateDevice>(f));
         return reinterpret_cast<PFN_vkVoidFunction>(&hk_vk_create_device);
     }
-    return wrap_vk_device_proc(name, f);
+    return wrap_vk_device_proc(VK_NULL_HANDLE, name, f);
 }
 
 std::atomic<bool> g_vk_dev_hooks_done{false};
@@ -3617,11 +4001,13 @@ void hook_device_creation() {
         void* fn = reinterpret_cast<void*>(GetProcAddress(m, name));
         if (fn && MH_CreateHook(fn, detour, orig) == MH_OK) {
             MH_EnableHook(fn);
+            if (std::strcmp(name, "vkEnumeratePhysicalDevices") == 0) g_vk_enum_phys_export_addr = fn;
             if (track_export && exp_idx < int(std::size(g_vk_export_addrs)))
                 g_vk_export_addrs[exp_idx++] = fn;
         }
     };
     try_hk("vkCreateInstance", reinterpret_cast<void*>(&hk_vk_create_instance), reinterpret_cast<void**>(&real_vk_create_instance));
+    try_hk("vkDestroyInstance", reinterpret_cast<void*>(&hk_vk_export_destroy_instance), reinterpret_cast<void**>(&real_vk_destroy_instance));
     try_hk("vkEnumeratePhysicalDevices", reinterpret_cast<void*>(&hk_vk_enum_phys), reinterpret_cast<void**>(&real_vk_enum_phys));
     try_hk("vkGetInstanceProcAddr", reinterpret_cast<void*>(&hk_vk_gipa), reinterpret_cast<void**>(&real_vk_gipa));
     try_hk("vkGetDeviceProcAddr", reinterpret_cast<void*>(&hk_vk_export_gdpa), reinterpret_cast<void**>(&real_vk_export_gdpa), true);
@@ -3701,6 +4087,12 @@ VOID NTAPI on_dll_loaded_notification(ULONG reason, const LDR_DLL_NOTIFICATION_D
     if (chars == 11 && _wcsnicmp(data->Loaded.BaseDllName->Buffer, L"nvapi64.dll", 11) == 0) {
         if (reason == 1) g_nvapi_hooks.hook_module(static_cast<HMODULE>(data->Loaded.DllBase));
         else g_nvapi_hooks.unhook_module(data->Loaded.DllBase, data->Loaded.SizeOfImage);
+        return;
+    }
+    if (chars >= 10 && _wcsnicmp(data->Loaded.BaseDllName->Buffer, L"dlssnr-amd", 10) == 0) {
+        HMODULE mod = static_cast<HMODULE>(data->Loaded.DllBase);
+        if (reason == 1) bind_dlssnr_peer_exports(mod);
+        else unbind_dlssnr_peer_exports(mod);
         return;
     }
     if (reason != 1) return;
@@ -3808,6 +4200,10 @@ void initialize_asi_from(void* caller) {
 }
 
 // Called by OptiScaler from its DllMain, under the loader lock: hooks and INI read only (Item #8).
+extern "C" __declspec(dllexport) int OpenRR_IsInDirectRecord() {
+    return t_in_openrr_record != 0 ? 1 : 0;
+}
+
 extern "C" __declspec(dllexport) void InitializeASI() {
     try {
         initialize_asi_from(__builtin_return_address(0));

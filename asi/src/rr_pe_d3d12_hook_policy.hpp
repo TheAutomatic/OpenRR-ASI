@@ -4,11 +4,36 @@
 
 #include <windows.h>
 
+#include <cctype>
 #include <cwchar>
 #include <iterator>
 #include <string>
 
 namespace openrr::pe {
+
+inline bool is_internal_vk_app_name(const char* name) {
+    if (!name) return false;
+    auto eq_ci = [](const char* s, const char* prefix, size_t n) {
+        for (size_t i = 0; i < n; ++i) {
+            if (!s[i] || std::tolower(static_cast<unsigned char>(s[i])) != prefix[i]) return false;
+        }
+        return true;
+    };
+    return eq_ci(name, "dlssnr-amd", 10) || eq_ci(name, "openrr", 6);
+}
+
+template <class Pred, class Unwrap>
+inline void* resolve_hookable_d3d12_target(void* slot_fn, Pred&& is_hookable, Unwrap&& unwrap_fn,
+                                           std::string* out_mod = nullptr) {
+    if (is_hookable(slot_fn, out_mod)) return slot_fn;
+    void* unwrapped = unwrap_fn(slot_fn);
+    std::string unwrapped_mod;
+    if (unwrapped && unwrapped != slot_fn && is_hookable(unwrapped, out_mod ? &unwrapped_mod : nullptr)) {
+        if (out_mod) *out_mod = std::move(unwrapped_mod);
+        return unwrapped;
+    }
+    return slot_fn;
+}
 
 inline bool is_conflicting_d3d12_hook_module(const wchar_t* base) {
     if (!base) return false;
