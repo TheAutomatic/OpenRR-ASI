@@ -39,14 +39,14 @@ msgstr "Unknown"
 msgid "State: %s%s%s%s"
 msgstr "State: %s%s%s%s"
 
-msgid "D3D12 Direct ELF"
-msgstr "D3D12 Direct ELF"
+msgid "D3D12 Direct"
+msgstr "D3D12 Direct"
 
-msgid "Vulkan Host (RecordVk)"
-msgstr "Vulkan Host (RecordVk)"
+msgid "Vulkan Native"
+msgstr "Vulkan Native"
 
-msgid "Vulkan Interop Bridge"
-msgstr "Vulkan Interop Bridge"
+msgid "Vulkan Bridge"
+msgstr "Vulkan Bridge"
 
 msgid "Backend: %s"
 msgstr "Backend: %s"

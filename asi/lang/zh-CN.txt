@@ -45,14 +45,14 @@ msgstr "未知"
 msgid "State: %s%s%s%s"
 msgstr "状态：%s%s%s%s"
 
-msgid "D3D12 Direct ELF"
-msgstr "D3D12 直连 ELF"
+msgid "D3D12 Direct"
+msgstr "D3D12 直连"
 
-msgid "Vulkan Host (RecordVk)"
-msgstr "Vulkan 宿主（RecordVk）"
+msgid "Vulkan Native"
+msgstr "Vulkan 原生"
 
-msgid "Vulkan Interop Bridge"
-msgstr "Vulkan 互操作桥接"
+msgid "Vulkan Bridge"
+msgstr "Vulkan 桥接"
 
 msgid "Backend: %s"
 msgstr "后端：%s"
@@ -91,19 +91,19 @@ msgid "D3D12 Backend"
 msgstr "D3D12 后端"
 
 msgid "Legacy"
-msgstr "传统模式（Legacy）"
+msgstr "传统"
 
 msgid "New (recommended)"
-msgstr "标准加速（New，推荐）"
+msgstr "标准（推荐）"
 
 msgid "Fast (experimental)"
-msgstr "极速模式（Fast，实验性）"
+msgstr "极速（实验性）"
 
 msgid "Network Mode"
 msgstr "网络模式"
 
 msgid "New"
-msgstr "标准加速（New）"
+msgstr "标准"
 
 msgid "Building fast kernels"
 msgstr "正在构建加速内核"
@@ -136,52 +136,52 @@ msgid "Depth Type"
 msgstr "深度类型"
 
 msgid "Shader Read Optimal"
-msgstr "着色器只读最优（Shader Read Optimal）"
+msgstr "着色器只读（推荐）"
 
 msgid "General"
-msgstr "通用（General）"
+msgstr "通用"
 
 msgid "Vulkan Input Layout"
 msgstr "Vulkan 输入布局"
 
 msgid "Re-init Upscaler"
-msgstr "重建 Upscaler"
+msgstr "重新初始化超分"
 
 msgid "Recreates active upscalers so backend or depth changes take effect without restarting."
-msgstr "重建当前活动的 Upscaler，使后端或深度类型修改无需重启即可生效。"
+msgstr "重新初始化当前超分，使后端或深度类型修改无需重启即可生效。"
 
 msgid "Re-init requested"
-msgstr "已请求重建"
+msgstr "已请求重新初始化"
 
 msgid "Guides"
 msgstr "引导图"
 
 msgid "Use Disocclusion Mask"
-msgstr "使用去遮挡遮罩（Disocclusion Mask）"
+msgstr "使用去遮挡遮罩"
 
 msgid "Invert Disocclusion Mask"
 msgstr "反转去遮挡遮罩"
 
 msgid "Clamp Disocclusion Mask (0..1)"
-msgstr "钳位去遮挡遮罩（0..1）"
+msgstr "限制去遮挡遮罩范围（0..1）"
 
 msgid "Disocclusion Mask Scale"
 msgstr "去遮挡遮罩缩放"
 
 msgid "Use SSS Guide (ColorBeforeFog)"
-msgstr "使用次表面散射引导图（ColorBeforeFog）"
+msgstr "使用次表面散射引导图（SSS）"
 
 msgid "Use Responsivity Mask"
-msgstr "使用响应度遮罩（Responsivity Mask）"
+msgstr "使用响应度遮罩"
 
 msgid "Use Color Before Transparency"
-msgstr "使用半透明前颜色（Color Before Transparency）"
+msgstr "使用半透明前颜色"
 
 msgid "Use Depth of Field Guide"
-msgstr "使用景深引导图（Depth of Field）"
+msgstr "使用景深引导图"
 
 msgid "Use Reflection Motion Vectors"
-msgstr "使用反射运动矢量（Reflection MVs）"
+msgstr "使用反射运动矢量"
 
 msgid "Use Transparency Layer Opacity & Motion"
 msgstr "使用半透明层不透明度与运动矢量"
@@ -193,16 +193,16 @@ msgid "openrr-amd\\lang\\<name>.txt; the file reloads when it changes."
 msgstr "读取 openrr-amd\\lang\\<name>.txt；文件修改后会自动重载。"
 
 msgid "Updated OptiScaler.ini ([Menu] TTFFontPath). Restart the game to display non-Latin text."
-msgstr "已更新 OptiScaler.ini（[Menu] TTFFontPath），重启游戏后即可显示非拉丁文字。"
+msgstr "已更新 OptiScaler.ini 字体设置，重启游戏后生效。"
 
 msgid "OptiScaler's built-in font has Latin glyphs only. Configure [Menu] TTFFontPath in OptiScaler.ini and restart to display this language."
-msgstr "OptiScaler 内置字体仅包含拉丁字符。请在 OptiScaler.ini 中配置 [Menu] TTFFontPath 并重启游戏以显示该语言。"
+msgstr "OptiScaler 内置字体仅支持英文。请配置中文字体并重启游戏。"
 
 msgid "Configure CJK Font in OptiScaler.ini"
-msgstr "在 OptiScaler.ini 中配置中文字体"
+msgstr "一键写入中文字体到 OptiScaler.ini"
 
 msgid "No CJK font file found in openrr-amd\\lang\\fonts or C:\\Windows\\Fonts."
-msgstr "在 openrr-amd\\lang\\fonts 或 C:\\Windows\\Fonts 中未找到可用的 CJK 字体文件。"
+msgstr "未在 openrr-amd\\lang\\fonts 或系统字体目录找到可用的中文字体。"
 
 msgid "Could not write OptiScaler.ini. Check file permissions."
 msgstr "无法写入 OptiScaler.ini，请检查文件权限。"

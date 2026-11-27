@@ -406,9 +406,9 @@ struct TabState {
                 g_api->Text(state_line.c_str());
             }
 
-            const char* be_name = st.backend == ONR_RR_BACKEND_D3D12       ? tr("D3D12 Direct ELF")
-                                : st.backend == ONR_RR_BACKEND_VULKAN_HOST ? tr("Vulkan Host (RecordVk)")
-                                                                           : tr("Vulkan Interop Bridge");
+            const char* be_name = st.backend == ONR_RR_BACKEND_D3D12       ? tr("D3D12 Direct")
+                                : st.backend == ONR_RR_BACKEND_VULKAN_HOST ? tr("Vulkan Native")
+                                                                           : tr("Vulkan Bridge");
             g_api->Text(fmt(tr("Backend: %s"), be_name).c_str());
             if (st.backend_message[0]) {
                 g_api->TextDisabled(fmt(tr("Backend note: %s"), st.backend_message).c_str());
@@ -441,8 +441,8 @@ struct TabState {
         int32_t be_idx = (be == "d3d12") ? 1 : (be == "vulkan") ? 2 : 0;
         const char* be_items[] = {
             tr("Auto (D3D12 Direct preferred)"),
-            tr("D3D12 Direct ELF"),
-            tr("Vulkan Interop Bridge"),
+            tr("D3D12 Direct"),
+            tr("Vulkan Bridge"),
         };
         if (g_api->Combo(tr_id(tr("D3D12 Backend"), "##rr_backend"), &be_idx, be_items, 3, nullptr)) {
             ini.set("OpenRR", "Backend", be_idx == 1 ? "d3d12" : be_idx == 2 ? "vulkan" : "auto");

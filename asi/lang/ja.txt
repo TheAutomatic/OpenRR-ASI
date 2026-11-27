@@ -24,7 +24,7 @@ msgid "OpenRR could not register as an OptiScaler DLSSD provider. Check openrr-a
 msgstr "OpenRR を OptiScaler DLSSD プロバイダーとして登録できませんでした。openrr-amd.log を確認してください。"
 
 msgid "Idle: waiting for the game to create a DLSS Ray Reconstruction feature."
-msgstr "待機中：ゲームが DLSS レイ再構成機能を作成するのを待っています。"
+msgstr "待機中：ゲーム側で DLSS レイ再構成が有効になるのを待っています。"
 
 msgid "Note: %s"
 msgstr "補足：%s"
@@ -44,14 +44,14 @@ msgstr "不明"
 msgid "State: %s%s%s%s"
 msgstr "状態：%s%s%s%s"
 
-msgid "D3D12 Direct ELF"
-msgstr "D3D12 直接 ELF"
+msgid "D3D12 Direct"
+msgstr "D3D12 ダイレクト"
 
-msgid "Vulkan Host (RecordVk)"
-msgstr "Vulkan ホスト（RecordVk）"
+msgid "Vulkan Native"
+msgstr "Vulkan ネイティブ"
 
-msgid "Vulkan Interop Bridge"
-msgstr "Vulkan 相互運用ブリッジ"
+msgid "Vulkan Bridge"
+msgstr "Vulkan ブリッジ"
 
 msgid "Backend: %s"
 msgstr "バックエンド：%s"
@@ -69,10 +69,10 @@ msgid "Est. w/o async preemption: %.2f ms (avg %.2f ms)"
 msgstr "非同期プリエンプション除外推定：%.2f ms（平均 %.2f ms）"
 
 msgid "Weights: %s"
-msgstr "重み：%s"
+msgstr "モデル重み：%s"
 
 msgid "Coexistence: dlssnr-amd.asi detected (Direct path active)"
-msgstr "共存：dlssnr-amd.asi を検出（直接パス有効）"
+msgstr "共存：dlssnr-amd.asi を検出（ダイレクトパス有効）"
 
 msgid "Execution & Backend"
 msgstr "実行とバックエンド"
@@ -84,25 +84,25 @@ msgid "Registers OpenRR as an OptiScaler Ray Reconstruction provider (restart re
 msgstr "OpenRR を OptiScaler のレイ再構成プロバイダーとして登録します（切替時は再起動が必要）。リアルタイム切替は OptiScaler の Upscalers -> RR Upscaler を使用してください。"
 
 msgid "Auto (D3D12 Direct preferred)"
-msgstr "自動（D3D12 直接優先）"
+msgstr "自動（D3D12 ダイレクト優先）"
 
 msgid "D3D12 Backend"
 msgstr "D3D12 バックエンド"
 
 msgid "Legacy"
-msgstr "レガシー（Legacy）"
+msgstr "レガシー"
 
 msgid "New (recommended)"
-msgstr "標準高速（New・推奨）"
+msgstr "標準（推奨）"
 
 msgid "Fast (experimental)"
-msgstr "最速（Fast・実験的）"
+msgstr "高速（実験的）"
 
 msgid "Network Mode"
 msgstr "ネットワークモード"
 
 msgid "New"
-msgstr "標準高速（New）"
+msgstr "標準"
 
 msgid "Building fast kernels"
 msgstr "高速カーネルを構築中"
@@ -135,19 +135,19 @@ msgid "Depth Type"
 msgstr "深度タイプ"
 
 msgid "Shader Read Optimal"
-msgstr "シェーダー読取最適（Shader Read Optimal）"
+msgstr "シェーダー読取最適"
 
 msgid "General"
-msgstr "汎用（General）"
+msgstr "汎用"
 
 msgid "Vulkan Input Layout"
 msgstr "Vulkan 入力レイアウト"
 
 msgid "Re-init Upscaler"
-msgstr "Upscaler を再初期化"
+msgstr "アップスケーラーを再初期化"
 
 msgid "Recreates active upscalers so backend or depth changes take effect without restarting."
-msgstr "実行中の Upscaler を再作成し、再起動せずにバックエンドや深度の変更を反映します。"
+msgstr "実行中のアップスケーラーを再作成し、再起動せずにバックエンドや深度の変更を反映します。"
 
 msgid "Re-init requested"
 msgstr "再初期化を要求しました"
@@ -162,19 +162,19 @@ msgid "Invert Disocclusion Mask"
 msgstr "ディソクルージョンマスクを反転"
 
 msgid "Clamp Disocclusion Mask (0..1)"
-msgstr "ディソクルージョンマスクを 0..1 にクランプ"
+msgstr "ディソクルージョンマスクを 0..1 に制限"
 
 msgid "Disocclusion Mask Scale"
 msgstr "ディソクルージョンマスク倍率"
 
 msgid "Use SSS Guide (ColorBeforeFog)"
-msgstr "SSS ガイドを使用（ColorBeforeFog）"
+msgstr "SSS ガイドを使用"
 
 msgid "Use Responsivity Mask"
-msgstr "応答度マスク（Responsivity Mask）を使用"
+msgstr "レスポンシビティマスクを使用"
 
 msgid "Use Color Before Transparency"
-msgstr "半透明前カラー（Color Before Transparency）を使用"
+msgstr "半透明適用前カラーを使用"
 
 msgid "Use Depth of Field Guide"
 msgstr "被写界深度ガイド（DoF）を使用"
@@ -192,16 +192,16 @@ msgid "openrr-amd\\lang\\<name>.txt; the file reloads when it changes."
 msgstr "openrr-amd\\lang\\<name>.txt を読み込みます。ファイル変更時は自動再読込されます。"
 
 msgid "Updated OptiScaler.ini ([Menu] TTFFontPath). Restart the game to display non-Latin text."
-msgstr "OptiScaler.ini（[Menu] TTFFontPath）を更新しました。非ラテン文字を表示するにはゲームを再起動してください。"
+msgstr "OptiScaler.ini のフォント設定を更新しました。ゲームを再起動すると反映されます。"
 
 msgid "OptiScaler's built-in font has Latin glyphs only. Configure [Menu] TTFFontPath in OptiScaler.ini and restart to display this language."
-msgstr "OptiScaler の内蔵フォントはラテン文字のみ対応です。この言語を表示するには OptiScaler.ini に [Menu] TTFFontPath を設定して再起動してください。"
+msgstr "OptiScaler の内蔵フォントは英語のみ対応です。日本語を表示するにはフォントを設定して再起動してください。"
 
 msgid "Configure CJK Font in OptiScaler.ini"
-msgstr "OptiScaler.ini に CJK フォントを設定"
+msgstr "OptiScaler.ini に日本語フォントを設定"
 
 msgid "No CJK font file found in openrr-amd\\lang\\fonts or C:\\Windows\\Fonts."
-msgstr "openrr-amd\\lang\\fonts または C:\\Windows\\Fonts に CJK フォントファイルが見つかりません。"
+msgstr "openrr-amd\\lang\\fonts または C:\\Windows\\Fonts に日本語フォントが見つかりません。"
 
 msgid "Could not write OptiScaler.ini. Check file permissions."
 msgstr "OptiScaler.ini に書き込めませんでした。ファイルの権限を確認してください。"
