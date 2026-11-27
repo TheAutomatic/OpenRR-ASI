@@ -35,6 +35,12 @@ def tokens(src):
                     i = j
                     break
                 i = j + 1
+        elif c == "'":
+            i += 1
+            while i < n and src[i] != "'":
+                i += 2 if (src[i] == "\\" and i + 1 < n) else 1
+            i += 1
+            yield "p", "'", i
         elif c == '"' or (c in "uUL" and src[i + 1:i + 2] == '"') or (src.startswith("u8", i) and src[i + 2:i + 3] == '"'):
             if src.startswith('R"', i):
                 raise SystemExit("raw string literals are not read")

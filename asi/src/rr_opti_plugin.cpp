@@ -8,7 +8,6 @@
 #include "rr_pe_config.hpp"
 #include "rr_pe_control.hpp"
 #include "rr_pe_log.hpp"
-#include "rr_pe_vkdevice.hpp"
 #include "opennr_rr_api.h"
 
 #include <windows.h>
@@ -131,100 +130,170 @@ std::string pick_cjk_font_path() {
     return {};
 }
 
-uint64_t ini_mtime(const std::string& path) {
+struct IniStamp {
+    uint64_t mtime = 0;
+    uint64_t size = 0;
+    bool valid() const { return mtime != 0; }
+    bool operator==(const IniStamp& o) const { return mtime == o.mtime && size == o.size; }
+    bool operator!=(const IniStamp& o) const { return !(*this == o); }
+};
+
+IniStamp ini_stamp(const std::string& path) {
     WIN32_FILE_ATTRIBUTE_DATA d{};
-    if (!openrr::u8::attributes_ex(path, &d)) return 0;
-    return (uint64_t(d.ftLastWriteTime.dwHighDateTime) << 32) | d.ftLastWriteTime.dwLowDateTime;
+    if (!openrr::u8::attributes_ex(path, &d)) return {};
+    return {
+        (uint64_t(d.ftLastWriteTime.dwHighDateTime) << 32) | d.ftLastWriteTime.dwLowDateTime,
+        (uint64_t(d.nFileSizeHigh) << 32) | d.nFileSizeLow,
+    };
 }
 
-bool needs_cjk_font_repair(const std::string& ini_path) {
-    char hq_buf[32]{};
-    openrr::u8::profile("Menu", "UseHQFont", "auto", hq_buf, sizeof(hq_buf), ini_path);
-    const std::string hq = lower(trim(hq_buf));
-    if (hq == "false" || hq == "0" || hq == "off" || hq == "no") return true;
+enum class FontRepairResult { Unreadable, CustomFont, Ok, Repaired };
 
-    char font_buf[1024]{};
-    openrr::u8::profile("Menu", "TTFFontPath", "auto", font_buf, sizeof(font_buf), ini_path);
-    const std::string raw = trim(font_buf);
-    return raw.empty() || lower(raw) == "auto";
-}
-
-bool write_cjk_font_ini(const std::string& ini_path, const std::string& font_path, uint64_t* out_stamp) {
+FontRepairResult repair_cjk_font_ini(const std::string& ini_path, const std::string& font_path,
+                                     bool allow_create, bool force_font_path, IniStamp* out_stamp) {
     openrr::ini_edit::Ini opti_ini{openrr::u8::path(ini_path)};
-    opti_ini.refresh();
+    if (!opti_ini.refresh()) {
+        const DWORD attrs = openrr::u8::attributes(ini_path);
+        const DWORD err = GetLastError();
+        if (!allow_create || attrs != INVALID_FILE_ATTRIBUTES || err != ERROR_FILE_NOT_FOUND) {
+            return FontRepairResult::Unreadable;
+        }
+    }
+
+    const std::string hq = lower(trim(opti_ini.get("Menu", "UseHQFont", "auto")));
+    const bool hq_disabled = (hq == "false" || hq == "0" || hq == "off" || hq == "no");
+    std::string cur_font = trim(opti_ini.get("Menu", "TTFFontPath", "auto"));
+    if (cur_font.size() >= 2 && (cur_font.front() == '"' || cur_font.front() == '\'') &&
+        cur_font.back() == cur_font.front()) {
+        cur_font = cur_font.substr(1, cur_font.size() - 2);
+    }
+    const bool font_auto = cur_font.empty() || lower(cur_font) == "auto";
+
+    if (!force_font_path && !font_auto && !hq_disabled) {
+        return lower(cur_font) == lower(font_path) ? FontRepairResult::Ok : FontRepairResult::CustomFont;
+    }
+
     opti_ini.set("Menu", "UseHQFont", "true");
-    opti_ini.set("Menu", "TTFFontPath", font_path);
-    if (!opti_ini.save(/*notify_config=*/false)) return false;
-    if (out_stamp) *out_stamp = ini_mtime(ini_path);
-    return true;
+    if (force_font_path || font_auto) {
+        opti_ini.set("Menu", "TTFFontPath", font_path);
+    }
+    if (!opti_ini.save(/*notify_config=*/false)) return FontRepairResult::Unreadable;
+    if (out_stamp) *out_stamp = ini_stamp(ini_path);
+    return FontRepairResult::Repaired;
 }
 
 struct PendingFontGuard {
     std::mutex mutex;
     std::atomic<bool> active{false};
+    std::atomic<bool> watcher_running{false};
     std::string ini_path;
     std::string font_path;
-    uint64_t last_known_stamp = 0;
-    uint64_t pending_stamp = 0;
+    IniStamp last_known_stamp{};
+    IniStamp pending_stamp{};
     ULONGLONG change_seen_ms = 0;
     ULONGLONG last_check_ms = 0;
     ULONGLONG last_write_ms = 0;
 };
-PendingFontGuard g_pending_font;
 
-void arm_pending_font(const std::string& ini_path, const std::string& font_path, uint64_t stamp) {
-    std::lock_guard<std::mutex> lock(g_pending_font.mutex);
-    g_pending_font.ini_path = ini_path;
-    g_pending_font.font_path = font_path;
-    g_pending_font.last_known_stamp = stamp;
-    g_pending_font.pending_stamp = 0;
-    g_pending_font.change_seen_ms = 0;
-    g_pending_font.last_check_ms = GetTickCount64();
-    g_pending_font.last_write_ms = g_pending_font.last_check_ms;
-    g_pending_font.active.store(true, std::memory_order_release);
+// Immortal singleton allocated lazily only when armed; never constructed or destroyed during DllMain/ExitProcess.
+std::atomic<PendingFontGuard*> g_pending_font_ptr{nullptr};
+
+void poll_pending_font();
+
+DWORD WINAPI pending_font_watcher(void* param) {
+    HMODULE self = static_cast<HMODULE>(param);
+    PendingFontGuard* g = g_pending_font_ptr.load(std::memory_order_acquire);
+    while (g && g->active.load(std::memory_order_acquire)) {
+        Sleep(500);
+        if (!g->active.load(std::memory_order_acquire)) break;
+        poll_pending_font();
+    }
+    if (g) g->watcher_running.store(false, std::memory_order_release);
+    if (self) FreeLibraryAndExitThread(self, 0);
+    return 0;
+}
+
+void arm_pending_font(const std::string& ini_path, const std::string& font_path, IniStamp stamp) {
+    PendingFontGuard* g = g_pending_font_ptr.load(std::memory_order_acquire);
+    if (!g) {
+        auto* fresh = new PendingFontGuard();
+        if (g_pending_font_ptr.compare_exchange_strong(g, fresh, std::memory_order_acq_rel, std::memory_order_acquire)) {
+            g = fresh;
+        } else {
+            delete fresh;
+        }
+    }
+    {
+        std::lock_guard<std::mutex> lock(g->mutex);
+        g->ini_path = ini_path;
+        g->font_path = font_path;
+        g->last_known_stamp = stamp;
+        g->pending_stamp = {};
+        g->change_seen_ms = 0;
+        g->last_check_ms = GetTickCount64();
+        g->last_write_ms = g->last_check_ms;
+        g->active.store(true, std::memory_order_release);
+    }
+    if (!g->watcher_running.exchange(true, std::memory_order_acq_rel)) {
+        HMODULE self = nullptr;
+        GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+                           reinterpret_cast<LPCWSTR>(&pending_font_watcher), &self);
+        HANDLE t = CreateThread(nullptr, 0, &pending_font_watcher, self, 0, nullptr);
+        if (t) {
+            CloseHandle(t);
+        } else {
+            g->watcher_running.store(false, std::memory_order_release);
+            if (self) FreeLibrary(self);
+        }
+    }
 }
 
 void poll_pending_font() {
-    if (!g_pending_font.active.load(std::memory_order_acquire)) return;
-    std::unique_lock<std::mutex> lock(g_pending_font.mutex, std::try_to_lock);
-    if (!lock.owns_lock() || !g_pending_font.active.load(std::memory_order_relaxed)) return;
+    PendingFontGuard* g = g_pending_font_ptr.load(std::memory_order_acquire);
+    if (!g || !g->active.load(std::memory_order_acquire)) return;
+    std::unique_lock<std::mutex> lock(g->mutex, std::try_to_lock);
+    if (!lock.owns_lock() || !g->active.load(std::memory_order_relaxed)) return;
 
     const ULONGLONG now = GetTickCount64();
-    if (now >= g_pending_font.last_check_ms && (now - g_pending_font.last_check_ms) < 500) return;
-    g_pending_font.last_check_ms = now;
+    if (now >= g->last_check_ms && (now - g->last_check_ms) < 500) return;
+    g->last_check_ms = now;
 
-    const uint64_t cur_stamp = ini_mtime(g_pending_font.ini_path);
-    if (cur_stamp == 0 || cur_stamp == g_pending_font.last_known_stamp) {
-        g_pending_font.pending_stamp = 0;
-        g_pending_font.change_seen_ms = 0;
+    const IniStamp cur_stamp = ini_stamp(g->ini_path);
+    if (!cur_stamp.valid() || cur_stamp == g->last_known_stamp) {
+        g->pending_stamp = {};
+        g->change_seen_ms = 0;
         return;
     }
-    if (cur_stamp != g_pending_font.pending_stamp) {
-        g_pending_font.pending_stamp = cur_stamp;
-        g_pending_font.change_seen_ms = now;
+    if (cur_stamp != g->pending_stamp) {
+        g->pending_stamp = cur_stamp;
+        g->change_seen_ms = now;
         return;
     }
     // Wait until OptiScaler.ini has been stable for 1.5s and at least 2.0s passed since our last write.
-    if (now < g_pending_font.change_seen_ms || (now - g_pending_font.change_seen_ms) < 1500) return;
-    if (now < g_pending_font.last_write_ms || (now - g_pending_font.last_write_ms) < 2000) return;
+    if (now < g->change_seen_ms || (now - g->change_seen_ms) < 1500) return;
+    if (now < g->last_write_ms || (now - g->last_write_ms) < 2000) return;
 
-    if (!needs_cjk_font_repair(g_pending_font.ini_path)) {
-        // User manually configured a different custom TTF font; respect their edit.
-        g_pending_font.last_known_stamp = cur_stamp;
-        g_pending_font.pending_stamp = 0;
-        g_pending_font.change_seen_ms = 0;
-        return;
-    }
-
-    uint64_t new_stamp = 0;
-    if (write_cjk_font_ini(g_pending_font.ini_path, g_pending_font.font_path, &new_stamp)) {
-        g_pending_font.last_known_stamp = new_stamp;
-        g_pending_font.pending_stamp = 0;
-        g_pending_font.change_seen_ms = 0;
-        g_pending_font.last_write_ms = now;
+    IniStamp new_stamp{};
+    const FontRepairResult r = repair_cjk_font_ini(g->ini_path, g->font_path, /*allow_create=*/false,
+                                                   /*force_font_path=*/false, &new_stamp);
+    if (r == FontRepairResult::Repaired) {
+        g->last_known_stamp = new_stamp;
+        g->pending_stamp = {};
+        g->change_seen_ms = 0;
+        g->last_write_ms = now;
         openrr::pe::log("[openrr] restored OptiScaler.ini [Menu] TTFFontPath after external save");
+    } else if (r == FontRepairResult::CustomFont) {
+        // User manually configured a different custom TTF font; respect their edit and stop guarding.
+        g->last_known_stamp = cur_stamp;
+        g->pending_stamp = {};
+        g->change_seen_ms = 0;
+        g->active.store(false, std::memory_order_release);
+    } else if (r == FontRepairResult::Ok) {
+        g->last_known_stamp = cur_stamp;
+        g->pending_stamp = {};
+        g->change_seen_ms = 0;
     } else {
-        g_pending_font.last_write_ms = now;
+        g->last_write_ms = now;
     }
 }
 
@@ -297,15 +366,13 @@ struct TabState {
         sync_language();
 
         const openrr::control::Shared st = openrr::pe::control::snapshot();
-        const std::string gpu = openrr::pe::vkdevice::gpu_name();
         const char* api_name = st.route == 1 ? "D3D12" : st.route == 2 ? "Vulkan" : "Standby";
         const char* build_str = st.asi_build[0] ? st.asi_build : OPENRR_BUILD_STAMP;
 
         // ---- Status card ----
         g_api->Section(tr("Status"));
-        g_api->TextDisabled(fmt("OpenRR %s (%s)  |  %s%s%s",
-                                ONR_RR_RUNTIME_VERSION, build_str, api_name,
-                                gpu.empty() ? "" : "  |  ", gpu.c_str())
+        g_api->TextDisabled(fmt("OpenRR %s (%s)  |  %s",
+                                ONR_RR_RUNTIME_VERSION, build_str, api_name)
                                 .c_str());
 
         if (g_missing_provider_api.load(std::memory_order_acquire)) {
@@ -519,8 +586,9 @@ struct TabState {
                         font_error = tr("No CJK font file found in openrr-amd\\lang\\fonts or C:\\Windows\\Fonts.");
                     } else {
                         const std::string opti_path = optiscaler_ini_path();
-                        uint64_t stamp = 0;
-                        if (write_cjk_font_ini(opti_path, font_path, &stamp)) {
+                        IniStamp stamp{};
+                        if (repair_cjk_font_ini(opti_path, font_path, /*allow_create=*/true,
+                                                /*force_font_path=*/true, &stamp) == FontRepairResult::Repaired) {
                             arm_pending_font(opti_path, font_path, stamp);
                             font_configured_pending_restart = true;
                             font_error.clear();
@@ -624,19 +692,17 @@ bool init(const OptiPluginApi* api, OptiPlugin* plugin, OptiGetProcFn provider_g
 
 void flush_pending_font() {
     try {
-        if (!g_pending_font.active.load(std::memory_order_acquire)) return;
-        std::unique_lock<std::mutex> lock(g_pending_font.mutex, std::try_to_lock);
-        if (!lock.owns_lock() || !g_pending_font.active.load(std::memory_order_relaxed)) return;
+        PendingFontGuard* g = g_pending_font_ptr.load(std::memory_order_acquire);
+        if (!g || !g->active.load(std::memory_order_acquire)) return;
+        std::unique_lock<std::mutex> lock(g->mutex, std::try_to_lock);
+        if (!lock.owns_lock() || !g->active.load(std::memory_order_relaxed)) return;
 
-        if (is_existing_file(g_pending_font.ini_path) &&
-            needs_cjk_font_repair(g_pending_font.ini_path)) {
-            uint64_t new_stamp = 0;
-            if (write_cjk_font_ini(g_pending_font.ini_path, g_pending_font.font_path, &new_stamp)) {
-                g_pending_font.last_known_stamp = new_stamp;
-                openrr::pe::log("[openrr] restored OptiScaler.ini [Menu] TTFFontPath on exit");
-            }
+        IniStamp new_stamp{};
+        if (repair_cjk_font_ini(g->ini_path, g->font_path, /*allow_create=*/false,
+                                /*force_font_path=*/false, &new_stamp) == FontRepairResult::Repaired) {
+            g->last_known_stamp = new_stamp;
         }
-        g_pending_font.active.store(false, std::memory_order_release);
+        g->active.store(false, std::memory_order_release);
     } catch (...) {
     }
 }

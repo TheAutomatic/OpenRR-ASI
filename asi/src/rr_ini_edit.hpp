@@ -26,14 +26,17 @@ public:
         if (!openrr::u8::attributes_ex(p_u8, &d)) return false;
         const uint64_t s = (uint64_t(d.ftLastWriteTime.dwHighDateTime) << 32) | d.ftLastWriteTime.dwLowDateTime;
         if (s == stamp_ && !text_.empty()) return false;
+        FILE* f = openrr::u8::fopen(p_u8.c_str(), "rb");
+        if (!f) return false;
+        std::string raw;
+        char buf[4096];
+        for (size_t n; (n = std::fread(buf, 1, sizeof buf, f)) > 0;) raw.append(buf, n);
+        const bool io_err = std::ferror(f) != 0;
+        std::fclose(f);
+        if (io_err) return false;
+        openrr::u8::decode_ini_text(raw);
         stamp_ = s;
-        text_.clear();
-        if (FILE* f = openrr::u8::fopen(p_u8.c_str(), "rb")) {
-            char buf[4096];
-            for (size_t n; (n = std::fread(buf, 1, sizeof buf, f)) > 0;) text_.append(buf, n);
-            std::fclose(f);
-        }
-        openrr::u8::decode_ini_text(text_);
+        text_ = std::move(raw);
         crlf_ = text_.find("\r\n") != std::string::npos;
         return true;
     }
@@ -107,11 +110,17 @@ public:
     bool save(bool notify_config = true) {
         if (!dirty_) return true;
         const std::string p_u8 = openrr::u8::text(path_);
-        FILE* f = openrr::u8::fopen(p_u8.c_str(), "wb");
+        const std::string tmp_u8 = p_u8 + ".openrr.tmp";
+        FILE* f = openrr::u8::fopen(tmp_u8.c_str(), "wb");
         if (!f) return false;
         const bool wrote = text_.empty() || std::fwrite(text_.data(), 1, text_.size(), f) == text_.size();
         const bool closed = std::fclose(f) == 0;
-        if (!wrote || !closed) return false;
+        const std::wstring tmp_w = openrr::u8::wide(tmp_u8);
+        const std::wstring dst_w = openrr::u8::wide(p_u8);
+        if (!wrote || !closed || !MoveFileExW(tmp_w.c_str(), dst_w.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+            DeleteFileW(tmp_w.c_str());
+            return false;
+        }
         dirty_ = false;
         WIN32_FILE_ATTRIBUTE_DATA d{};
         if (openrr::u8::attributes_ex(p_u8, &d))

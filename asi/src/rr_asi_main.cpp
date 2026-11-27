@@ -3780,9 +3780,11 @@ std::atomic<bool> g_terminate_said{false}, g_exiting{false};
 
 LONG NTAPI hk_terminate(HANDLE process, LONG status) {
     const bool self = process == GetCurrentProcess() || (process && GetProcessId(process) == GetCurrentProcessId());
-    if (self) {
-        openrr::pe::opti_plugin::flush_pending_font();
-        if (!g_exiting.load() && !g_terminate_said.exchange(true)) {
+    if (self && !g_exiting.load(std::memory_order_acquire)) {
+        if (static_cast<uint32_t>(status) < 0xC0000000u) {
+            openrr::pe::opti_plugin::flush_pending_font();
+        }
+        if (!g_terminate_said.exchange(true)) {
             log("[openrr] process is being ended by TerminateProcess (exit status 0x%08lX), thread %lu",
                 static_cast<unsigned long>(status), GetCurrentThreadId());
         }
@@ -3876,6 +3878,7 @@ BOOL WINAPI DllMain(HINSTANCE module, DWORD reason, LPVOID reserved) {
         if (g_asi_initialized.load(std::memory_order_relaxed))
             log("[openrr] process is ending (ExitProcess)");
         openrr::pe::remove_crash_watch();
+        for (auto& [id, sess] : g_vkd3d_sessions) if (sess) sess->abandon();
         for (auto& [id, ctx] : g_d3d12_rr) (void)ctx.release();
         for (auto& [id, ctx] : g_vk_rr) (void)ctx.release();
         openrr::pe::flush_log();

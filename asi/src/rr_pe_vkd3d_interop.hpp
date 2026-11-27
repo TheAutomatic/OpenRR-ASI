@@ -123,6 +123,14 @@ struct InteropSession {
         queue_family = 0;
         queue_index = 0;
     }
+
+    // Drop COM pointers without calling Release() (for ExitProcess DLL_PROCESS_DETACH under loader lock).
+    void abandon() {
+        own_queue = nullptr;
+        interop1 = nullptr;
+        interop = nullptr;
+        d3d_dev = nullptr;
+    }
 };
 
 inline bool probe_and_open(ID3D12Device* dev, InteropSession& out, std::string& why) {
