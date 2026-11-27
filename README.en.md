@@ -11,7 +11,7 @@ For details about the OpenRR network reimplementation, RDNA4 shader architecture
 
 ---
 
-This release (**v0.1.7.1plus**) refactors OpenRR-ASI into a native **OptiScaler v0.10 nightly (Plugin API v1–v3)** plugin while keeping all fixes from **v0.1.7plus6** (Linux Wine / Proton + `vkd3d-proton` direct Vulkan interop), **v0.1.7plus5** (`NvAPI_GPU_GetGPUInfo` `0xafd1b02c` fallback compatibility and parallelized build/packaging), and **v0.1.7plus4** / **v0.1.7plus3** (ReShade + RenoDX D3D12 wrapper compatibility and D3D12 hook hardening):
+This release (**v0.1.7.1plus2**) refactors OpenRR-ASI into a native **OptiScaler v0.10 nightly (Plugin API v1–v3)** plugin while keeping all fixes from **v0.1.7plus6** (Linux Wine / Proton + `vkd3d-proton` direct Vulkan interop), **v0.1.7plus5** (`NvAPI_GPU_GetGPUInfo` `0xafd1b02c` fallback compatibility and parallelized build/packaging), and **v0.1.7plus4** / **v0.1.7plus3** (ReShade + RenoDX D3D12 wrapper compatibility and D3D12 hook hardening):
 - **Native `OptiProvider_Dlssd` registration**: registers directly as a first-class OptiScaler Ray Reconstruction provider via Plugin API v3 `RegisterProvider(..., "OpenRR", OptiProvider_Dlssd, ...)`, removing ~30 outer `NVSDK_NGX_*` MinHooks, `SlCapsPatch`, and the separate `openrr-ngx-host.dll` bridge. Downstream OptiScaler features (`OptiFG`, `XeFG`, `HUDfix`, `OutputScaling`, `RCAS`, and live RR upscaler switching) now work natively without extra host DLL configuration or restarts.
 - **Native `PLUGINS -> OpenRR` tab inside OptiScaler**: removes the standalone DX11/DX12/Vulkan ImGui overlay, SwapChain / `Present` hooks, WndProc / User32 input interception, and bundled UI font. Settings now live directly in OptiScaler's `PLUGINS -> OpenRR` tab with a one-click `Re-init Upscaler` action and zero-hook CJK font configuration (`OptiScaler.ini [Menu] UseHQFont=true` + `TTFFontPath`, safely falling back to English until configured and restarted).
 - **Requirement**: requires **OptiScaler v0.10 nightly** (with Plugin API v3 `RegisterProvider`). Legacy `openrr-ngx-host.dll`, `OptiFGHost`, `MenuKey`, `MenuScale`, `TextScale`, and `Theme` options have been removed; clean up any old `openrr-ngx-host.dll` and replace `openrr-amd.ini` when upgrading.
@@ -90,7 +90,7 @@ Use the **[dlss-5-amd-project](https://github.com/TheAutomatic/dlss-5-amd-projec
 
 > When upgrading from `<= v0.1.7plus6`, remove any leftover `openrr-ngx-host.dll` from the game directory, clear any manual `[Libraries] NvngxPath` override in `OptiScaler.ini`, and replace `openrr-amd.ini` with the new file from the archive.
 
-Place the build artifacts (the 392-file unified `stage/` package, or extract `dist/OpenRR-v0.1.7.1plus-OptiScaler.zip`) directly into the game directory containing OptiScaler's `dxgi.dll` / `OptiScaler.ini`:
+Place the build artifacts (the 392-file unified `stage/` package, or extract `dist/OpenRR-v0.1.7.1plus2-OptiScaler.zip`) directly into the game directory containing OptiScaler's `dxgi.dll` / `OptiScaler.ini`:
 
 | File / directory | Destination relative to `OptiScaler.ini` |
 |---|---|

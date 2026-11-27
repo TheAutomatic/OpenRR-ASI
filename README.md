@@ -11,7 +11,7 @@
 
 ---
 
-当前发行版本 **v0.1.7.1plus** 完成了面向 **OptiScaler v0.10 nightly（Plugin API v1–v3）** 的原生插件化重构，在保留 **v0.1.7plus6**（Linux Wine / Proton + `vkd3d-proton` 直通 Vulkan interop 修复）、**v0.1.7plus5**（`NvAPI_GPU_GetGPUInfo` `0xafd1b02c` 通用回退兼容与并行化构建打包链）与 **v0.1.7plus4** / **v0.1.7plus3**（ReShade + RenoDX D3D12 包装层兼容性修复与 D3D12 装钩加固）全部成果的基础上，实现了以下架构升级：
+当前发行版本 **v0.1.7.1plus2** 完成了面向 **OptiScaler v0.10 nightly（Plugin API v1–v3）** 的原生插件化重构，在保留 **v0.1.7plus6**（Linux Wine / Proton + `vkd3d-proton` 直通 Vulkan interop 修复）、**v0.1.7plus5**（`NvAPI_GPU_GetGPUInfo` `0xafd1b02c` 通用回退兼容与并行化构建打包链）与 **v0.1.7plus4** / **v0.1.7plus3**（ReShade + RenoDX D3D12 包装层兼容性修复与 D3D12 装钩加固）全部成果的基础上，实现了以下架构升级：
 - **原生 `OptiProvider_Dlssd` 提供者注册**：通过 OptiScaler Plugin API v3 `RegisterProvider(..., "OpenRR", OptiProvider_Dlssd, ...)` 直接作为 OptiScaler 官方一级 Ray Reconstruction 提供者接入，彻底移除外层 ~30 个 `NVSDK_NGX_*` MinHook、`SlCapsPatch` 及独立的 `openrr-ngx-host.dll` 宿主桥接，原生兼容 OptiScaler 全部下游特性（`OptiFG`、`XeFG`、`HUDfix`、`OutputScaling`、`RCAS`、DLSS-D / FSR / XeSS 实时切换），无需任何额外配置或重启切宿主模式。
 - **原生嵌入 OptiScaler `PLUGINS -> OpenRR` 标签页**：彻底移除自建 DX11/DX12/Vulkan ImGui 叠加层、SwapChain / `Present` hook、WndProc / User32 按键拦截及内置字体，界面直接嵌入 OptiScaler 主菜单左侧 `PLUGINS -> OpenRR` 标签页；内置一键 `Re-init Upscaler` 按钮与零 Hook 中文/日文/韩文字体配置（自动写入 `OptiScaler.ini [Menu] UseHQFont=true` 与 `TTFFontPath`，未配置时安全回退英文避免乱码），剥离后体积大幅缩减且完全消除跨渲染后端叠加层冲突。
 - **版本要求**：本版本起仅适配 **OptiScaler v0.10 nightly**（需支持 Plugin API v3 `RegisterProvider`）；不再需要旧版 `openrr-ngx-host.dll`、`MenuKey`、`OptiFGHost` 等旧配置项，升级前建议清理旧版 `openrr-ngx-host.dll` 并使用新版 `openrr-amd.ini`。
@@ -83,7 +83,7 @@
 
 > 从旧版本（`<= v0.1.7plus6`）升级前，请先删除游戏目录下旧版遗留的 `openrr-ngx-host.dll`（如曾安装），并清理 `OptiScaler.ini` 中手动设置的 `[Libraries] NvngxPath` 覆盖项；建议使用新版 `openrr-amd.ini`。
 
-将构建产物（共 `392` 个文件的通用 `stage/` 包，或直接解压 `dist/OpenRR-v0.1.7.1plus-OptiScaler.zip`）放入游戏目录（即 OptiScaler 的 `dxgi.dll` / `OptiScaler.ini` 所在目录）：
+将构建产物（共 `392` 个文件的通用 `stage/` 包，或直接解压 `dist/OpenRR-v0.1.7.1plus2-OptiScaler.zip`）放入游戏目录（即 OptiScaler 的 `dxgi.dll` / `OptiScaler.ini` 所在目录）：
 
 | 文件 / 目录 | 放置位置（相对于 `OptiScaler.ini` 所在目录） |
 |---|---|
