@@ -50,7 +50,7 @@ SOFTWARE.
 
 Adapted from `DLSSNR-AMD` (`windows/src/pe/`), Copyright (c) 2026 mochizuki0323.
 - The PAL ELF, MessagePack, NRPAL002 parser and prologue in `gpu/src/rr_pal_binary.hpp` are adapted from `windows/src/core/nr_pal_binary.hpp` of the same project under the MIT license below.
-- `asi/src/rr_ngx_abi.hpp` and `asi/src/rr_ngx_slots.hpp` are clean-room ABI declarations transcribed from NVIDIA NGX SDK headers (`nvsdk_ngx.h`, `nvsdk_ngx_defs.h`, `nvsdk_ngx_defs_dlssd.h`, `nvsdk_ngx_params.h`, `nvsdk_ngx_vk.h`) for binary interoperability without NVIDIA SDK header dependencies.
+- `asi/src/rr_ngx_abi.hpp` contains clean-room ABI declarations transcribed from NVIDIA NGX SDK headers (`nvsdk_ngx.h`, `nvsdk_ngx_defs.h`, `nvsdk_ngx_defs_dlssd.h`, `nvsdk_ngx_params.h`, `nvsdk_ngx_vk.h`) for binary interoperability without NVIDIA SDK header dependencies.
 
 ```text
 MIT License

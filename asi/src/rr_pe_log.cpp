@@ -88,12 +88,7 @@ LogSettings read_settings() {
 FILE* open_log() {
     const LogSettings s = read_settings();
     if (!s.enabled) return nullptr;
-    // Several of our modules can live in one process (the NGX forwarder and the core); only the
-    // first to log may start the file afresh, or it would erase what the other already wrote.
-    char seen[4];
-    const bool first = GetEnvironmentVariableA("OPENRR_LOG_OPENED", seen, sizeof seen) == 0;
-    if (first) SetEnvironmentVariableA("OPENRR_LOG_OPENED", "1");
-    return openrr::u8::fopen(resolve_path().c_str(), s.clear && first ? "w" : "a");
+    return openrr::u8::fopen(resolve_path().c_str(), s.clear ? "w" : "a");
 }
 
 FILE* file() {
@@ -257,26 +252,6 @@ bool log_d3d12_device_removed(ID3D12Device* device, const char* where) {
     return true;
 }
 
-namespace {
-std::atomic<int> g_trace_execute{0}, g_trace_present{0}, g_trace_execute_n{0}, g_trace_present_n{0};
-std::atomic<int> g_trace_bridge{0}, g_trace_bridge_n{0}, g_trace_exception{0}, g_trace_exception_n{0};
-int trace_next(std::atomic<int>& left, std::atomic<int>& n) {
-    int l = left.load();
-    while (l > 0 && !left.compare_exchange_weak(l, l - 1)) {}
-    return l > 0 ? ++n : 0;
-}
-}  // namespace
-
-void trace_arm() {
-    g_trace_execute = 48; g_trace_present = 24; g_trace_bridge = 24;
-    static std::atomic<bool> once{false};
-    if (!once.exchange(true)) g_trace_exception = 16;   // the first 16 after the first evaluate, not again
-}
-int trace_execute() { return trace_next(g_trace_execute, g_trace_execute_n); }
-int trace_present() { return trace_next(g_trace_present, g_trace_present_n); }
-int trace_bridge() { return trace_next(g_trace_bridge, g_trace_bridge_n); }
-int trace_exception() { return trace_next(g_trace_exception, g_trace_exception_n); }
-
 }  // namespace openrr::pe
 
 // ---- the stall report (rr_pe_watchdog.hpp) -------------------------------------------------------------------------
@@ -317,17 +292,11 @@ std::atomic<bool> g_rr_active{false};
 std::atomic<ULONGLONG> g_active_since{0};
 std::atomic<ULONGLONG> g_last_beat{0};
 std::atomic<unsigned long long> g_beats{0};
-std::atomic<ULONGLONG> g_last_game{0};
-std::atomic<unsigned long long> g_games{0};
-constexpr ULONGLONG kGameStallMs = 3000;
-constexpr int kMaxGameReports = 2;
 std::atomic<int> g_reports{0};
 constexpr int kMaxReports = 4;
 std::mutex g_thread_lock;      // the watching thread's start and stop
 HANDLE g_stop = nullptr;       // the running watcher's stop event (null: none runs; g_thread_lock)
 std::atomic<bool> g_running{false};   // a watcher runs (beat() reads it without the lock)
-HANDLE g_thread = nullptr;     // the running watcher (for stop_and_wait)
-bool g_closed = false;         // stop_and_wait ran: the module is about to be unloaded, nothing starts again
 
 bool enabled() {
     static const bool on = [] {
@@ -577,8 +546,7 @@ DWORD WINAPI watch(void* param) {
         g_describe = reinterpret_cast<Describe>(reinterpret_cast<void*>(GetProcAddress(k32, "GetThreadDescription")));
     }
     const ULONGLONG started = GetTickCount64();
-    bool said_none = false, stalled = false, game_stalled = false;
-    int game_reports = 0;
+    bool said_none = false, stalled = false;
     // Frames stop while the game is not in front (minimised, the desktop in front): no stall then. The time without a
     // frame counts from the later of the last frame and the last second the game was not in front.
     ULONGLONG not_front = 0;
@@ -593,7 +561,6 @@ DWORD WINAPI watch(void* param) {
         if (!in_front()) not_front = now;
         if (!g_rr_active.load(std::memory_order_acquire)) {
             stalled = false;
-            game_stalled = false;
             continue;
         }
         const unsigned long long beats = g_beats.load();
@@ -607,19 +574,6 @@ DWORD WINAPI watch(void* param) {
         }
         const ULONGLONG beat_ref = std::max(g_last_beat.load(std::memory_order_acquire), not_front);
         const ULONGLONG gap = now >= beat_ref ? (now - beat_ref) : 0;
-        if (g_games.load() && game_reports < kMaxGameReports) {   // the game's frames alone (game_beat)
-            const ULONGLONG game_ref = std::max(g_last_game.load(std::memory_order_acquire), not_front);
-            const ULONGLONG game_gap = now >= game_ref ? (now - game_ref) : 0;
-            if (game_gap < kGameStallMs) game_stalled = false;
-            else if (!game_stalled && gap < stall_ms()) {
-                game_stalled = true;
-                ++game_reports;
-                char why[160];
-                std::snprintf(why, sizeof why, "no frame of the game's own for %llu ms while beats go on, "
-                              "after %llu of them", (unsigned long long)game_gap, g_games.load());
-                report(why);
-            }
-        }
         if (gap < stall_ms()) { stalled = false; continue; }
         if (stalled) continue;
         stalled = true;
@@ -641,7 +595,7 @@ DWORD WINAPI watch(void* param) {
 void start() {
     if (!enabled() || g_reports.load() >= kMaxReports) return;
     std::lock_guard<std::mutex> guard(g_thread_lock);
-    if (g_stop || g_closed) return;
+    if (g_stop) return;
     HANDLE stop = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     if (!stop) return;
     // the module pinned here, before the thread exists: an unload right after start() cannot take the code from under
@@ -656,28 +610,9 @@ void start() {
         if (self) FreeLibrary(self);
         return;
     }
-    if (g_thread) CloseHandle(g_thread);
-    g_thread = t;
+    CloseHandle(t);
     g_stop = stop;
     g_running.store(true);
-}
-
-void stop_and_wait() {
-    HANDLE t = nullptr;
-    {
-        std::lock_guard<std::mutex> guard(g_thread_lock);
-        if (g_stop) SetEvent(g_stop);   // the watcher closes it
-        g_stop = nullptr;
-        g_running.store(false);
-        g_closed = true;
-        t = g_thread;
-        g_thread = nullptr;
-    }
-    if (!t) return;
-    // It ends within a second, or a report's length. Bounded: a watcher that does not end keeps the module loaded
-    // (ReShade then says the add-on "was not unregistered" and keeps it), which is better than a game that hangs here.
-    WaitForSingleObject(t, 3000);
-    CloseHandle(t);
 }
 
 void set_rr_active(bool active) {
@@ -693,33 +628,11 @@ void set_rr_active(bool active) {
     }
 }
 
-void game_beat() {
-    g_last_game.store(GetTickCount64());
-    g_games.fetch_add(1);
-}
-
 void beat() {
     g_last_beat.store(GetTickCount64());
     g_beats.fetch_add(1);
     if (!g_running.load()) start();
 }
-
-std::string phases_now() {
-    std::string out;
-    const ULONGLONG now = GetTickCount64();
-    for (const Slot& s : g_slots) {
-        const DWORD tid = s.tid.load();
-        const char* what = s.what.load();
-        if (!tid || !what) continue;
-        char b[256];
-        std::snprintf(b, sizeof b, "%s[thread %lu: %s, %llu ms]", out.empty() ? "" : " ", tid, what,
-                      static_cast<unsigned long long>(now - s.since.load()));
-        out += b;
-    }
-    return out.empty() ? std::string("none") : out;
-}
-
-unsigned long long presents_seen() { return g_beats.load(); }
 
 Phase::Phase(const char* what) : previous(nullptr) {
     Slot* s = my_slot();

@@ -57,7 +57,6 @@ namespace {
 using openrr::pe::log;
 
 HMODULE g_self = nullptr;
-HMODULE g_opti = nullptr;
 
 std::wstring wide_from_utf8(const std::string& s) {
     return openrr::u8::wide(s);
@@ -1074,16 +1073,11 @@ bool restore_direct_state(ID3D12GraphicsCommandList* cmd) {
 std::mutex g_rt_mutex;
 OnrRrApi5 g_api5{};
 OnrRrApi4& g_api4 = g_api5.v4;
-OnrRrApi3& g_api3 = g_api4.v3;
-OnrRrApi2& g_api2 = g_api3.v2;
-OnrRrApi& g_api = g_api2.v1;
+OnrRrApi& g_api = g_api5.v4.v3.v2.v1;
 bool g_api_ready = false;
 
 std::vector<std::wstring> g_ngx_search_paths;
 std::wstring g_dlssd_path;
-std::string g_dlssd_source;
-bool g_usable = false;
-std::string g_unusable_reason;
 std::string g_blocked_reason;
 
 bool ensure_api() {
@@ -1209,7 +1203,6 @@ void block_session(const std::string& why) {
         g_blocked_reason = why;
         log("[openrr] session blocked: %s", why.c_str());
     }
-    g_usable = false;
 }
 
 uint64_t file_mtime_64(const std::wstring& path) {
@@ -1346,7 +1339,6 @@ bool check_gpu_cheap_vulkan(const LUID* luid, std::string& out_gpu_name, std::st
             return false;
         }
     }
-    openrr::pe::vkdevice::set_adapter_names(out_gpu_name, "");
     return true;
 }
 
@@ -1355,7 +1347,6 @@ struct UsabilityCheck {
     ULONGLONG tick = 0;
     uint64_t mtime = 0;
     std::wstring path;
-    std::string source, reason;
 };
 // One cached result per adapter LUID (plus the automatic selection): an iGPU that fails the check
 // (e.g. enumerated by Streamline) must not disable OpenRR for the dGPU, and vice versa.
@@ -1373,38 +1364,31 @@ bool check_usable(const LUID* luid) {
     const ULONGLONG now = GetTickCount64();
     if (cached.tick && ((!cached.usable && now - cached.tick < 30000) ||
         (cached.usable && cached.mtime && file_mtime_64(cached.path) == cached.mtime))) {
-        g_usable = cached.usable;
         g_dlssd_path = cached.path;
-        g_dlssd_source = cached.source;
-        g_unusable_reason = cached.reason;
         return cached.usable;
     }
+    bool usable = false;
     struct SaveCheck {
         UsabilityCheck& entry;
         ULONGLONG now;
+        bool& usable;
         ~SaveCheck() {
-            entry = {g_usable, now, g_dlssd_path.empty() ? 0 : file_mtime_64(g_dlssd_path),
-                     g_dlssd_path, g_dlssd_source, g_unusable_reason};
+            entry = {usable, now, g_dlssd_path.empty() ? 0 : file_mtime_64(g_dlssd_path), g_dlssd_path};
         }
-    } save{cached, now};
+    } save{cached, now, usable};
 
     const auto t0 = std::chrono::steady_clock::now();
     const char* source = nullptr;
     g_dlssd_path = find_dlssd_locked(&source);
-    g_dlssd_source = source ? source : "";
 
     if (g_dlssd_path.empty()) {
-        g_usable = false;
-        g_unusable_reason = "nvngx_dlssd.dll (310.9.1) not found";
         const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
-        log("[openrr] cheap Check failed in %.1f ms: %s", ms, g_unusable_reason.c_str());
+        log("[openrr] cheap Check failed in %.1f ms: nvngx_dlssd.dll (310.9.1) not found", ms);
         return false;
     }
 
     std::string why;
     if (!check_dlssd_version_310_9_1(g_dlssd_path, why)) {
-        g_usable = false;
-        g_unusable_reason = why;
         const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
         log("[openrr] cheap Check failed in %.1f ms: %s (%s)", ms, why.c_str(), utf8_from_wide(g_dlssd_path).c_str());
         return false;
@@ -1412,35 +1396,15 @@ bool check_usable(const LUID* luid) {
 
     std::string gpu_name;
     if (!check_gpu_cheap_vulkan(luid, gpu_name, why)) {
-        g_usable = false;
-        g_unusable_reason = why;
         const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
         log("[openrr] cheap Check failed in %.1f ms: %s", ms, why.c_str());
         return false;
     }
 
-    g_usable = true;
-    g_unusable_reason.clear();
+    usable = true;
     const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
     log("[openrr] Check passed (cheap check in %.1f ms; GPU: %s; dlssd from %s: %s)",
-        ms, gpu_name.c_str(), g_dlssd_source.c_str(), utf8_from_wide(g_dlssd_path).c_str());
-    return true;
-}
-
-bool query_d3d12_adapter_names(ID3D12Device* dev) {
-    if (!dev) return false;
-    const LUID luid = dev->GetAdapterLuid();
-    IDXGIFactory4* fac = nullptr;
-    if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&fac))) || !fac) return false;
-    IDXGIAdapter1* ad = nullptr;
-    if (SUCCEEDED(fac->EnumAdapterByLuid(luid, IID_PPV_ARGS(&ad))) && ad) {
-        DXGI_ADAPTER_DESC1 desc{};
-        if (SUCCEEDED(ad->GetDesc1(&desc))) {
-            openrr::pe::vkdevice::set_adapter_names(utf8_from_wide(desc.Description), "");
-        }
-        ad->Release();
-    }
-    fac->Release();
+        ms, gpu_name.c_str(), source ? source : "", utf8_from_wide(g_dlssd_path).c_str());
     return true;
 }
 
@@ -2302,7 +2266,7 @@ bool fill_vk_frame(RrContext& ctx, const NVSDK_NGX_Parameter& params, OnrRrFrame
     return true;
 }
 
-void update_status_from_context(const RrContext& ctx, bool split_used) {
+void update_status_from_context(const RrContext& ctx) {
     OnrRrInfo info{};
     info.size = sizeof(info);
     if (g_api.GetInfo(ctx.runtime_ctx, &info) != ONR_RR_OK) return;
@@ -2326,7 +2290,6 @@ void update_status_from_context(const RrContext& ctx, bool split_used) {
     st.output_width = info.output_width ? info.output_width : ctx.output_w;
     st.output_height = info.output_height ? info.output_height : ctx.output_h;
     st.coexist_mochi = coexist_mochi_detected();
-    st.split_active = split_used;
     st.weights_source = info.weights_source;
     st.message = info.message;
     st.backend_message = info.backend_message;
@@ -2349,7 +2312,6 @@ void on_d3d12_device_seen(ID3D12Device* dev) {
     std::memcpy(&luid_bits, &luid, sizeof(luid));
     g_last_d3d12_luid_bits.store(luid_bits, std::memory_order_release);
     g_has_d3d12_luid.store(true, std::memory_order_release);
-    query_d3d12_adapter_names(dev);
     if (check_usable(&luid)) {
         const openrr::pe::Config cfg = openrr::pe::current_config();
         if (!is_vkd3d && cfg.backend == "vulkan" && split_allowed_by_config()) {
@@ -2593,7 +2555,7 @@ NVSDK_NGX_Result create_d3d12_rr(ID3D12GraphicsCommandList* cmd, NVSDK_NGX_Featu
                       : (running_be == ONR_RR_BACKEND_D3D12 ? "D3D12 Direct" : "Vulkan Bridge"),
         mochi ? "yes" : "no");
 
-    update_status_from_context(*ctx, !vkd3d_session && running_be == ONR_RR_BACKEND_VULKAN);
+    update_status_from_context(*ctx);
     NVSDK_NGX_Handle* allocated_out = ctx->allocated_handle;
     {
         std::lock_guard<std::mutex> lock(g_ctx_mutex);
@@ -2686,13 +2648,13 @@ NVSDK_NGX_Result evaluate_vkd3d_interop_rr(ID3D12GraphicsCommandList* cmd, NVSDK
         return NVSDK_NGX_Result_Success;
     }
     if (rc != ONR_RR_OK) {
-        update_status_from_context(ctx, false);
+        update_status_from_context(ctx);
         log("[openrr] vkd3d-proton RecordVk failed (rc=%d): %s", rc, runtime_last_error().c_str());
         return NVSDK_NGX_Result_Fail;
     }
     ++ctx.frame_count;
     if (ctx.frame_count <= 32 || ctx.frame_count % 30 == 0) {
-        update_status_from_context(ctx, false);
+        update_status_from_context(ctx);
     }
     (void)lock;
     return NVSDK_NGX_Result_Success;
@@ -2758,7 +2720,6 @@ NVSDK_NGX_Result evaluate_d3d12_rr(ID3D12GraphicsCommandList* cmd, const NVSDK_N
         return NVSDK_NGX_Result_Fail;
     }
 
-    bool used_split = false;
     if (running_be == ONR_RR_BACKEND_D3D12) {
         if (!split_ok) {
             if (!direct_hooks_ok) {
@@ -2834,7 +2795,7 @@ NVSDK_NGX_Result evaluate_d3d12_rr(ID3D12GraphicsCommandList* cmd, const NVSDK_N
             return NVSDK_NGX_Result_Success;
         }
         if (rc != ONR_RR_OK) {
-            update_status_from_context(ctx, false);
+            update_status_from_context(ctx);
             log("[openrr] D3D12 Record failed (rc=%d): %s", rc, runtime_last_error().c_str());
             return NVSDK_NGX_Result_Fail;
         }
@@ -2845,7 +2806,7 @@ NVSDK_NGX_Result evaluate_d3d12_rr(ID3D12GraphicsCommandList* cmd, const NVSDK_N
         const int32_t rc_in = g_api.RecordInputs(ctx.runtime_ctx, &frame, cmd, &job);
         if (rc_in != ONR_RR_OK || !job) {
             openrr::pe::split::restore(cmd, state);
-            update_status_from_context(ctx, true);
+            update_status_from_context(ctx);
             log("[openrr] D3D12 RecordInputs failed (rc=%d): %s", rc_in, runtime_last_error().c_str());
             return NVSDK_NGX_Result_Fail;
         }
@@ -2873,17 +2834,16 @@ NVSDK_NGX_Result evaluate_d3d12_rr(ID3D12GraphicsCommandList* cmd, const NVSDK_N
         }
         const int32_t rc_out = g_api.RecordOutput(ctx.runtime_ctx, job, cmd);
         if (rc_out != ONR_RR_OK) {
-            update_status_from_context(ctx, true);
+            update_status_from_context(ctx);
             log("[openrr] D3D12 RecordOutput failed (rc=%d): %s", rc_out, runtime_last_error().c_str());
             return NVSDK_NGX_Result_Fail;
         }
         out_ok->store(true, std::memory_order_release);
-        used_split = true;
     }
 
     ++ctx.frame_count;
     if (ctx.frame_count <= 32 || ctx.frame_count % 30 == 0) {
-        update_status_from_context(ctx, used_split);
+        update_status_from_context(ctx);
     }
     return NVSDK_NGX_Result_Success;
 }
@@ -3000,21 +2960,19 @@ NVSDK_NGX_Result RR_NGX_MSABI provider_d3d12_shutdown1(ID3D12Device* dev) {
 // ---- Vulkan Provider Implementation ----
 std::mutex g_vk_ngx_mutex;
 VkInstance g_ngx_vk_instance = VK_NULL_HANDLE;
-VkPhysicalDevice g_ngx_vk_phys = VK_NULL_HANDLE;
 VkDevice g_ngx_vk_device = VK_NULL_HANDLE;
 
-void note_ngx_vk(VkInstance inst, VkPhysicalDevice phys, VkDevice dev, const NVSDK_NGX_FeatureCommonInfo* info) {
+void note_ngx_vk(VkInstance inst, VkDevice dev, const NVSDK_NGX_FeatureCommonInfo* info) {
     ensure_deferred_init();
     note_feature_common_info(info);
     std::lock_guard<std::mutex> lock(g_vk_ngx_mutex);
     if (inst) g_ngx_vk_instance = inst;
-    if (phys) g_ngx_vk_phys = phys;
     if (dev) g_ngx_vk_device = dev;
 }
 
 NVSDK_NGX_Result provider_vk_init_impl(VkInstance inst, VkPhysicalDevice phys, VkDevice dev,
                                        const NVSDK_NGX_FeatureCommonInfo* info) {
-    note_ngx_vk(inst, phys, dev, info);
+    note_ngx_vk(inst, dev, info);
     if (!vk_rr_capable(phys, dev)) {
         return NVSDK_NGX_Result_FAIL_FeatureNotSupported;
     }
@@ -3194,7 +3152,7 @@ NVSDK_NGX_Result create_vk_rr_feature(VkDevice dev, const RrCreateParams& create
     log("[openrr] Vulkan Ray Reconstruction feature created (handle=0x%X, render=%ux%u -> output=%ux%u)",
         id, ctx->max_render_w, ctx->max_render_h, ctx->output_w, ctx->output_h);
 
-    update_status_from_context(*ctx, false);
+    update_status_from_context(*ctx);
     NVSDK_NGX_Handle* allocated_out = ctx->allocated_handle;
     {
         std::lock_guard<std::mutex> lock(g_ctx_mutex);
@@ -3273,14 +3231,14 @@ NVSDK_NGX_Result evaluate_vk_rr(VkCommandBuffer cmd, const NVSDK_NGX_Handle* han
         return NVSDK_NGX_Result_Success;
     }
     if (rc != ONR_RR_OK) {
-        update_status_from_context(ctx, false);
+        update_status_from_context(ctx);
         log("[openrr] RecordVk failed (rc=%d): %s", rc, runtime_last_error().c_str());
         return NVSDK_NGX_Result_Fail;
     }
 
     ++ctx.frame_count;
     if (ctx.frame_count == 1 || ctx.frame_count % 30 == 0) {
-        update_status_from_context(ctx, false);
+        update_status_from_context(ctx);
     }
     return NVSDK_NGX_Result_Success;
 }
@@ -3494,8 +3452,7 @@ VkResult do_vk_create_device(PFN_vkCreateDevice create, VkInstance inst, VkPhysi
         if (vit != g_inst_api_ver.end()) api_ver = vit->second;
     }
 
-    openrr::pe::vkdevice::DeviceInfo di{};
-    return openrr::pe::vkdevice::create_with_runtime(create, inst, api_ver, phys, ci, a, out, &di);
+    return openrr::pe::vkdevice::create_with_runtime(create, inst, api_ver, phys, ci, a, out, nullptr);
 }
 
 VKAPI_ATTR VkResult VKAPI_CALL hk_vk_create_device(VkPhysicalDevice phys, const VkDeviceCreateInfo* ci,
@@ -3807,20 +3764,21 @@ std::atomic<bool> g_asi_initialized{false};
 
 void initialize_asi_from(void* caller) {
     std::call_once(g_asi_init_once, [caller] {
+        HMODULE opti = nullptr;
         GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                           reinterpret_cast<LPCWSTR>(caller), &g_opti);
-        if (!g_opti || g_opti == g_self) g_opti = GetModuleHandleW(nullptr);
+                           reinterpret_cast<LPCWSTR>(caller), &opti);
+        if (!opti || opti == g_self) opti = GetModuleHandleW(nullptr);
 
-        openrr::pe::set_module(g_opti);
+        openrr::pe::set_module(opti);
         openrr::pe::enable_d3d12_dred();
-        openrr::pe::install_crash_watch(g_opti);
+        openrr::pe::install_crash_watch(opti);
         std::set_terminate([] {
             log("[openrr] std::terminate: an unhandled exception terminated an OpenRR thread");
             std::abort();
         });
 
         log("[openrr] openrr-amd.asi v%s (%s) loaded by %s",
-            ONR_RR_RUNTIME_VERSION, OPENRR_BUILD_STAMP, openrr::u8::module_file(g_opti).c_str());
+            ONR_RR_RUNTIME_VERSION, OPENRR_BUILD_STAMP, openrr::u8::module_file(opti).c_str());
 
         judge_executable();
         read_ini_barriers();
@@ -3839,7 +3797,7 @@ void initialize_asi_from(void* caller) {
         register_dll_notification();
 
         g_nvapi_hooks.set_callbacks(&nvapi_can_provide, &nvapi_log_msg);
-        if (g_opti && GetProcAddress(g_opti, "nvapi_QueryInterface") && !g_nvapi_hooks.hook_module(g_opti)) {
+        if (opti && GetProcAddress(opti, "nvapi_QueryInterface") && !g_nvapi_hooks.hook_module(opti)) {
             log("[openrr] nvapi_QueryInterface could not be hooked in host module");
         }
         g_nvapi_hooks.hook_module(GetModuleHandleW(L"nvapi64.dll"));

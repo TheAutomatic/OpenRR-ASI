@@ -1,8 +1,6 @@
 // Adapted from mochi / DLSSNR-AMD (MIT, Copyright (c) 2026 mochizuki0323).
 #pragma once
 
-#include <string>
-
 // Where a game died. A vectored handler (games replace the unhandled-exception
 // filter with their own crash reporters, so that one is not enough) logs the
 // first few fatal-looking exceptions with module + offset and an unwound stack,
@@ -12,6 +10,4 @@
 namespace openrr::pe {
 void install_crash_watch(void* host_module);
 void remove_crash_watch();
-// "module+0xoffset" of an address, or the bare address when it is in no module.
-std::string where_address(const void* at);
 }

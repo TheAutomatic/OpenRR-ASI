@@ -1,37 +1,14 @@
 // Adapted from mochi / DLSSNR-AMD (MIT, Copyright (c) 2026 mochizuki0323).
 #include "rr_pe_control.hpp"
-#include "rr_path_win.hpp"
-#include "rr_pe_log.hpp"
 
-#include <windows.h>
 #include <cstdio>
-#include <cstdlib>
 #include <mutex>
-#include <string>
 
 namespace openrr::pe::control {
 namespace {
 
 std::mutex g_mutex;
 openrr::control::Shared g_state{};
-
-void write_control_bin_locked(const openrr::control::Shared& s) {
-    static const bool enabled = [] {
-        const char* e = std::getenv("OPENRR_CONTROL_BIN");
-        return e && e[0] == '1';
-    }();
-    if (!enabled) return;
-    static ULONGLONG last_write = 0;
-    const ULONGLONG now = GetTickCount64();
-    if (last_write && now - last_write < 500) return;
-    last_write = now;
-    const std::string folder = module_folder();
-    const std::string path = (folder.empty() ? std::string() : folder + "\\") + "openrr-control.bin";
-    if (FILE* f = openrr::u8::fopen(path.c_str(), "wb")) {
-        std::fwrite(&s, 1, sizeof(s), f);
-        std::fclose(f);
-    }
-}
 
 } // namespace
 
@@ -58,12 +35,9 @@ void report(const Status& st) {
     g_state.output_width = st.output_width;
     g_state.output_height = st.output_height;
     g_state.coexist_mochi = st.coexist_mochi ? 1u : 0u;
-    g_state.split_active = st.split_active ? 1u : 0u;
     std::snprintf(g_state.weights_source, sizeof(g_state.weights_source), "%s", st.weights_source.c_str());
     std::snprintf(g_state.message, sizeof(g_state.message), "%s", st.message.c_str());
     std::snprintf(g_state.backend_message, sizeof(g_state.backend_message), "%s", st.backend_message.c_str());
-    ++g_state.status_seq;
-    write_control_bin_locked(g_state);
 }
 
 openrr::control::Shared snapshot() {

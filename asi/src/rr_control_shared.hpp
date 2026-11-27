@@ -5,15 +5,8 @@
 
 namespace openrr::control {
 
-constexpr uint32_t kMagic = 0x52524354u; // "RRCT"
-constexpr uint32_t kVersion = 2;
-
 struct Shared {
-    uint32_t magic = kMagic;
-    uint32_t version = kVersion;
-
     // OpenRR status (written by evaluate / runtime, read by OptiScaler plugin tab)
-    uint32_t status_seq = 0;
     uint32_t route = 0;            // 0 idle, 1 D3D12, 2 Vulkan
     uint32_t rr_active = 0;        // 1 if RR feature is created and active
     uint32_t state = 0;            // OnrRrState (0 building, 1 ready, 2 failed)
@@ -28,7 +21,6 @@ struct Shared {
     uint32_t render_width = 0, render_height = 0;
     uint32_t output_width = 0, output_height = 0;
     uint32_t coexist_mochi = 0;    // 1 if dlssnr-amd*.asi is detected in the process
-    uint32_t split_active = 0;     // 1 if command-list split is active for this session
     char asi_build[64]{};
     char weights_source[260]{};
     char message[256]{};

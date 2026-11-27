@@ -169,18 +169,7 @@ LONG CALLBACK on_exception(EXCEPTION_POINTERS* ep) {
     const EXCEPTION_RECORD* rec = ep ? ep->ExceptionRecord : nullptr;
     if (!rec) return EXCEPTION_CONTINUE_SEARCH;
     if (!is_our_context(rec, ep->ContextRecord)) return EXCEPTION_CONTINUE_SEARCH;
-    if (!fatal(rec->ExceptionCode)) {
-        // After the first evaluate (trace_arm): the first exceptions of any kind but the usual notices (thread names,
-        // debug output, breakpoints), first-chance - a C++ exception nobody catches ends the game in abort's fast fail,
-        // which no handler sees (PBZ: a game that ended with nothing logged)
-        const DWORD code = rec->ExceptionCode;
-        if (code != 0x406D1388 && code != 0x40010006 && code != 0x4001000A && code != 0x80000003) {
-            if (const int n = trace_exception())
-                log("[openrr] trace e%d: exception 0x%08lX (first chance) at %s, thread %lu", n, code,
-                    where(reinterpret_cast<DWORD64>(rec->ExceptionAddress)).c_str(), GetCurrentThreadId());
-        }
-        return EXCEPTION_CONTINUE_SEARCH;
-    }
+    if (!fatal(rec->ExceptionCode)) return EXCEPTION_CONTINUE_SEARCH;
     report_exception("exception", ep);
     return EXCEPTION_CONTINUE_SEARCH;
 }
@@ -192,8 +181,6 @@ LONG WINAPI on_unhandled_exception(EXCEPTION_POINTERS* ep) {
 }
 
 }  // namespace
-
-std::string where_address(const void* at) { return where(reinterpret_cast<DWORD64>(at)); }
 
 void install_crash_watch(void* host_module) {
     if (handler) return;

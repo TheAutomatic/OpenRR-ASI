@@ -8,8 +8,6 @@
 // The report suspends the threads one at a time only long enough to copy their registers and stack (nothing is
 // allocated or locked meanwhile) and writes after they run again. At most four reports a process; enabled via OPENRR_WATCHDOG=1.
 // Implemented in rr_pe_log.cpp.
-#include <string>
-
 namespace openrr::pe::watchdog {
 
 // Starts the stall-monitoring thread (called from deferred post-DllMain init).
@@ -20,17 +18,6 @@ void set_rr_active(bool active);
 
 // An active RR frame went by. Starts the watchdog if start() was not called.
 void beat();
-
-// The game's own frame beat (optional secondary stall check).
-void game_beat();
-
-// Stops the watching thread and waits for it to exit (never call from DllMain).
-void stop_and_wait();
-
-// Every thread in a step now: "[thread <id>: <step>, <ms in it> ms] ...", "none" when none (a heartbeat's line).
-std::string phases_now();
-// Presents seen (beat()).
-unsigned long long presents_seen();
 
 // The step this thread is in, while the object lives (nested steps restore the outer one). `what` must be a literal.
 struct Phase {

@@ -2,7 +2,11 @@
 // Transcribed from NVIDIA NGX SDK headers for ABI interoperability without SDK header dependencies.
 #pragma once
 
-#include "rr_ngx_slots.hpp"
+#if defined(__GNUC__) && defined(__x86_64__)
+#define RR_NGX_MSABI __attribute__((ms_abi))
+#else
+#define RR_NGX_MSABI
+#endif
 
 #include <cstddef>
 #include <cstdint>

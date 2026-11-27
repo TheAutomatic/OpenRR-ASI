@@ -22,7 +22,6 @@ struct Status {
     uint32_t render_width = 0, render_height = 0;
     uint32_t output_width = 0, output_height = 0;
     bool coexist_mochi = false;
-    bool split_active = false;
     std::string weights_source;
     std::string message;
     std::string backend_message;

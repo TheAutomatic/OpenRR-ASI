@@ -3,7 +3,6 @@
 
 #include <vulkan/vulkan.h>
 #include <cstdint>
-#include <string>
 
 namespace openrr::pe {
 // Ensure vulkan-1.dll entry points are resolved (vulkan_lazy.c).
@@ -31,9 +30,5 @@ VkResult create_with_runtime(PFN_vkCreateDevice create, VkInstance instance, uin
 bool get_device_info(VkDevice device, DeviceInfo* out);
 bool latest_device_info(DeviceInfo* out);
 void forget_device(VkDevice device);
-
-void set_adapter_names(const std::string& gpu, const std::string& driver);
-std::string gpu_name();
-std::string driver_name();
 
 } // namespace openrr::pe::vkdevice

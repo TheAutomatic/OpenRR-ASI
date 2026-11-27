@@ -2,13 +2,11 @@
 #include "rr_pe_vkdevice.hpp"
 #include "rr_pe_log.hpp"
 #include "opennr_rr_api.h"
-#include "opennr_rr/vk.hpp"
 
 #include <windows.h>
 #include <algorithm>
 #include <cstring>
 #include <mutex>
-#include <string>
 #include <vector>
 
 extern "C" void rr_vk_load(void);
@@ -24,20 +22,6 @@ namespace {
 
 std::mutex g_mutex;
 std::vector<DeviceInfo> g_devices;
-std::string g_gpu_name;
-std::string g_driver_name;
-
-void query_adapter_names(VkPhysicalDevice phys) {
-    if (!phys) return;
-    openrr::pe::vulkan_entry_points();
-    VkPhysicalDeviceProperties props{};
-    VkPhysicalDeviceDriverProperties drv{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
-    onr::query_real_vk_props(phys, props, drv);
-    std::lock_guard<std::mutex> lock(g_mutex);
-    if (props.deviceName[0]) g_gpu_name = props.deviceName;
-    if (drv.driverInfo[0]) g_driver_name = drv.driverInfo;
-    else if (drv.driverName[0]) g_driver_name = drv.driverName;
-}
 
 } // namespace
 
@@ -45,7 +29,6 @@ VkResult create_with_runtime(PFN_vkCreateDevice create, VkInstance instance, uin
                              VkPhysicalDevice physical, const VkDeviceCreateInfo* info,
                              const VkAllocationCallbacks* allocator, VkDevice* out, DeviceInfo* out_info) {
     openrr::pe::vulkan_entry_points();
-    query_adapter_names(physical);
 
     OnrRrApi5 api5{};
     const bool has_api5 = OnrRrGetApi(ONR_RR_ABI_VERSION_5, &api5.v4.v3.v2.v1) == ONR_RR_OK &&
@@ -138,22 +121,6 @@ void forget_device(VkDevice device) {
     g_devices.erase(std::remove_if(g_devices.begin(), g_devices.end(),
                                    [device](const DeviceInfo& x) { return x.device == device; }),
                     g_devices.end());
-}
-
-void set_adapter_names(const std::string& gpu, const std::string& driver) {
-    std::lock_guard<std::mutex> lock(g_mutex);
-    if (!gpu.empty()) g_gpu_name = gpu;
-    if (!driver.empty()) g_driver_name = driver;
-}
-
-std::string gpu_name() {
-    std::lock_guard<std::mutex> lock(g_mutex);
-    return g_gpu_name;
-}
-
-std::string driver_name() {
-    std::lock_guard<std::mutex> lock(g_mutex);
-    return g_driver_name;
 }
 
 } // namespace openrr::pe::vkdevice

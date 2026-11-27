@@ -174,7 +174,6 @@ EXPORTS
     OnrRrNotifyVkCommandPoolDestroyed
     OnrRrNotifyVkDeviceDestroyed
     rr_vk_load
-    rr_vk_use_loader
 EOF
 
 echo "[3/4] Generating Vulkan lazy loader & linking openrr-amd.asi..."
