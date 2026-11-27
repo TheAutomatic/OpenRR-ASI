@@ -3738,7 +3738,7 @@ std::atomic<bool> g_terminate_said{false}, g_exiting{false};
 LONG NTAPI hk_terminate(HANDLE process, LONG status) {
     const bool self = process == GetCurrentProcess() || (process && GetProcessId(process) == GetCurrentProcessId());
     if (self && !g_exiting.load(std::memory_order_acquire)) {
-        if (static_cast<uint32_t>(status) < 0xC0000000u) {
+        if (static_cast<uint32_t>(status) < 0x40000000u) {
             openrr::pe::opti_plugin::flush_pending_font();
         }
         if (!g_terminate_said.exchange(true)) {
@@ -3836,9 +3836,11 @@ BOOL WINAPI DllMain(HINSTANCE module, DWORD reason, LPVOID reserved) {
         if (g_asi_initialized.load(std::memory_order_relaxed))
             log("[openrr] process is ending (ExitProcess)");
         openrr::pe::remove_crash_watch();
-        for (auto& [id, sess] : g_vkd3d_sessions) if (sess) sess->abandon();
-        for (auto& [id, ctx] : g_d3d12_rr) (void)ctx.release();
-        for (auto& [id, ctx] : g_vk_rr) (void)ctx.release();
+        if (std::unique_lock<std::mutex> lock(g_ctx_mutex, std::try_to_lock); lock.owns_lock()) {
+            for (auto& [id, sess] : g_vkd3d_sessions) if (sess) sess->abandon();
+            for (auto& [id, ctx] : g_d3d12_rr) (void)ctx.release();
+            for (auto& [id, ctx] : g_vk_rr) (void)ctx.release();
+        }
         openrr::pe::flush_log();
     } else if (reason == DLL_PROCESS_DETACH) {
         unregister_dll_notification();

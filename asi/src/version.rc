@@ -1,0 +1,27 @@
+#include <winver.h>
+#include "opennr_rr_api.h"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION ONR_RR_RUNTIME_VERSION_RC
+PRODUCTVERSION ONR_RR_RUNTIME_VERSION_RC
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_DLL
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "FileDescription", "OpenRR OptiScaler Plugin"
+            VALUE "FileVersion", ONR_RR_RUNTIME_VERSION
+            VALUE "InternalName", "openrr-amd.asi"
+            VALUE "LegalCopyright", "Copyright (c) 2026 TheAutomatic (PolyForm Noncommercial 1.0.0)"
+            VALUE "OriginalFilename", "openrr-amd.asi"
+            VALUE "ProductName", "OpenRR-ASI"
+            VALUE "ProductVersion", ONR_RR_RUNTIME_VERSION
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

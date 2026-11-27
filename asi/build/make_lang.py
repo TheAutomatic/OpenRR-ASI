@@ -35,6 +35,12 @@ def tokens(src):
                     i = j
                     break
                 i = j + 1
+        elif c.isdigit():
+            j = i + 1
+            while j < n and (src[j].isalnum() or src[j] in "_." or (src[j] == "'" and j + 1 < n and src[j + 1].isalnum())):
+                j += 1
+            yield "p", src[i:j], i
+            i = j
         elif c == "'":
             i += 1
             while i < n and src[i] != "'":

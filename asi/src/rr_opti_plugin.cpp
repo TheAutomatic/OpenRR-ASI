@@ -160,17 +160,25 @@ FontRepairResult repair_cjk_font_ini(const std::string& ini_path, const std::str
         }
     }
 
-    const std::string hq = lower(trim(opti_ini.get("Menu", "UseHQFont", "auto")));
+    auto strip_ini_val = [](std::string v) {
+        v = trim(v);
+        if (!v.empty() && (v.front() == '"' || v.front() == '\'')) {
+            const size_t end = v.find(v.front(), 1);
+            return end != std::string::npos ? v.substr(1, end - 1) : v.substr(1);
+        }
+        const size_t c = v.find_first_of(";#");
+        if (c != std::string::npos) v.resize(c);
+        return trim(v);
+    };
+
+    const std::string hq = lower(strip_ini_val(opti_ini.get("Menu", "UseHQFont", "auto")));
     const bool hq_disabled = (hq == "false" || hq == "0" || hq == "off" || hq == "no");
-    std::string cur_font = trim(opti_ini.get("Menu", "TTFFontPath", "auto"));
-    if (cur_font.size() >= 2 && (cur_font.front() == '"' || cur_font.front() == '\'') &&
-        cur_font.back() == cur_font.front()) {
-        cur_font = cur_font.substr(1, cur_font.size() - 2);
-    }
+    const std::string cur_font = strip_ini_val(opti_ini.get("Menu", "TTFFontPath", "auto"));
     const bool font_auto = cur_font.empty() || lower(cur_font) == "auto";
 
-    if (!force_font_path && !font_auto && !hq_disabled) {
-        return lower(cur_font) == lower(font_path) ? FontRepairResult::Ok : FontRepairResult::CustomFont;
+    if (!force_font_path && !font_auto) {
+        if (lower(cur_font) != lower(font_path)) return FontRepairResult::CustomFont;
+        if (!hq_disabled) return FontRepairResult::Ok;
     }
 
     opti_ini.set("Menu", "UseHQFont", "true");
@@ -185,7 +193,7 @@ FontRepairResult repair_cjk_font_ini(const std::string& ini_path, const std::str
 struct PendingFontGuard {
     std::mutex mutex;
     std::atomic<bool> active{false};
-    std::atomic<bool> watcher_running{false};
+    bool watcher_running = false; // guarded by mutex
     std::string ini_path;
     std::string font_path;
     IniStamp last_known_stamp{};
@@ -203,12 +211,18 @@ void poll_pending_font();
 DWORD WINAPI pending_font_watcher(void* param) {
     HMODULE self = static_cast<HMODULE>(param);
     PendingFontGuard* g = g_pending_font_ptr.load(std::memory_order_acquire);
-    while (g && g->active.load(std::memory_order_acquire)) {
+    while (g) {
         Sleep(500);
-        if (!g->active.load(std::memory_order_acquire)) break;
-        poll_pending_font();
+        if (g->active.load(std::memory_order_acquire)) {
+            poll_pending_font();
+            continue;
+        }
+        std::lock_guard<std::mutex> lock(g->mutex);
+        if (!g->active.load(std::memory_order_relaxed)) {
+            g->watcher_running = false;
+            break;
+        }
     }
-    if (g) g->watcher_running.store(false, std::memory_order_release);
     if (self) FreeLibraryAndExitThread(self, 0);
     return 0;
 }
@@ -223,6 +237,7 @@ void arm_pending_font(const std::string& ini_path, const std::string& font_path,
             delete fresh;
         }
     }
+    bool spawn_watcher = false;
     {
         std::lock_guard<std::mutex> lock(g->mutex);
         g->ini_path = ini_path;
@@ -233,8 +248,12 @@ void arm_pending_font(const std::string& ini_path, const std::string& font_path,
         g->last_check_ms = GetTickCount64();
         g->last_write_ms = g->last_check_ms;
         g->active.store(true, std::memory_order_release);
+        if (!g->watcher_running) {
+            g->watcher_running = true;
+            spawn_watcher = true;
+        }
     }
-    if (!g->watcher_running.exchange(true, std::memory_order_acq_rel)) {
+    if (spawn_watcher) {
         HMODULE self = nullptr;
         GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
                            reinterpret_cast<LPCWSTR>(&pending_font_watcher), &self);
@@ -242,7 +261,8 @@ void arm_pending_font(const std::string& ini_path, const std::string& font_path,
         if (t) {
             CloseHandle(t);
         } else {
-            g->watcher_running.store(false, std::memory_order_release);
+            std::lock_guard<std::mutex> lock(g->mutex);
+            g->watcher_running = false;
             if (self) FreeLibrary(self);
         }
     }

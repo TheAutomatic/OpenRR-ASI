@@ -142,7 +142,7 @@ pool_run "$cc" -O2 -I"$minhook/include" -I"$minhook/src" -c "$minhook/src/hde/hd
 pool_run "$cxx" "${common_cxx[@]}" -c asi/src/rr_pe_crash.cpp -o "$out/rr_pe_crash.o"
 pool_run "$cxx" "${common_cxx[@]}" -c asi/src/rr_pe_vkdevice.cpp -o "$out/rr_pe_vkdevice.o"
 pool_run "$cxx" "${common_cxx[@]}" -c gpu/src/kernels.cpp -o "$out/gpu_kernels.o"
-pool_run "$windres" -Iruntime/include -O coff runtime/src/version.rc -o "$out/version_rc.o"
+pool_run "$windres" -Iruntime/include -O coff asi/src/version.rc -o "$out/version_rc.o"
 pool_wait
 
 objs=("$out/rr_asi_main.o" "$out/rr_opti_plugin.o" "$out/rr_pe_control.o" "$out/rr_pe_config.o"

@@ -26,14 +26,19 @@ public:
         if (!openrr::u8::attributes_ex(p_u8, &d)) return false;
         const uint64_t s = (uint64_t(d.ftLastWriteTime.dwHighDateTime) << 32) | d.ftLastWriteTime.dwLowDateTime;
         if (s == stamp_ && !text_.empty()) return false;
-        FILE* f = openrr::u8::fopen(p_u8.c_str(), "rb");
-        if (!f) return false;
+        // Share read-only so concurrent non-atomic writers cause refresh() to fail closed instead of reading a truncated prefix.
+        const HANDLE h = openrr::u8::create_file(p_u8, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                                                 FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (h == INVALID_HANDLE_VALUE) return false;
         std::string raw;
         char buf[4096];
-        for (size_t n; (n = std::fread(buf, 1, sizeof buf, f)) > 0;) raw.append(buf, n);
-        const bool io_err = std::ferror(f) != 0;
-        std::fclose(f);
-        if (io_err) return false;
+        DWORD got = 0;
+        bool ok = true;
+        while ((ok = (ReadFile(h, buf, sizeof buf, &got, nullptr) != 0)) && got > 0) {
+            raw.append(buf, got);
+        }
+        CloseHandle(h);
+        if (!ok) return false;
         openrr::u8::decode_ini_text(raw);
         stamp_ = s;
         text_ = std::move(raw);
@@ -117,7 +122,19 @@ public:
         const bool closed = std::fclose(f) == 0;
         const std::wstring tmp_w = openrr::u8::wide(tmp_u8);
         const std::wstring dst_w = openrr::u8::wide(p_u8);
-        if (!wrote || !closed || !MoveFileExW(tmp_w.c_str(), dst_w.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+        bool moved = false;
+        if (wrote && closed) {
+            for (int attempt = 0; attempt < 3; ++attempt) {
+                if (MoveFileExW(tmp_w.c_str(), dst_w.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+                    moved = true;
+                    break;
+                }
+                const DWORD err = GetLastError();
+                if (err != ERROR_SHARING_VIOLATION && err != ERROR_ACCESS_DENIED) break;
+                Sleep(10);
+            }
+        }
+        if (!moved) {
             DeleteFileW(tmp_w.c_str());
             return false;
         }
