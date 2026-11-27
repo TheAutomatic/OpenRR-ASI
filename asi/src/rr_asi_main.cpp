@@ -3780,9 +3780,12 @@ std::atomic<bool> g_terminate_said{false}, g_exiting{false};
 
 LONG NTAPI hk_terminate(HANDLE process, LONG status) {
     const bool self = process == GetCurrentProcess() || (process && GetProcessId(process) == GetCurrentProcessId());
-    if (self && !g_exiting.load() && !g_terminate_said.exchange(true)) {
-        log("[openrr] process is being ended by TerminateProcess (exit status 0x%08lX), thread %lu",
-            static_cast<unsigned long>(status), GetCurrentThreadId());
+    if (self) {
+        openrr::pe::opti_plugin::flush_pending_font();
+        if (!g_exiting.load() && !g_terminate_said.exchange(true)) {
+            log("[openrr] process is being ended by TerminateProcess (exit status 0x%08lX), thread %lu",
+                static_cast<unsigned long>(status), GetCurrentThreadId());
+        }
     }
     return real_terminate(process, status);
 }
@@ -3869,6 +3872,7 @@ BOOL WINAPI DllMain(HINSTANCE module, DWORD reason, LPVOID reserved) {
         DisableThreadLibraryCalls(module);
     } else if (reason == DLL_PROCESS_DETACH && reserved) {
         g_exiting = true;
+        openrr::pe::opti_plugin::flush_pending_font();
         if (g_asi_initialized.load(std::memory_order_relaxed))
             log("[openrr] process is ending (ExitProcess)");
         openrr::pe::remove_crash_watch();

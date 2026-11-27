@@ -186,8 +186,8 @@ msgstr "Language"
 msgid "openrr-amd\\lang\\<name>.txt; the file reloads when it changes."
 msgstr "openrr-amd\\lang\\<name>.txt; the file reloads when it changes."
 
-msgid "Updated OptiScaler.ini ([Menu] TTFFontPath). Restart the game (without clicking OptiScaler's Save INI) to display non-Latin text."
-msgstr "Updated OptiScaler.ini ([Menu] TTFFontPath). Restart the game (without clicking OptiScaler's Save INI) to display non-Latin text."
+msgid "Updated OptiScaler.ini ([Menu] TTFFontPath). Restart the game to display non-Latin text."
+msgstr "Updated OptiScaler.ini ([Menu] TTFFontPath). Restart the game to display non-Latin text."
 
 msgid "OptiScaler's built-in font has Latin glyphs only. Configure [Menu] TTFFontPath in OptiScaler.ini and restart to display this language."
 msgstr "OptiScaler's built-in font has Latin glyphs only. Configure [Menu] TTFFontPath in OptiScaler.ini and restart to display this language."

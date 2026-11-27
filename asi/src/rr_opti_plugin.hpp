@@ -12,4 +12,7 @@ using DeferredInitFn = void (*)();
 bool init(const OptiPluginApi* api, OptiPlugin* plugin, OptiGetProcFn provider_get_proc,
           DeferredInitFn deferred_init);
 
+// Re-applies a pending [Menu] TTFFontPath write on process exit if OptiScaler's Save INI overwrote it.
+void flush_pending_font();
+
 } // namespace openrr::pe::opti_plugin

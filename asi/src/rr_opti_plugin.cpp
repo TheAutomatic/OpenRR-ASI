@@ -20,6 +20,7 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <mutex>
 #include <string>
 #include <utility>
 #include <vector>
@@ -128,6 +129,103 @@ std::string pick_cjk_font_path() {
         if (is_existing_file(c)) return c;
     }
     return {};
+}
+
+uint64_t ini_mtime(const std::string& path) {
+    WIN32_FILE_ATTRIBUTE_DATA d{};
+    if (!openrr::u8::attributes_ex(path, &d)) return 0;
+    return (uint64_t(d.ftLastWriteTime.dwHighDateTime) << 32) | d.ftLastWriteTime.dwLowDateTime;
+}
+
+bool needs_cjk_font_repair(const std::string& ini_path) {
+    char hq_buf[32]{};
+    openrr::u8::profile("Menu", "UseHQFont", "auto", hq_buf, sizeof(hq_buf), ini_path);
+    const std::string hq = lower(trim(hq_buf));
+    if (hq == "false" || hq == "0" || hq == "off" || hq == "no") return true;
+
+    char font_buf[1024]{};
+    openrr::u8::profile("Menu", "TTFFontPath", "auto", font_buf, sizeof(font_buf), ini_path);
+    const std::string raw = trim(font_buf);
+    return raw.empty() || lower(raw) == "auto";
+}
+
+bool write_cjk_font_ini(const std::string& ini_path, const std::string& font_path, uint64_t* out_stamp) {
+    openrr::ini_edit::Ini opti_ini{openrr::u8::path(ini_path)};
+    opti_ini.refresh();
+    opti_ini.set("Menu", "UseHQFont", "true");
+    opti_ini.set("Menu", "TTFFontPath", font_path);
+    if (!opti_ini.save(/*notify_config=*/false)) return false;
+    if (out_stamp) *out_stamp = ini_mtime(ini_path);
+    return true;
+}
+
+struct PendingFontGuard {
+    std::mutex mutex;
+    std::atomic<bool> active{false};
+    std::string ini_path;
+    std::string font_path;
+    uint64_t last_known_stamp = 0;
+    uint64_t pending_stamp = 0;
+    ULONGLONG change_seen_ms = 0;
+    ULONGLONG last_check_ms = 0;
+    ULONGLONG last_write_ms = 0;
+};
+PendingFontGuard g_pending_font;
+
+void arm_pending_font(const std::string& ini_path, const std::string& font_path, uint64_t stamp) {
+    std::lock_guard<std::mutex> lock(g_pending_font.mutex);
+    g_pending_font.ini_path = ini_path;
+    g_pending_font.font_path = font_path;
+    g_pending_font.last_known_stamp = stamp;
+    g_pending_font.pending_stamp = 0;
+    g_pending_font.change_seen_ms = 0;
+    g_pending_font.last_check_ms = GetTickCount64();
+    g_pending_font.last_write_ms = g_pending_font.last_check_ms;
+    g_pending_font.active.store(true, std::memory_order_release);
+}
+
+void poll_pending_font() {
+    if (!g_pending_font.active.load(std::memory_order_acquire)) return;
+    std::unique_lock<std::mutex> lock(g_pending_font.mutex, std::try_to_lock);
+    if (!lock.owns_lock() || !g_pending_font.active.load(std::memory_order_relaxed)) return;
+
+    const ULONGLONG now = GetTickCount64();
+    if (now >= g_pending_font.last_check_ms && (now - g_pending_font.last_check_ms) < 500) return;
+    g_pending_font.last_check_ms = now;
+
+    const uint64_t cur_stamp = ini_mtime(g_pending_font.ini_path);
+    if (cur_stamp == 0 || cur_stamp == g_pending_font.last_known_stamp) {
+        g_pending_font.pending_stamp = 0;
+        g_pending_font.change_seen_ms = 0;
+        return;
+    }
+    if (cur_stamp != g_pending_font.pending_stamp) {
+        g_pending_font.pending_stamp = cur_stamp;
+        g_pending_font.change_seen_ms = now;
+        return;
+    }
+    // Wait until OptiScaler.ini has been stable for 1.5s and at least 2.0s passed since our last write.
+    if (now < g_pending_font.change_seen_ms || (now - g_pending_font.change_seen_ms) < 1500) return;
+    if (now < g_pending_font.last_write_ms || (now - g_pending_font.last_write_ms) < 2000) return;
+
+    if (!needs_cjk_font_repair(g_pending_font.ini_path)) {
+        // User manually configured a different custom TTF font; respect their edit.
+        g_pending_font.last_known_stamp = cur_stamp;
+        g_pending_font.pending_stamp = 0;
+        g_pending_font.change_seen_ms = 0;
+        return;
+    }
+
+    uint64_t new_stamp = 0;
+    if (write_cjk_font_ini(g_pending_font.ini_path, g_pending_font.font_path, &new_stamp)) {
+        g_pending_font.last_known_stamp = new_stamp;
+        g_pending_font.pending_stamp = 0;
+        g_pending_font.change_seen_ms = 0;
+        g_pending_font.last_write_ms = now;
+        openrr::pe::log("[openrr] restored OptiScaler.ini [Menu] TTFFontPath after external save");
+    } else {
+        g_pending_font.last_write_ms = now;
+    }
 }
 
 const char* tr_id(const char* text, const char* id_suffix) {
@@ -411,7 +509,7 @@ struct TabState {
         if (table_needs_non_latin_font() && !opti_font_ready_at_launch) {
             if (font_configured_pending_restart) {
                 g_api->TextColored(0.45f, 0.85f, 0.45f, 1.0f,
-                                   tr("Updated OptiScaler.ini ([Menu] TTFFontPath). Restart the game (without clicking OptiScaler's Save INI) to display non-Latin text."));
+                                   tr("Updated OptiScaler.ini ([Menu] TTFFontPath). Restart the game to display non-Latin text."));
             } else {
                 g_api->TextColored(0.95f, 0.78f, 0.25f, 1.0f,
                                    tr("OptiScaler's built-in font has Latin glyphs only. Configure [Menu] TTFFontPath in OptiScaler.ini and restart to display this language."));
@@ -420,11 +518,10 @@ struct TabState {
                     if (font_path.empty()) {
                         font_error = tr("No CJK font file found in openrr-amd\\lang\\fonts or C:\\Windows\\Fonts.");
                     } else {
-                        openrr::ini_edit::Ini opti_ini{openrr::u8::path(optiscaler_ini_path())};
-                        opti_ini.refresh();
-                        opti_ini.set("Menu", "UseHQFont", "true");
-                        opti_ini.set("Menu", "TTFFontPath", font_path);
-                        if (opti_ini.save(/*notify_config=*/false)) {
+                        const std::string opti_path = optiscaler_ini_path();
+                        uint64_t stamp = 0;
+                        if (write_cjk_font_ini(opti_path, font_path, &stamp)) {
+                            arm_pending_font(opti_path, font_path, stamp);
                             font_configured_pending_restart = true;
                             font_error.clear();
                             openrr::pe::log("[openrr] configured OptiScaler.ini [Menu] TTFFontPath = %s", font_path.c_str());
@@ -448,6 +545,7 @@ void draw_tab(void*) {
     try {
         if (!g_api) return;
         if (g_deferred_init) g_deferred_init();
+        poll_pending_font();
         static TabState state;
         state.draw();
     } catch (...) {
@@ -521,6 +619,25 @@ bool init(const OptiPluginApi* api, OptiPlugin* plugin, OptiGetProcFn provider_g
         return true;
     } catch (...) {
         return false;
+    }
+}
+
+void flush_pending_font() {
+    try {
+        if (!g_pending_font.active.load(std::memory_order_acquire)) return;
+        std::unique_lock<std::mutex> lock(g_pending_font.mutex, std::try_to_lock);
+        if (!lock.owns_lock() || !g_pending_font.active.load(std::memory_order_relaxed)) return;
+
+        if (is_existing_file(g_pending_font.ini_path) &&
+            needs_cjk_font_repair(g_pending_font.ini_path)) {
+            uint64_t new_stamp = 0;
+            if (write_cjk_font_ini(g_pending_font.ini_path, g_pending_font.font_path, &new_stamp)) {
+                g_pending_font.last_known_stamp = new_stamp;
+                openrr::pe::log("[openrr] restored OptiScaler.ini [Menu] TTFFontPath on exit");
+            }
+        }
+        g_pending_font.active.store(false, std::memory_order_release);
+    } catch (...) {
     }
 }
 
